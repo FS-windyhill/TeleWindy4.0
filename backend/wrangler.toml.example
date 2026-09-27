@@ -1,0 +1,66 @@
+name = "telewindy-chat-jobs"
+main = "worker.js"
+compatibility_date = "2026-05-21"
+
+[[kv_namespaces]]
+binding = "CHAT_JOBS"
+id = "replace-with-your-kv-namespace-id"
+
+[[queues.producers]]
+binding = "CHAT_JOB_QUEUE"
+queue = "telewindy-chat-jobs"
+
+[[queues.consumers]]
+queue = "telewindy-chat-jobs"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 0
+
+[[durable_objects.bindings]]
+name = "CHAT_JOB_OBJECT"
+class_name = "ChatJobObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatJobObject"]
+
+# ★ 主动消息复用 CHAT_JOB_OBJECT，不需要新增 Durable Object binding 或 migration。
+# 已部署过旧版 PROACTIVE_CHARACTER_OBJECT 的用户可以暂时保留，Worker 会帮忙领取旧 outbox。
+
+# ★ Worker 控制台可按 proactive_* 事件检索每次唤醒；角色对象里另存最近 10 条精简事件。
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[vars]
+ALLOWED_ORIGIN = "https://795799.xyz,https://www.795799.xyz,http://127.0.0.1:5500"
+
+# Legacy fallback. If the frontend API URL does not match any provider below,
+# Worker will keep using this old single-upstream config.
+UPSTREAM_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
+DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.2"
+
+# OpenAI-compatible provider URLs. Keys must be configured as secrets below.
+DEEPSEEK_CHAT_URL = "https://api.deepseek.com/v1/chat/completions"
+SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+GLM_CHAT_URL = "https://api.z.ai/api/paas/v4/chat/completions"
+
+# Optional custom OpenAI-compatible relay slots.
+# The frontend API URL must exactly match CUSTOM1_CHAT_URL, unless CUSTOM1_MATCH_HOSTS is set.
+CUSTOM1_CHAT_URL = ""
+CUSTOM1_MATCH_HOSTS = ""
+
+# Leave empty or use "*" to allow any model name. Fill comma-separated names to enable a model allowlist.
+ALLOWED_MODELS = ""
+
+# Set APP_TOKEN as Worker secret, not plain var.
+# Model API key secrets are only needed when the page uses advanced "server_secret" mode.
+# Normal replies use the frontend key temporarily; proactive private-worker mode stores an AES-GCM ciphertext.
+# wrangler secret put APP_TOKEN
+# wrangler secret put UPSTREAM_API_KEY
+# wrangler secret put DEEPSEEK_API_KEY
+# wrangler secret put SILICONFLOW_API_KEY
+# wrangler secret put OPENAI_API_KEY
+# wrangler secret put GLM_API_KEY
+# wrangler secret put CUSTOM1_API_KEY

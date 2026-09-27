@@ -1,0 +1,50 @@
+# 本地调试记录，不上传
+# ★ Z.AI 中转和两个旧 Worker 的专用绑定只留在本机，不进入公开发布仓库。
+/backend/zai-relay/
+/.github/deploy-existing/
+/.github/workflows/deploy-existing-workers.yml
+26.6.6缓存调试.txt
+发布网站.bat
+网站发布工具.bat
+publish-site.ps1
+publish-files.txt
+
+# 本地提问草稿，不上传
+提问本.txt
+提问本2.txt
+提问本3.txt
+
+# 系统/编辑器临时文件
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+/.agents/
+/.codex/
+/.publish/
+
+# 日志和临时文件
+*.log
+*.tmp
+*.bak
+*.zip
+*.db
+*.sqlite
+*.sqlite3
+node_modules/
+coverage/
+.cache/
+
+# ★ 真实口令、API Key 和证书只存本地或服务商 Secret；示例文件仍可发布。
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+
+# ★ Wrangler 本地构建和 dry-run 的打包输出，不提交到 Git。
+.wrangler/

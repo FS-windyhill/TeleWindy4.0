@@ -1,0 +1,37 @@
+name: Sync TeleWindy Worker
+
+# ★ Cloudflare 部署按钮会把 backend 复制成用户自己的仓库。
+# 定时只同步公共 worker.js；用户的资源 ID、Worker 名称和 Secret 不参与覆盖。
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: true
+      - name: Read the latest public Worker
+        shell: bash
+        run: |
+          git fetch --depth=1 https://github.com/FS-windyhill/TeleWindy4.0.git main
+          git show FETCH_HEAD:backend/worker.js > worker.js
+      - name: Commit an update only when the Worker changed
+        shell: bash
+        run: |
+          if git diff --quiet -- worker.js; then
+            echo "Worker is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- worker.js
+          git commit -m "Sync TeleWindy Worker from upstream main"
+          git push

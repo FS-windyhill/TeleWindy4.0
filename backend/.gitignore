@@ -1,0 +1,7 @@
+# ★ 用户部署后的本地密钥文件不能提交；示例文件仍需给部署按钮读取。
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
+.wrangler/
+node_modules/

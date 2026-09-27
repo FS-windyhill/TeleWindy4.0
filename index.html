@@ -1,0 +1,2968 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>TeleWindy</title>
+    
+    <!-- PWA 相关 -->
+    <link rel="manifest" href="./manifest.webmanifest">
+    <link rel="icon" href="./assets/icons/icon192.png">
+    <link rel="apple-touch-icon" href="./assets/icons/icon192.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <!-- LateX -->
+    <link rel="stylesheet" href="./vendor/katex/katex.min.css">
+
+    <!-- ★ 后台服务与切屏回复拆页后更新样式版本，避免 PWA 沿用旧卡片排版。 -->
+    <link rel="stylesheet" href="./style.css?v=20260927-worker-deploy-1">
+</head>
+<body>
+
+    <!-- 仿原生状态栏 -->
+    <div id="app-status-bar" class="app-status-bar">
+        <!-- <div class="sb-left">
+            <span id="sb-time">00:00</span>
+        </div>
+        <div class="sb-right">
+            <span id="sb-battery-text">100%</span>
+            <div class="sb-battery-icon">
+                <div id="sb-battery-level" class="sb-battery-level"></div>
+            </div>
+        </div> -->
+    </div>
+
+    
+
+    <div id="app-container">
+        
+        <!-- ======================= -->
+        <!-- 页面 1：好友列表 (首页) -->
+        <!-- ======================= -->
+        <div id="view-contact-list" class="page-view" style="display: none;">
+            <header class="app-header">
+                
+                <h1>通讯录</h1>
+                <button id="add-contact-btn" class="header-icon-btn right" title="添加新角色">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+                <button id="main-settings-btn" class="header-icon-btn left" title="全局设置">
+                    <!-- 将 SVG 直接粘在按钮里 -->
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </header>
+            
+            <!-- 新增这一层：统一的毛玻璃容器 -->
+            <div id="contact-list-wrapper">
+                <div id="contact-list-container">
+                    <!-- 这里的列表由 JS 动态生成（保持原来的结构不变） -->
+                    <!-- 示例（实际由 JS 生成）：
+                    <div class="contact-item" data-id="1">
+                        <img src="xxx.jpg" class="contact-avatar">
+                        <div class="contact-info">
+                            <h3>张三</h3>
+                            <p>最后一句消息预览...</p>
+                        </div>
+                    </div>
+                    -->
+                </div>
+            </div>
+
+
+
+        </div>
+
+
+                
+        <!-- ================================================= -->
+        <!-- 新增模块：探索与朋友圈 -->
+        <!-- ================================================= -->
+
+        <!-- ================= 1. 底部导航栏 ================= -->
+        <!-- 注意：它和 #view-contact-list 平级，放在 #app-container 内部的最底下 -->
+        <!-- ★★★★★ 桌面 START：今日状态、小组件和底部主入口 ★★★★★ -->
+        <div id="view-desktop" class="page-view" style="display: flex;">
+            <main class="desktop-page">
+                <section class="desktop-top-grid">
+                    <div class="desktop-card desktop-clock-card">
+                        <div id="desktop-time" class="desktop-time">00:00</div>
+                        <div id="desktop-date-line" class="desktop-date-line">今天</div>
+                        <div id="desktop-lunar-line" class="desktop-lunar-line">农历</div>
+                        <div id="desktop-weather-line" class="desktop-weather-line">天气未开启</div>
+                        <div id="desktop-weather-temp-line" class="desktop-weather-temp-line">--℃</div>
+                    </div>
+
+                    <button type="button" id="desktop-signature-card" class="desktop-card desktop-signature-card">
+                        <p id="desktop-signature-text">写一句只放在桌面的签名...</p>
+                    </button>
+
+                </section>
+
+                <section class="desktop-middle-grid">
+
+                    <button type="button" id="desktop-countdown-card" class="desktop-card desktop-countdown-card">
+                        <div class="desktop-mini-row">
+                            <strong id="desktop-countdown-down">暂无倒数日</strong>
+                        </div>
+                        <div class="desktop-countdown-divider"></div>
+                        <div class="desktop-mini-row">
+                            <strong id="desktop-countdown-up">暂无正数日</strong>
+                        </div>
+                    </button>
+
+                    <div id="desktop-todo-card" class="desktop-card desktop-todo-card">
+                        <div class="desktop-card-head">
+                            <span class="desktop-card-label">TODO</span>
+                            <span id="desktop-todo-count" class="desktop-card-sub">0 项待办</span>
+                        </div>
+                        <div id="desktop-todo-list" class="desktop-todo-list"></div>
+                    </div>
+
+                    <!-- ★ 桌面快捷入口：最近联系人 + 设置中心
+                         这一行在手机上也保持左右布局，避免入口被挤成两层。 -->
+                    <div class="desktop-shortcut-row">
+                        <div id="desktop-recent-contacts-card" class="desktop-card desktop-recent-card">
+                            <div class="desktop-card-head">
+                                <span class="desktop-card-label">最近联系人</span>
+                            </div>
+                            <div id="desktop-recent-contacts" class="desktop-recent-contacts"></div>
+                        </div>
+
+                        <button type="button" id="desktop-settings-card" class="desktop-card desktop-settings-card" title="设置">
+                            <svg class="desktop-settings-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="3"></circle>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                            </svg>
+                            <span class="desktop-settings-label">全局设置</span>
+                        </button>
+                    </div>
+
+                    <!-- ★ 桌面云同步：复用设置弹窗里的 CloudSync.updateBackup，只在这里加一个快捷入口。 -->
+                    <button type="button" id="desktop-sync-card" class="desktop-card desktop-sync-card" title="云端同步">
+                        <svg class="desktop-sync-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 12a9 9 0 0 0-15.5-6.3L3 8"></path>
+                            <path d="M3 3v5h5"></path>
+                            <path d="M3 12a9 9 0 0 0 15.5 6.3L21 16"></path>
+                            <path d="M21 21v-5h-5"></path>
+                        </svg>
+                        <span id="desktop-sync-text" class="desktop-sync-text">SYNC - 云端同步</span>
+                    </button>
+                </section>
+
+                <section class="desktop-bottom-grid">
+                    <div class="desktop-card desktop-switch-card">
+                        <label class="desktop-switch-cell">
+                            <input type="checkbox" id="desktop-switch-world-sense">
+                            <span>世界感知</span>
+                        </label>
+                        <label class="desktop-switch-cell">
+                            <input type="checkbox" id="desktop-switch-todo">
+                            <span>TODO注入</span>
+                        </label>
+                        <label class="desktop-switch-cell">
+                            <input type="checkbox" id="desktop-switch-countdown">
+                            <span>倒数日注入</span>
+                        </label>
+                        <label class="desktop-switch-cell">
+                            <input type="checkbox" id="desktop-switch-async">
+                            <span>后台接收</span>
+                        </label>
+                    </div>
+
+                    <div class="desktop-bottom-row">
+                        <div class="desktop-card desktop-activity-card">
+                            <div class="desktop-card-head">
+                                <span class="desktop-card-label">互动日志</span>
+                                <span id="desktop-activity-today" class="desktop-card-sub">今天 0 次</span>
+                            </div>
+                            <div id="desktop-activity-grid" class="desktop-activity-grid"></div>
+                        </div>
+
+                        <div class="desktop-card desktop-async-card">
+                            <div class="desktop-card-head">
+                                <span class="desktop-card-label">后台消息</span>
+                                <button type="button" id="desktop-async-clear" class="desktop-trash-btn" title="清除后台状态">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M3 6h18"></path>
+                                        <path d="M8 6V4h8v2"></path>
+                                        <path d="M19 6l-1 14H6L5 6"></path>
+                                        <path d="M10 11v5"></path>
+                                        <path d="M14 11v5"></path>
+                                    </svg>
+                                </button>
+                            </div>
+                            <div id="desktop-async-status" class="desktop-async-status">后台接收未配置</div>
+                            <div id="desktop-async-detail" class="desktop-card-sub">暂无待取回消息</div>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+        <!-- ★★★★★ 桌面 END：今日状态、小组件和底部主入口 ★★★★★ -->
+
+        <div id="bottom-tab-bar" class="tab-bar">
+            <button id="tab-desktop" class="tab-btn active">桌面</button>
+            <button id="tab-chat" class="tab-btn">聊天</button>
+            <button id="tab-explore" class="tab-btn">探索</button>
+        </div>
+
+        <!-- ================= 2. 探索列表视图 (默认隐藏) ================= -->
+        <div id="view-explore" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="explore-back-btn" class="header-icon-btn left" title="返回桌面">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>探索</h1>
+            </header>
+            <ul class="explore-list">
+                <!-- 给了它一个 ID：explore-moments-btn -->
+                <li id="explore-moments-btn">
+                    <span class="icon">
+                        <!-- 替换 ✨︎ (Sparkles) -->
+                        <svg width="1em" height="1em" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M10 6C10 10.5 13.5 14 18 14C13.5 14 10 17.5 10 22C10 17.5 6.5 14 2 14C6.5 14 10 10.5 10 6ZM18 1C18 3.5 19.5 5 22 5C19.5 5 18 6.5 18 9C18 6.5 16.5 5 14 5C16.5 5 18 3.5 18 1ZM5 2C5 3.5 6 4.5 7.5 4.5C6 4.5 5 5.5 5 7C5 5.5 4 4.5 2.5 4.5C4 4.5 5 3.5 5 2Z" />
+                        </svg>
+                    </span>
+                    <span class="text">朋友圈</span>
+                    <!-- ★ 朋友圈使用自己的未读徽标：新动态显示小圆点，有新回复时改为数字。 -->
+                    <span id="explore-moments-unread-dot" class="explore-moments-unread-indicator hidden" aria-hidden="true"></span>
+                    <span class="arrow">
+                        <!-- 替换 > (Greater-than) -->
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- 未来可以加：AI朋友圈、世界画廊等 -->
+
+                <!-- ★★★★★ 角色记忆：探索页入口 START ★★★★★ -->
+                <li id="explore-character-memory-btn">
+                    <span class="icon">
+                        <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 4h11a3 3 0 0 1 3 3v13l-5-3H5a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z"></path>
+                            <path d="M7 8h8"></path>
+                            <path d="M7 12h5"></path>
+                        </svg>
+                    </span>
+                    <span class="text">记忆</span>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 角色记忆：探索页入口 END ★★★★★ -->
+
+                <!-- ★★★★★ 心笺：探索页入口 START ★★★★★ -->
+                <li id="explore-heart-note-btn">
+                    <span class="icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-pencil-sparkles"><path d="M10 3H8"/><path d="m15.007 5.008 3.987 3.986"/><path d="M20 15v4"/><path d="M21.174 6.813a2.82 2.82 0 0 0-3.986-3.987L3.842 16.175a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="M22 17h-4"/><path d="M4 5v4"/><path d="M6 7H2"/><path d="M9 2v2"/></svg>
+                    </span>
+                    <span class="text">心笺</span>
+                    <label class="todo-menu-switch heart-note-menu-switch" title="启用/关闭心笺管理">
+                        <input type="checkbox" id="heart-note-enable-toggle">
+                        <span class="app-switch-slider todo-switch-slider"></span>
+                    </label>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -0.125em;"><path d="M9 6L16 12L9 18" /></svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 心笺：探索页入口 END ★★★★★ -->
+
+
+
+
+
+
+
+                <!-- ★★★★★ 番茄钟：探索入口 START ★★★★★ -->
+                <li id="explore-pomodoro-btn">
+                    <!-- ★ 与其它探索入口共用图标容器和行高，避免直接放 SVG 导致整行偏矮。 -->
+                    <span class="icon">
+                        <svg class="lucide lucide-clipboard-clock" xmlns="http://www.w3.org/2000/svg" width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M16 14v2.2l1.6 1"/>
+                            <path d="M16 4h2a2 2 0 0 1 2 2v.832"/>
+                            <path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h2"/>
+                            <circle cx="16" cy="16" r="6"/>
+                            <rect x="8" y="2" width="8" height="4" rx="1"/>
+                        </svg>
+                    </span>
+                    <span class="text">番茄钟</span>
+                    <!-- ★ 复用朋友圈的无数字未读红点，完成后保留到进入番茄钟页面。 -->
+                    <span id="explore-pomodoro-unread-dot" class="explore-moments-unread-indicator hidden" aria-hidden="true"></span>
+                    <span id="pomodoro-entry-status"></span>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="m9 18 6-6-6-6"></path>
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 番茄钟：探索入口 END ★★★★★ -->
+
+
+                <!-- ★★★★★ 探索 TO DO 计划：入口 START ★★★★★ -->
+                <li id="explore-todo-plan-btn">
+                    <span class="icon">
+                        <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M8 6h13"></path>
+                            <path d="M8 12h13"></path>
+                            <path d="M8 18h13"></path>
+                            <path d="m3 6 1 1 2-2"></path>
+                            <path d="m3 12 1 1 2-2"></path>
+                            <path d="m3 18 1 1 2-2"></path>
+                        </svg>
+                    </span>
+                    <span class="text">TO DO 计划</span>
+                    <label class="todo-menu-switch" title="启用/关闭 TO DO 计划注入">
+                        <input type="checkbox" id="todo-plan-enable-toggle">
+                        <span class="app-switch-slider todo-switch-slider"></span>
+                    </label>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 探索 TO DO 计划：入口 END ★★★★★ -->
+
+
+                <!-- ★★★★★ 探索倒数日：入口 START ★★★★★ -->
+                <li id="explore-countdown-btn">
+                    <span class="icon">
+                        <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                            <circle cx="12" cy="12" r="8"></circle>
+                            <path d="M12 8v4l3 2"></path>
+                            <path d="M9 2h6"></path>
+                            <path d="M12 2v2"></path>
+                        </svg>
+                    </span>
+                    <span class="text">倒数日</span>
+                    <label class="todo-menu-switch" title="启用/关闭倒数日注入">
+                        <input type="checkbox" id="countdown-enable-toggle">
+                        <span class="app-switch-slider todo-switch-slider"></span>
+                    </label>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 探索倒数日：入口 END ★★★★★ -->
+
+
+
+                <!-- ★★★★★ 角色日程：探索页入口 START ★★★★★ -->
+                <li id="explore-character-schedule-btn">
+                    <span class="icon">
+                        <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="3" y="4" width="18" height="17" rx="2"></rect>
+                            <path d="M8 2v4"></path>
+                            <path d="M16 2v4"></path>
+                            <path d="M3 10h18"></path>
+                            <path d="M8 14h3"></path>
+                            <path d="M13 17h3"></path>
+                        </svg>
+                    </span>
+                    <span class="text">角色日程</span>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 角色日程：探索页入口 END ★★★★★ -->
+
+                
+                
+                <!-- ★★★★★ 世界书：探索页入口 START ★★★★★ -->
+                <li id="explore-worldbook-btn">
+                    <span class="icon">
+                        <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                            <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5z"></path>
+                            <path d="M8 7h8"></path>
+                            <path d="M8 11h6"></path>
+                        </svg>
+                    </span>
+                    <span class="text">世界书</span>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 世界书：探索页入口 END ★★★★★ -->
+
+                
+
+
+
+                <!-- ★★★★★ 后台运行服务 ★★★★★ -->
+                <li id="explore-async-backend-btn">
+                    <span class="icon">
+                        <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2v6"></path>
+                            <path d="M12 16v6"></path>
+                            <path d="M4.93 4.93l4.24 4.24"></path>
+                            <path d="M14.83 14.83l4.24 4.24"></path>
+                            <path d="M2 12h6"></path>
+                            <path d="M16 12h6"></path>
+                            <path d="M4.93 19.07l4.24-4.24"></path>
+                            <path d="M14.83 9.17l4.24-4.24"></path>
+                        </svg>
+                    </span>
+                    <span class="text">后台运行服务</span>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+
+
+
+
+                <!-- ★★★★★ 主动消息：探索页入口 START ★★★★★ -->
+                <li id="explore-proactive-messages-btn">
+                    <span class="icon">
+                        <svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"></path>
+                            <path d="M8 9h8"></path><path d="M8 13h5"></path>
+                        </svg>
+                    </span>
+                    <span class="text">主动消息</span>
+                    <label class="todo-menu-switch proactive-menu-switch" title="启用/关闭主动消息">
+                        <input type="checkbox" id="proactive-messages-enable-toggle">
+                        <span class="app-switch-slider todo-switch-slider"></span>
+                    </label>
+                    <span class="arrow"><svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6L16 12L9 18"></path></svg></span>
+                </li>
+                <!-- ★★★★★ 主动消息：探索页入口 END ★★★★★ -->
+
+                <!-- ★★★★★ 切屏回复接收：探索页入口 START ★★★★★ -->
+                <li id="explore-async-reply-btn">
+                    <span class="icon"><svg xmlns="http://www.w3.org/2000/svg" width="0.9em" height="0.9em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-message-square-share preview-icon"><path d="M12 3H4a2 2 0 0 0-2 2v16.286a.71.71 0 0 0 1.212.502l2.202-2.202A2 2 0 0 1 6.828 19H20a2 2 0 0 0 2-2v-4"/><path d="M16 3h6v6"/><path d="m16 9 6-6"/></svg></span>
+                    <span class="text">切屏回复接收</span>
+                    <label class="async-backend-switch" title="启用/关闭切屏回复接收"><input type="checkbox" id="async-backend-enable-toggle"><span class="app-switch-slider async-backend-slider"></span></label>
+                    <span class="arrow"><svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 6L16 12L9 18"></path></svg></span>
+                </li>
+                <!-- ★★★★★ 切屏回复接收：探索页入口 END ★★★★★ -->
+
+
+
+                <!-- ★★★★★ 世界感知：探索页入口 START ★★★★★ -->
+                <li id="explore-world-sense-btn">
+                    <span class="icon">
+                        <svg width="1em" height="1em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <clipPath id="world-sense-globe-clip">
+                            <circle cx="12" cy="12" r="8"/>
+                            </clipPath>
+                        </defs>
+                        <circle cx="12" cy="12" r="8"/>
+                        <g clip-path="url(#world-sense-globe-clip)">
+                            <line x1="3.5" y1="9" x2="20.5" y2="9"/>
+                            <line x1="3.5" y1="15" x2="20.5" y2="15"/>
+                            <path d="M12 4a12.5 12.5 0 0 1 0 16"/>
+                            <path d="M12 4a12.5 12.5 0 0 0 0 16"/>
+                        </g>
+                        </svg>
+                    </span>
+                    <span class="text">世界感知</span>
+                    <label class="world-sense-menu-switch" title="启用/关闭世界感知">
+                        <input type="checkbox" id="world-sense-enable-toggle">
+                        <span class="app-switch-slider world-sense-switch-slider"></span>
+                    </label>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 世界感知：探索页入口 END ★★★★★ -->
+
+
+                <!-- ★★★★★ Agent：探索页入口 START ★★★★★ -->
+                <li id="explore-agent-btn">
+                    <span class="icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-wrench"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z"/></svg>
+                            <path d="M12 3v4"></path>
+                            <path d="M12 17v4"></path>
+                            <path d="M4.22 6.22l2.83 2.83"></path>
+                            <path d="M16.95 16.95l2.83 2.83"></path>
+                            <path d="M3 12h4"></path>
+                            <path d="M17 12h4"></path>
+                            <circle cx="12" cy="12" r="4"></circle>
+                        </svg>
+                    </span>
+                    <span class="text">Agent</span>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ Agent：探索页入口 END ★★★★★ -->
+
+
+
+
+
+
+
+
+
+                
+                <!-- 👇 新加的：原本的“查看日志”按钮，现在伪装成了列表项 👇 -->
+                <!-- 重点：保留 ID="btn-show-log"，这样你的 JS 依然能找到它！ -->
+                <li id="btn-show-log">
+                    <span class="icon">
+                        <!-- 替换原先的 emoji -->
+                        <svg width="0.9em" height="0.9em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+                            <!-- 外面的矩形框 -->
+                            <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+                            <!-- 内部的横线 -->
+                            <path d="M9 8h6"></path> <!-- 第一行短一点或居中 -->
+                            <path d="M8 12h8"></path> <!-- 第二行长 -->
+                            <path d="M8 16h8"></path> <!-- 第三行长 -->
+                        </svg>
+                    </span>
+                    <span class="text">上下文日志</span>
+                    <span class="arrow">
+                        <!-- 右侧箭头保持不变 -->
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+
+
+            </ul>
+        </div>
+
+        <!-- ★★★★★ 番茄钟 START：页面与设置沿用现有探索布局 ★★★★★ -->
+        <div id="view-pomodoro" class="page-view" style="display:none;">
+            <header class="app-header">
+                <button id="pomodoro-back-btn" class="header-icon-btn left" title="返回探索"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                <h1>番茄钟</h1>
+                <button id="pomodoro-settings-btn" class="header-icon-btn right" title="番茄钟设置"></button>
+            </header>
+            <main class="pomodoro-page">
+                <!-- ★ 单层毛玻璃卡片沿用世界感知的透明底色，隔开壁纸与计时内容。 -->
+                <section class="pomodoro-card" aria-label="陪伴专注">
+                <p id="pomodoro-status">准备开始</p>
+                <button id="pomodoro-pat" title="拍拍头像，说句话" aria-label="拍拍陪伴人头像">
+                    <svg viewBox="0 0 180 180" aria-hidden="true"><circle class="pomodoro-track" cx="90" cy="90" r="84"></circle><circle id="pomodoro-progress" cx="90" cy="90" r="84"></circle></svg>
+                    <img id="pomodoro-avatar" src="assets/images/char.jpg" alt="陪伴人头像">
+                    <span id="pomodoro-avatar-emoji" aria-hidden="true"></span>
+                </button>
+                <strong id="pomodoro-name">还没有选择陪伴人</strong>
+                <p id="pomodoro-speech" aria-live="polite">选一位陪伴人，拍拍头像说句话。</p>
+                <div id="pomodoro-time">25:00</div>
+
+                <input id="pomodoro-task" type="text" maxlength="200" placeholder="例如：写论文、喝水">
+                <div class="pomodoro-controls">
+                    <button id="pomodoro-toggle">开始专注</button>
+                    <!-- ★ 未开始时不展示结束按钮；进入专注或暂停状态后再由脚本显示。 -->
+                    <button id="pomodoro-end" hidden disabled>结束本轮</button>
+                </div>
+                <p id="pomodoro-stats">今天已经完成 0 个番茄</p>
+                <button id="pomodoro-history-btn" class="pomodoro-history-link">查看历史记录</button>
+                </section>
+            </main>
+        </div>
+        <div id="modal-pomodoro-settings" class="modal-overlay moments-bg hidden">
+            <div class="moments-settings-panel" role="dialog" aria-modal="true" aria-labelledby="pomodoro-settings-title">
+                <h3 id="pomodoro-settings-title">番茄钟设置</h3>
+                <div class="m-modal-scroll-container">
+                    <div class="input-group"><label>陪伴人</label><p id="pomodoro-selected"></p><button id="pomodoro-pick">选择陪伴人</button></div>
+                    <div class="input-group"><label for="pomodoro-minutes">专注时长（分钟）</label><input id="pomodoro-minutes" type="number" min="1" max="180" step="1" value="25"></div>
+                    <!-- ★ 与探索记忆页一致：选择现有模型预设。 -->
+                    <div class="input-group"><label for="pomodoro-api-preset">选择模型</label><select id="pomodoro-api-preset" class="character-memory-api-select"></select></div>
+                    <p id="pomodoro-settings-hint" class="moments-setting-hint"></p>
+                </div>
+                <div class="modal-buttons"><button id="pomodoro-settings-close">关闭</button><button id="pomodoro-settings-save">保存</button></div>
+            </div>
+        </div>
+        <!-- ★ 陪伴人列表复用模型选择框样式，但只允许选择已有角色，不提供输入框。 -->
+        <div id="pomodoro-picker" class="modal-overlay hidden">
+            <div class="modal glass-panel model-picker-modal" role="dialog" aria-modal="true" aria-labelledby="pomodoro-picker-title">
+                <h2 id="pomodoro-picker-title">选择陪伴人</h2>
+                <div class="model-picker-list-header"><span id="pomodoro-people-count"></span><span>点击即可选择</span></div>
+                <div id="pomodoro-people" class="model-picker-results"></div>
+                <div class="modal-buttons"><button id="pomodoro-picker-close">关闭</button></div>
+            </div>
+        </div>
+        <div id="pomodoro-history" class="modal-overlay hidden">
+            <div class="modal glass-panel model-picker-modal" role="dialog" aria-modal="true" aria-labelledby="pomodoro-history-title">
+                <h2 id="pomodoro-history-title">番茄钟历史</h2>
+                <div id="pomodoro-history-list" class="model-picker-results"></div>
+                <div class="modal-buttons"><button id="pomodoro-history-close">关闭</button></div>
+            </div>
+        </div>
+        <!-- ★★★★★ 番茄钟 END ★★★★★ -->
+        <!-- ★★★★★ TO DO 计划页面 START ★★★★★ -->
+        <div id="view-todo-plan" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="todo-plan-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>TO DO 计划</h1>
+            </header>
+
+            <main class="todo-page">
+                <div id="todo-plan-list" class="todo-plan-list"></div>
+                <div id="todo-plan-empty" class="todo-empty-hint">还没有计划，点右下角加一条吧。</div>
+            </main>
+
+            <button id="todo-plan-add-btn" class="todo-floating-btn" title="新增计划">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+            </button>
+        </div>
+        <!-- ★★★★★ TO DO 计划页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 倒数日页面 START ★★★★★ -->
+        <div id="view-countdown" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="countdown-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>倒数日</h1>
+            </header>
+
+            <main class="todo-page">
+                <div class="countdown-tabs" role="tablist" aria-label="倒数日类型">
+                    <button type="button" id="countdown-tab-down" class="countdown-tab active" data-mode="down">倒数日</button>
+                    <button type="button" id="countdown-tab-up" class="countdown-tab" data-mode="up">正数日</button>
+                </div>
+                <div id="countdown-list" class="countdown-list"></div>
+                <div id="countdown-empty" class="todo-empty-hint">还没有日期，点右下角加一条吧。</div>
+            </main>
+
+            <button id="countdown-add-btn" class="todo-floating-btn" title="新增倒数日">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+            </button>
+        </div>
+        <!-- ★★★★★ 倒数日页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 角色日程页面 START ★★★★★ -->
+        <div id="view-character-schedule" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="character-schedule-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>角色日程</h1>
+                <button id="character-schedule-settings-btn" class="header-icon-btn right" title="角色日程设置">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </header>
+
+            <main class="character-schedule-page">
+                <div id="character-schedule-list" class="character-schedule-list"></div>
+                <div id="character-schedule-empty" class="todo-empty-hint">还没有角色，先去通讯录创建一个吧。</div>
+            </main>
+        </div>
+
+        <div id="view-character-schedule-detail" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="character-schedule-detail-back-btn" class="header-icon-btn left" title="返回角色日程">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1 id="character-schedule-detail-title">角色日程</h1>
+            </header>
+
+            <main class="character-schedule-page">
+                <div id="character-schedule-status" class="character-schedule-status"></div>
+                <div id="character-schedule-detail-list" class="character-schedule-detail-list"></div>
+                <div id="character-schedule-detail-empty" class="todo-empty-hint">开启日程后，会在这里显示今天的安排。</div>
+            </main>
+
+            <button id="character-schedule-refresh-btn" class="todo-floating-btn character-schedule-refresh-btn" title="重新生成日程">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 12a9 9 0 0 1-15.5 6.3L3 16"></path>
+                    <path d="M3 21v-5h5"></path>
+                    <path d="M3 12a9 9 0 0 1 15.5-6.3L21 8"></path>
+                    <path d="M21 3v5h-5"></path>
+                </svg>
+            </button>
+        </div>
+        <!-- ★★★★★ 角色日程页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 角色记忆页面 START ★★★★★ -->
+        <div id="view-character-memory" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="character-memory-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>角色记忆</h1>
+                <button id="character-memory-settings-btn" class="header-icon-btn right" title="角色记忆设置">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </header>
+
+            <main class="character-memory-page">
+                <div id="character-memory-list" class="character-memory-list"></div>
+                <div id="character-memory-empty" class="todo-empty-hint">还没有角色，先去通讯录创建一个吧。</div>
+            </main>
+        </div>
+
+        <div id="view-character-memory-detail" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="character-memory-detail-back-btn" class="header-icon-btn left" title="返回角色记忆">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1 id="character-memory-detail-title">角色记忆</h1>
+            </header>
+
+            <main class="character-memory-page">
+                <div class="character-memory-tabs" role="tablist" aria-label="记忆视图">
+                    <button type="button" id="character-memory-tab-all" class="character-memory-tab active" data-mode="all" role="tab" aria-selected="true">全部记忆</button>
+                    <button type="button" id="character-memory-tab-injected" class="character-memory-tab" data-mode="injected" role="tab" aria-selected="false">注入的记忆</button>
+                </div>
+                <div class="character-memory-setting-pill">
+                    <div class="character-memory-setting-row">
+                        <span>注入</span>
+                        <input type="number" id="character-memory-inject-days" min="1" step="1" inputmode="numeric">
+                        <span>天的记忆至上下文</span>
+                    </div>
+                    <div id="character-memory-status" class="character-memory-status"></div>
+                </div>
+                <div id="character-memory-detail-list" class="character-memory-detail-list"></div>
+                <div id="character-memory-detail-empty" class="todo-empty-hint">开启记忆后，会在这里显示每日总结。</div>
+            </main>
+        </div>
+        <!-- ★★★★★ 角色记忆页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 心笺页面 START ★★★★★ -->
+        <div id="view-heart-note" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="heart-note-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+                <h1>心笺</h1>
+            </header>
+            <main class="heart-note-page">
+                <div class="heart-note-intro">ta的记事本，ta可以在这里记录ta想记下的东西。</div>
+                <div id="heart-note-contact-list" class="heart-note-contact-list"></div>
+                <div id="heart-note-contact-empty" class="todo-empty-hint">还没有角色，先去通讯录创建一个吧。</div>
+            </main>
+        </div>
+
+        <div id="view-heart-note-detail" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="heart-note-detail-back-btn" class="header-icon-btn left" title="返回心笺">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+                <h1 id="heart-note-detail-title">心笺</h1>
+                <button id="heart-note-add-btn" class="header-icon-btn right heart-note-add-btn" title="添加心笺" aria-label="添加心笺">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"></path></svg>
+                </button>
+            </header>
+            <main class="heart-note-page">
+                <div class="heart-note-tabs" role="tablist" aria-label="心笺视图">
+                    <button type="button" class="heart-note-tab active" data-mode="all" role="tab" aria-selected="true">全部心笺</button>
+                    <button type="button" class="heart-note-tab" data-mode="injected" role="tab" aria-selected="false">注入的心笺</button>
+                </div>
+                <div class="heart-note-setting-pill">
+                    <div class="heart-note-setting-row"><span>注入</span><input type="number" id="heart-note-inject-days" min="1" step="1" inputmode="numeric"><span>天的心笺至上下文</span></div>
+                    <div id="heart-note-status" class="heart-note-status"></div>
+                </div>
+                <div id="heart-note-detail-list" class="heart-note-detail-list"></div>
+                <div id="heart-note-detail-empty" class="todo-empty-hint">还没有心笺，点右上角加一条吧。</div>
+            </main>
+        </div>
+        <!-- ★★★★★ 心笺页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 主动消息页面 START ★★★★★ -->
+        <div id="view-proactive-messages" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="proactive-messages-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg>
+                </button>
+                <h1>主动消息</h1>
+                <button id="proactive-api-preset-btn" class="header-icon-btn right" type="button" title="选择主动消息 API 预设" aria-label="选择主动消息 API 预设">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </header>
+            <main class="proactive-page">
+                <section class="proactive-card">
+                    <div class="proactive-title-row"><div class="input-label">让角色自己决定是否联系你</div><span id="proactive-mode-badge" class="proactive-badge">纯前端</span></div>
+                    <p id="proactive-mode-help" class="input-hint">可以前往“探索”-“后台运行服务”配置后台服务。没有配置后台服务时，会采用纯前端补发模式拉起主动消息。</p>
+                </section>
+                <!-- ★ 主动消息页只选择运行方式；Worker URL、访问密钥和连接状态统一放在“后台运行服务”。 -->
+                <section class="proactive-card">
+                    <!-- ★ 执行位置与 API 预设来源分开：三种模式都继续使用上方选定的角色/全局预设。 -->
+                    <div class="input-group">
+                        <label for="proactive-execution-mode">主动消息运行方式</label>
+                        <select id="proactive-execution-mode">
+                            <option value="frontend">浏览器运行（零配置）</option>
+                            <option value="private_worker">私人 Worker 后台（推荐）</option>
+                            <option value="server_secret">Worker Secret 后台（高级）</option>
+                        </select>
+                        <div class="async-backend-note proactive-mode-note">
+                            浏览器运行：零配置，回到页面后补做判断。<br>
+                            私人 Worker：跟随角色 API，并将 Key 加密保存到你的 Worker。<br>
+                            Worker Secret：跟随角色 URL 和模型，Key 由 Cloudflare Secret 提供。
+                        </div>
+                        <!-- ★ 能力检测不请求模型；连接结果与实际回退状态分开显示，避免失败时只看到“纯前端”。 -->
+                        <div class="proactive-worker-check">
+                            <div><span>连接状态</span><strong id="proactive-worker-check-status">尚未检测</strong></div>
+                            <div><span>实际运行</span><strong id="proactive-worker-actual-mode">浏览器运行</strong></div>
+                            <button id="proactive-worker-probe-btn" type="button">检测并应用运行方式</button>
+                        </div>
+                    </div>
+                </section>
+                <section class="proactive-card proactive-settings-grid">
+                    <!-- ★ 三组规则留在同一张卡片内，各自用浅底和细边框划出范围。 -->
+                    <div class="proactive-setting-section">
+                        <h3 class="proactive-setting-heading">何时判断</h3>
+                    <div class="input-group">
+                        <label>允许主动判断的时间</label>
+                        <small id="proactive-active-hint" class="proactive-setting-note">仅在此时段内请求模型；开始与结束相同表示全天，支持跨午夜。</small>
+                        <span class="proactive-inline"><input id="proactive-active-start" type="time" aria-label="允许主动判断的开始时间" aria-describedby="proactive-active-hint"><em>至</em><input id="proactive-active-end" type="time" aria-label="允许主动判断的结束时间" aria-describedby="proactive-active-hint"></span>
+                    </div>
+                    <div class="input-group">
+                        <label for="proactive-chat-quiet">聊天后暂停主动判断（分钟）</label>
+                        <small id="proactive-chat-quiet-hint" class="proactive-setting-note">最近一条聊天消息之后，至少等多久。</small>
+                        <input id="proactive-chat-quiet" type="number" min="0" step="any" inputmode="decimal" aria-describedby="proactive-chat-quiet-hint">
+                    </div>
+                    <div class="input-group">
+                        <label for="proactive-heartbeat-hours">最长判断间隔（小时）</label>
+                        <small id="proactive-heartbeat-hint" class="proactive-setting-note">最久隔多久再给角色一次判断机会，不代表一定发送。</small>
+                        <input id="proactive-heartbeat-hours" type="number" step="any" inputmode="decimal" aria-describedby="proactive-heartbeat-hint">
+                    </div>
+                    </div>
+                    <div class="proactive-setting-section">
+                        <h3 class="proactive-setting-heading">发送限制</h3>
+                    <div class="input-group">
+                        <label for="proactive-min-cooldown">两条主动消息至少间隔（分钟）</label>
+                        <small id="proactive-min-cooldown-hint" class="proactive-setting-note">只计算实际发送，选择沉默不计入。</small>
+                        <input id="proactive-min-cooldown" type="number" min="0" step="any" inputmode="decimal" aria-describedby="proactive-min-cooldown-hint">
+                    </div>
+                    <div class="input-group">
+                        <label for="proactive-daily-limit">每位角色每天最多发送</label>
+                        <small id="proactive-daily-limit-hint" class="proactive-setting-note">按实际发送条数计算。</small>
+                        <input id="proactive-daily-limit" type="number" min="1" max="20" step="1" inputmode="numeric" aria-describedby="proactive-daily-limit-hint">
+                    </div>
+                    <div class="input-group">
+                        <label for="proactive-unanswered-limit">未获回复时最多连发</label>
+                        <small id="proactive-unanswered-hint" class="proactive-setting-note">你回复后重新计数。</small>
+                        <input id="proactive-unanswered-limit" type="number" min="1" max="10" step="1" inputmode="numeric" aria-describedby="proactive-unanswered-hint">
+                    </div>
+                    </div>
+                    <div class="proactive-setting-section">
+                        <h3 class="proactive-setting-heading">仅浏览器模式</h3>
+                    <div class="input-group">
+                        <label class="proactive-check-row"><input id="proactive-catchup-enabled" type="checkbox" aria-describedby="proactive-catchup-enabled-hint"><span>浏览器自动判断与离线补做</span></label>
+                        <small id="proactive-catchup-enabled-hint" class="proactive-setting-note">开启后在页面运行时自动判断，重开页面时可补做一次。</small>
+                    </div>
+                    <div class="input-group">
+                        <label for="proactive-catchup-hours">离线补做最多回看（小时）</label>
+                        <small id="proactive-catchup-hours-hint" class="proactive-setting-note">只限制补做消息可显示的最早时间，不会补做每次错过的判断。</small>
+                        <input id="proactive-catchup-hours" type="number" step="any" inputmode="decimal" aria-describedby="proactive-catchup-hours-hint">
+                    </div>
+                    </div>
+                    <!-- ★ 仍由原保存入口提交本卡片的全部设置，不改变现有字段 ID 和保存逻辑。 -->
+                    <button id="proactive-time-save-btn" type="button" class="proactive-save-button">保存设置</button>
+                </section>
+                <section class="proactive-card">
+                    <div class="input-label">参与角色</div>
+                    <div id="proactive-character-list" class="proactive-character-list"></div>
+                    <button id="proactive-characters-save-btn" type="button" class="proactive-save-button">保存角色</button>
+                </section>
+                <!-- ★ 手动判断与自动参与名单独立；运行日志汇总所有角色，不受上方下拉框筛选。 -->
+                <section class="proactive-card proactive-manual-card">
+                    <div class="input-label">手动触发消息（测试）</div>
+                    <select id="proactive-debug-character"></select>
+                    <button id="proactive-test-btn" type="button" class="proactive-save-button">手动触发消息</button>
+                </section>
+                <section class="proactive-card proactive-manual-card">
+                    <div class="input-label">运行日志</div>
+                    <div id="proactive-status-summary" class="proactive-status-summary">尚未运行</div>
+                    <div id="proactive-event-list" class="proactive-event-list"></div>
+                </section>
+                <!-- ★ 请求日志放在全部卡片之后；只展示最近一次真正发往模型的内容。 -->
+                <section class="proactive-card proactive-manual-card">
+                    <div class="input-label">上下文日志</div>
+                    <button id="proactive-context-log-btn" type="button" class="proactive-log">查看最近一次 API 请求</button>
+                </section>
+            </main>
+        </div>
+        <!-- ★★★★★ 主动消息页面 END ★★★★★ -->
+
+        <!-- ★ 主动消息沿用聊天上下文日志的弹窗结构，内容独立保存。 -->
+        <div id="proactive-context-log-modal" class="log-modal hidden">
+            <div class="glass-panel log-modal-content">
+                <div class="log-modal-header">
+                    <h3 class="shangxiawen">主动消息上下文日志</h3>
+                    <button id="proactive-context-log-close-btn" class="log-close-btn" type="button" aria-label="关闭日志">&times;</button>
+                </div>
+                <div class="log-modal-body"><pre><code id="proactive-context-log-content" class="log-content-text">暂无主动消息 API 请求记录...</code></pre></div>
+                <div id="proactive-context-log-meta" class="log-token-count"></div>
+            </div>
+        </div>
+
+        <!-- ★ 主动消息 API 选择独立保存；预设内容仍来自全局 API 预设列表。 -->
+        <div id="proactive-api-modal" class="proactive-api-modal hidden">
+            <div class="proactive-api-dialog">
+                <h3>主动消息 API</h3>
+                <p>选择专门负责主动判断的模型。Worker 后台模式只使用预设的 URL、模型和参数，Key 仍从 Worker Secret 获取。</p>
+                <select id="proactive-api-preset-select"></select>
+                <div class="proactive-api-actions">
+                    <button id="proactive-api-cancel-btn" type="button">取消</button>
+                    <button id="proactive-api-save-btn" type="button" class="primary">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ★★★★★ Agent 页面 START ★★★★★ -->
+        <div id="view-agent" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="agent-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>Agent</h1>
+                <button id="agent-settings-btn" class="header-icon-btn right" title="Agent 设置">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </header>
+
+            <main class="agent-page">
+                <div id="agent-list" class="agent-list"></div>
+            </main>
+        </div>
+        <!-- ★★★★★ Agent 页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 后台运行服务：连接配置与能力开关统一入口 START ★★★★★ -->
+        <div id="view-async-backend" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="async-backend-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>后台运行服务</h1>
+            </header>
+
+            <main class="async-backend-page">
+                <div class="gist-sync-card async-backend-card">
+
+
+
+
+                    <div class="async-backend-card-scroll">
+
+                    <div class="async-backend-note">
+                        一套 Worker 连接同时服务于切屏后台回复和主动消息。中国大陆使用前，请先为 Worker 绑定自己的域名。
+                    </div>
+                    <!-- ★ 外部部署与教程沿用页面的 gist-btn 风格；链接仍可在手机浏览器直接打开。 -->
+                    <div class="async-backend-help-actions">
+                        <a class="gist-btn async-backend-help-btn" href="https://deploy.workers.cloudflare.com/?url=https://github.com/FS-windyhill/TeleWindy4.0/tree/main/backend" target="_blank" rel="noopener noreferrer">部署私人 Worker</a>
+                        <a class="gist-btn async-backend-help-btn" href="https://github.com/FS-windyhill/TeleWindy4.0/tree/main/backend" target="_blank" rel="noopener noreferrer">查看部署教程</a>
+                    </div>
+                    <!-- ★ 两个能力共用下方连接配置，但可以分别启用，互不修改对方的运行模式。 -->
+                    <div class="async-backend-capability-section">
+                        <div class="input-label">后台能力</div>
+                        <div class="async-backend-capability-row" data-target-view="async-reply" role="button" tabindex="0" aria-label="打开切屏回复接收设置">
+                            <span><strong>切屏后继续生成回复</strong><small>用户发消息后，把当前任务交给 Worker 继续完成。</small></span>
+                            <label class="async-backend-switch"><input type="checkbox" id="async-backend-reply-capability-toggle"><span class="app-switch-slider async-backend-slider"></span></label>
+                            <span class="async-backend-capability-arrow" aria-hidden="true"><svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9 6L16 12L9 18"></path></svg></span>
+                        </div>
+                        <div class="async-backend-capability-row" data-target-view="proactive-messages" role="button" tabindex="0" aria-label="打开主动消息设置">
+                            <span><strong>后台主动消息</strong><small>由主动消息页面选择浏览器、私人 Worker 或 Worker Secret 模式。</small></span>
+                            <label class="async-backend-switch"><input type="checkbox" id="async-backend-proactive-capability-toggle"><span class="app-switch-slider async-backend-slider"></span></label>
+                            <span class="async-backend-capability-arrow" aria-hidden="true"><svg width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M9 6L16 12L9 18"></path></svg></span>
+                        </div>
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label">后台URL</label>
+                        <input type="url" id="async-backend-url" class="setting-input"
+                            placeholder="https://chat-jobs.你的域名.com">
+                        <small class="input-hint">中国大陆用户请填写已绑定的自定义域名地址；保存后测试连接。留空时仍可使用纯前端模式。</small>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label">后台密钥</label>
+                        <!-- 小眼睛显示/隐藏密码：外层 input-wrapper 负责定位右侧图标 -->
+                        <div class="input-wrapper">
+                            <input type="password" id="async-backend-token" class="setting-input has-eye-icon"
+                                placeholder="same as Worker APP_TOKEN" autocomplete="off">
+                            
+                            <span class="eye-icon" id="toggle-async-backend-token" title="显示/隐藏密钥">
+                                <!-- 默认显示【闭眼】图标 (密码状态) -->
+                                <span class="svg-eye-closed">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-off-icon lucide-eye-off"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                                </span>
+                                
+                                <!-- 默认隐藏【睁眼】图标 (明文状态) -->
+                                <span class="svg-eye-open" style="display: none;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-icon lucide-eye"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                                </span>
+                            </span>
+                        </div>
+                        <small class="input-hint">可选。访问后端用的私有口令。留空时保持纯前端模式。</small>
+                    </div>
+
+                    </div>
+                </div>
+                <div class="async-backend-footer">
+                    <div class="async-backend-actions">
+                        <button type="button" id="async-backend-test-btn" class="gist-btn async-backend-test-btn">测试连接</button>
+                        <button type="button" id="async-backend-save-btn" class="gist-btn primary async-backend-save-btn">保存</button>
+                        <button type="button" id="async-backend-cancel-btn" class="gist-btn async-backend-cancel-btn">取消</button>
+
+                    </div>
+                    <div id="async-backend-status" class="api-status-text status-idle">- 后台连接待测试 -</div>
+                    <!-- ★ 版本状态只读取 Worker 元信息；旧版 Worker 没有接口时引导手动更新。 -->
+                    <div id="async-backend-version-status" class="api-status-text status-idle">- Worker 版本待检测 -</div>
+                </div>
+            </main>
+        </div>
+
+        <!-- ★★★★★ 切屏回复接收：沿用后台运行服务的卡片与按钮风格 START ★★★★★ -->
+        <div id="view-async-reply" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="async-reply-back-btn" class="header-icon-btn left" title="返回"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                <h1>切屏回复接收</h1>
+            </header>
+            <main class="async-backend-page">
+                <div class="gist-sync-card async-backend-card">
+                    <div class="async-backend-card-scroll">
+                        <!-- ★★★★★ 切屏回复后台调用模式 START ★★★★★
+                             client_key：跟随当前前端 API 预设；server_secret：使用 Worker 中预设的 Key。 -->
+                        <div class="async-backend-key-mode-section">
+                            <div class="input-label">后台调用模式</div>
+                            <div class="async-backend-key-mode-item">
+                                <label class="async-backend-key-mode-card">
+                                    <input type="radio" name="async-backend-key-mode" value="client_key" id="async-backend-mode-client">
+                                    <span>跟随前端 API Key（推荐）</span>
+                                </label>
+                                <div class="async-backend-note async-backend-key-mode-note">使用当前 API 预设里的 URL 和 Key 创建后台任务。适合私人 Worker，也支持中转站和任意 OpenAI 兼容接口。</div>
+                            </div>
+                            <div class="async-backend-key-mode-item">
+                                <label class="async-backend-key-mode-card">
+                                    <input type="radio" name="async-backend-key-mode" value="server_secret" id="async-backend-mode-server">
+                                    <span>使用 Worker 内置 Key（进阶）</span>
+                                </label>
+                                <div class="async-backend-note async-backend-key-mode-note">前端不发送模型 Key，由 Worker 使用 Cloudflare secret 里提前配置的 Key。适合固定服务商或更保守部署。</div>
+                            </div>
+                        </div>
+                        <!-- ★★★★★ 切屏回复后台调用模式 END ★★★★★ -->
+                        <div class="input-group">
+                            <label class="input-label" for="async-backend-ttl-hours">回复保留时间（小时）</label>
+                            <input type="number" id="async-backend-ttl-hours" class="setting-input" min="0.25" max="24" step="0.1" inputmode="decimal" placeholder="6">
+                            <small class="input-hint">后台只临时保存 AI 回复结果。支持 1.5 这种小数，范围 0.25 - 24 小时，取回后会删除。</small>
+                        </div>
+                        <!-- ★ 手机端没有 F12，继续在这里展示本机待接收任务和诊断日志。 -->
+                        <div class="async-backend-pending-panel">
+                            <div class="async-backend-pending-title">后台任务状态（可点击清理按钮清理卡住的任务）</div>
+                            <div id="async-backend-pending-summary" class="async-backend-pending-summary">暂无待接收任务</div>
+                            <div id="async-backend-pending-list" class="async-backend-pending-list"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="async-backend-footer">
+                    <div class="async-backend-actions">
+                        <button type="button" id="async-backend-clear-jobs-btn" class="gist-btn async-backend-clear-jobs-btn">清理失效任务</button>
+                        <button type="button" id="async-reply-save-btn" class="gist-btn primary async-backend-save-btn">保存</button>
+                        <button type="button" id="async-reply-cancel-btn" class="gist-btn async-backend-cancel-btn">取消</button>
+                    </div>
+                    <div id="async-reply-status" class="api-status-text status-idle"></div>
+                </div>
+            </main>
+        </div>
+        <!-- ★★★★★ 切屏回复接收页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 世界书独立页面 START：从设置中心搬到探索页，保留原有编辑器结构 ★★★★★ -->
+        <div id="view-worldbook" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="worldbook-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>世界书</h1>
+            </header>
+
+            <main class="worldbook-page">
+                <div class="wi-container">
+                    <!-- 1. 顶部：大分类（书）管理栏 -->
+                    <div class="wi-toolbar glass-card">
+                        <div class="wi-toolbar-group main-select">
+                            <label>当前世界书:</label>
+                            <!-- 选择大分类 -->
+                            <select id="wi-book-select" class="wi-select setting-input">
+                                <!-- JS会自动填充 -->
+                            </select>
+                        </div>
+
+                        <div class="wi-toolbar-divider"></div>
+
+                        <!-- 针对书的操作 -->
+                        <div class="wi-toolbar-group actions">
+                            <button id="wi-rename-book-btn" class="wi-btn secondary" title="重命名当前书">重命名</button>
+                            <button id="wi-export-book-btn" class="wi-btn secondary" title="导出当前书为JSON">导出</button>
+                            <button id="wi-delete-book-btn" class="wi-btn danger" title="删除整本书">删书</button>
+                        </div>
+                        
+                        <div class="wi-toolbar-divider vertical"></div>
+
+                        <!-- 全局操作 -->
+                        <div class="wi-toolbar-group global-actions">
+                            <button id="wi-new-book-btn" class="wi-btn primary">+ 新建书</button>
+                            <button id="wi-import-btn" class="wi-btn primary">导入ST</button>
+                            <input type="file" id="wi-file-input" accept=".json" style="display: none;">
+                        </div>
+                    </div>
+
+                    <!-- 2. 本书设定：放在书选择后面，先确定这本书对谁生效 -->
+                    <div class="wi-section-card">
+                        <h4 class="wi-section-title">本书设定 <span class="sub-text">(对整本书生效)</span></h4>
+                        <div class="wi-input-row wi-scope-row">
+                            <div class="wi-scope-control-line">
+                                <span>生效范围:</span>
+                                <button type="button" id="wi-book-scope-btn" class="wi-btn secondary wi-scope-btn">选择生效范围</button>
+                            </div>
+                            <div id="wi-book-scope-summary" class="wi-scope-summary-box">全局生效</div>
+                        </div>
+                    </div>
+
+                    <!-- 3. 下方主体：条目列表 + 条目编辑 -->
+                    <div class="wi-main-layout">
+                        <!-- 左栏：当前书内的条目列表 -->
+                        <div class="wi-sidebar glass-card">
+                            <div class="wi-sidebar-header">
+                                <span>条目列表</span>
+                                <button id="wi-add-btn" class="wi-btn icon-only" title="添加条目">+</button>
+                            </div>
+                            
+                            <div id="wi-list-container" class="wi-list-scroll">
+                                <!-- JS 会渲染条目到这里 -->
+                            </div>
+                        </div>
+
+                        <!-- 右栏：单个条目编辑 -->
+                        <div class="wi-edit-area">
+                            <div class="wi-edit-header">
+                                <h4 class="wi-section-title">条目编辑</h4>
+                                <div class="wi-checkbox-wrapper">
+                                    <input type="checkbox" id="wi-edit-constant">
+                                    <label for="wi-edit-constant">常驻 (无视关键词，永远生效)</label>
+                                </div>
+                            </div>
+
+                            <input type="hidden" id="wi-edit-uid">
+
+                            <!-- 条目名称单独留在这里，方便用户把世界书当资料卡管理。 -->
+                            <div class="input-group">
+                                <label>条目名称</label>
+                                <input type="text" id="wi-edit-comment" placeholder="例如：Eldoria 森林简介" />
+                            </div>
+                            
+                            <div class="wi-form-group">
+                                <label>触发关键词 <span class="sub-text">(逗号分隔)</span></label>
+                                <input type="text" id="wi-edit-keys" class="setting-input" placeholder="例如: 森林, 魔法 (留空仅依靠常驻生效)">
+                            </div>
+
+                            <div class="wi-form-group flex-grow">
+                                <label>设定内容</label>
+                                <textarea id="wi-edit-content" class="setting-input wi-textarea" placeholder="当检测到关键词时，注入给AI的内容..."></textarea>
+                            </div>
+
+                            <div class="wi-form-actions">
+                                <button id="wi-delete-btn" class="wi-btn danger">删除条目</button>
+                                <button id="wi-save-btn" class="wi-btn primary large">保存条目</button>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+        <!-- ★★★★★ 世界书独立页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 世界书生效范围弹窗 START：多选角色，空选择代表全局 ★★★★★ -->
+        <div id="modal-worldbook-scope" class="modal-overlay worldbook-scope-bg hidden">
+            <div class="worldbook-scope-modal glass-panel">
+                <h3 class="worldbook-scope-title">选择生效范围</h3>
+                <div class="worldbook-scope-scroll">
+                    <label class="worldbook-scope-global">
+                        <input type="checkbox" id="wi-scope-global-checkbox">
+                        <span class="worldbook-scope-char-name">全局生效</span>
+                    </label>
+                    <div id="wi-scope-char-list" class="worldbook-scope-checkbox-group">
+                        <!-- JS 动态渲染角色复选框 -->
+                    </div>
+                </div>
+                <div class="modal-buttons fixed-footer worldbook-scope-actions">
+                    <button type="button" id="wi-scope-cancel-btn" class="cancel-btn">取消</button>
+                    <button type="button" id="wi-scope-save-btn" class="save-btn">保存</button>
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ 世界书生效范围弹窗 END ★★★★★ -->
+
+        <!-- ================= 3. 朋友圈主界面 (默认隐藏) ================= -->
+        <!-- ★★★★★ 世界感知页面 START：天气感知 + 星期和节日 + 保存取消 ★★★★★ -->
+        <div id="view-world-sense" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="world-sense-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>世界感知</h1>
+            </header>
+
+            <main class="world-sense-page">
+                <div class="gist-sync-card world-sense-setting-card world-sense-card">
+                    <div class="world-sense-card-header">
+                        <div class="world-sense-weather-header-content">
+                            <div class="input-label world-sense-card-title">天气感知</div>
+                        </div>
+                        <label class="world-sense-switch world-sense-inline-switch" title="启用/关闭天气感知">
+                            <input type="checkbox" id="world-sense-weather-toggle">
+                            <span class="app-switch-slider world-sense-switch-slider"></span>
+                        </label>
+                        <div class="world-sense-auto-source">
+                            配置天气API时，天气信息更准确，未配置或请求失败时使用开源天气。</br>和风天气每月免费调用50000次，教程见下方i图标。
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label">城市</label>
+                        <input type="text" id="world-sense-weather-city" class="setting-input" placeholder="例如：成都">
+                        <small id="world-sense-weather-location-hint" class="input-hint">输入城市后搜索并选择具体地点，避免同名城市匹配错误。</small>
+                    </div>
+
+                    <div class="world-sense-action-row world-sense-actions">
+                        <button type="button" id="world-sense-weather-search-btn" class="gist-btn world-sense-location-search-btn">搜索地点</button>
+                        <button type="button" id="world-sense-weather-test-btn" class="gist-btn world-sense-test-btn">测试天气</button>
+                    </div>
+                    <div id="world-sense-weather-status" class="api-status-text status-idle">- 天气测试待开始 -</div>
+
+                    <!-- ★ 专业天气源只接和风：留空即走免费源，填写完整后自动优先使用和风。 -->
+                    <div class="world-sense-professional-api">
+                        <div class="world-sense-professional-title-row">
+                            <label class="input-label">专业 API（和风天气）</label>
+                            <button type="button" id="world-sense-qweather-help-btn" class="world-sense-info-btn" title="查看和风天气配置教程" aria-label="查看和风天气配置教程">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-info-icon lucide-info"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+                            </button>
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label">API Host</label>
+                            <input type="text" id="world-sense-qweather-host" class="setting-input" autocomplete="off" placeholder="例如：abc123xyz.def.qweatherapi.com">
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label">API Key</label>
+                            <div class="input-wrapper">
+                                <input type="password" id="world-sense-qweather-key" class="setting-input has-eye-icon" autocomplete="off">
+                                <span class="eye-icon" title="显示/隐藏密钥">
+                                    <span class="svg-eye-closed">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-off-icon lucide-eye-off"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                                    </span>
+                                    <span class="svg-eye-open" style="display: none;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-icon lucide-eye"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="world-sense-weather-cache" class="world-sense-note world-sense-cache-box">
+                        <div class="world-sense-cache-empty">暂时还没有已保存的天气缓存</div>
+                    </div>
+                </div>
+
+                <div class="gist-sync-card world-sense-setting-card world-sense-card">
+                    <div class="world-sense-card-header">
+                        <div>
+                            <div class="input-label world-sense-card-title">星期和节日</div>
+                            <div class="world-sense-card-subtitle">本地计算今天周几，并用本地节日表 + 农历计算节日，无需额外 API。</div>
+                        </div>
+                        <label class="world-sense-switch world-sense-inline-switch" title="启用/关闭星期和节日">
+                            <input type="checkbox" id="world-sense-festival-toggle">
+                            <span class="app-switch-slider world-sense-switch-slider"></span>
+                        </label>
+                    </div>
+
+                    <div id="world-sense-festival-preview" class="world-sense-note world-sense-preview-box">
+                        星期和节日开启后，这里会显示当前将注入的文案预览。
+                    </div>
+                </div>
+
+                <div class="world-sense-action-row world-sense-footer-actions">
+                    <button type="button" id="world-sense-save-btn" class="gist-btn primary world-sense-save-btn">保存</button>
+                    <button type="button" id="world-sense-cancel-btn" class="gist-btn world-sense-cancel-btn">取消</button>
+                </div>
+            </main>
+        </div>
+        <!-- ★★★★★ 世界感知页面 END ★★★★★ -->
+
+        <div id="view-moments" class="page-view" style="display: none;">
+            <!-- 顶部导航 (和你聊天页面一样的精美样式) -->
+            <header class="app-header">
+                <button id="moments-back-btn" class="header-icon-btn left" title="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                
+                <h1 id="moments-page-title">朋友圈</h1>
+
+                <button id="moments-settings-btn" class="header-icon-btn right" title="朋友圈设置">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </header>
+
+            <!-- ★★★ 新增：悬浮在右下角的撰写按钮 ★★★ -->
+            <button id="btn-write-moment" class="floating-write-btn" title="发布朋友圈">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                </svg>
+            </button>
+            
+            <!-- 朋友圈滚动区域 -->
+            <div id="moments-scroll-area" class="moments-scroll">
+
+                <!-- ★★★ 新增：两个隐藏的文件输入框，用于更换背景和头像 ★★★ -->
+                <input type="file" id="m-bg-upload-input" accept="image/*" style="display: none;">
+                <input type="file" id="m-avatar-upload-input" accept="image/*" style="display: none;">
+
+
+                <!-- ★ 公屏和个人主页都保留原有封面布局；公屏大头像是“我的主页”入口。 -->
+                <div id="moments-profile-header" class="moments-header">
+                    <img id="moments-bg" class="m-bg clickable-img" src="assets/images/wallpaper.jpg" title="点击更换背景">
+                    
+                    <div class="m-user-info">
+                        <!-- 新增：将文字内容包在一起 -->
+                        <div class="m-text-info">
+                            <span id="moments-username" class="m-username" title="点击修改名字">你的名字</span>
+                            <span id="moments-signature" class="m-signature" title="点击修改签名">写下你的个性签名...</span>
+                        </div>
+                        
+                        <!-- 头像：公屏点击进我的主页，在我的主页内继续保留更换头像功能。 -->
+                        <button id="moments-avatar-button" class="m-avatar-button" type="button" aria-label="进入我的主页">
+                            <img id="moments-avatar" class="m-avatar" src="assets/images/user.jpg" alt="">
+                        </button>
+                    </div>
+                </div>
+
+
+
+                <!-- 朋友圈流 -->
+                <div id="moments-feed"></div>
+                
+                <!-- 加载更多 -->
+                <button id="btn-load-more-moments" style="display: none;">加载更多</button>
+            </div>
+        </div>
+
+        <!-- ================= 4. 朋友圈设置 Modal ================= -->
+        <div id="modal-moments-settings" class="modal-overlay moments-bg hidden">
+            <!-- ★ 设置页沿用旧版单层内容框，不再在滚动区外重复套毛玻璃卡片。 -->
+            <div class="moments-settings-panel">
+                <h3 id="modal-title">朋友圈设置</h3>
+                <div class="m-modal-scroll-container">
+                    <div class="input-group">
+                        <label>评论 API 预设 (节省Token用):</label>
+                        <select id="m-setting-api-preset"></select>
+                    </div>
+                    
+                    <div class="input-group">
+                        <label>谁能看到我的动态</label>
+                        <p class="moments-setting-hint">留空代表所有角色；这些角色会看到动态并为你评论。</p>
+                        <div id="m-setting-allowed-chars" class="checkbox-group">
+                            <!-- JS 动态渲染复选框 -->
+                        </div>
+                    </div>
+
+                    <div class="input-group">
+                        <label>我能看到谁的动态</label>
+                        <p class="moments-setting-hint">留空代表所有角色；只有关闭下方总开关才会彻底停止角色发布。</p>
+                        <div id="m-setting-visible-authors" class="checkbox-group">
+                            <!-- JS 动态渲染角色动态作者复选框 -->
+                        </div>
+                    </div>
+
+                    <div class="input-group moments-auto-setting">
+                        <!-- ★ 独立类名复刻“外观-不展示思考链”的开关样式，避免两个设置互相影响。 -->
+                        <label class="moments-auto-switch-cell" for="m-setting-auto-enabled">
+                            <input id="m-setting-auto-enabled" type="checkbox">
+                            <span>
+                                <strong>角色自动动态</strong>
+                                <small>每次打开网页时最多尝试生成一条。</small>
+                            </span>
+                        </label>
+                    </div>
+
+                    <div class="input-group moments-probability-setting">
+                        <!-- ★ 概率卡片参考“外观-字号大小”，标题、数值和滑块收进同一个底板。 -->
+                        <div class="moments-probability-card">
+                            <div class="moments-probability-heading">
+                                <label for="m-setting-auto-probability">出现新动态的概率</label>
+                                <span class="moments-probability-value">
+                                    <input id="m-setting-auto-probability" type="number" min="0" max="100" step="1" inputmode="numeric">
+                                    <em>%</em>
+                                </span>
+                            </div>
+                            <div class="moments-probability-control">
+                            <input id="m-setting-auto-probability-range" type="range" min="0" max="100" step="1">
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <div class="input-group moments-probability-setting">
+                        <div class="moments-probability-card">
+                            <div class="moments-probability-heading">
+                                <label for="m-setting-auto-like-probability">角色点赞我的动态概率</label>
+                                <span class="moments-probability-value">
+                                    <input id="m-setting-auto-like-probability" type="number" min="0" max="100" step="1" inputmode="numeric">
+                                    <em>%</em>
+                                </span>
+                            </div>
+                            <div class="moments-probability-control">
+                            <input id="m-setting-auto-like-probability-range" type="range" min="0" max="100" step="1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-buttons fixed-footer">
+                    <button id="btn-close-m-settings" class="cancel-btn">取消</button>
+                    <button id="btn-save-m-settings" class="save-btn">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= 5. 撰写朋友圈 Modal ================= -->
+        <div id="modal-write-moment" class="modal-overlay moments-bg hidden">
+            <div class="edit-box glass-panel"> 
+                <!-- 保留原本的 ID，同时加上新的 class 保证样式 -->
+                <h3 id="modal-title" class="bianjixiaoxi">发布朋友圈</h3>
+                
+                <textarea id="m-write-text" placeholder="这一刻的想法..." rows="5"></textarea>
+                
+                <div class="edit-buttons">
+                    <button id="btn-close-m-write" class="cancel-btn">取消</button>
+                    <button id="btn-publish-m-write" class="primary">发布</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ================= 5-2. 给动态写评论 Modal ================= -->
+        <div id="modal-write-moment-comment" class="modal-overlay moments-bg hidden">
+            <div class="edit-box glass-panel">
+                <h3 id="moment-comment-modal-title" class="bianjixiaoxi">写评论</h3>
+                <textarea id="m-comment-text" placeholder="写下你的评论..." rows="4"></textarea>
+                <div class="edit-buttons">
+                    <button id="btn-close-m-comment" class="cancel-btn">取消</button>
+                    <button id="btn-publish-m-comment" class="primary">发送</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ★★★★★ TO DO 计划：创建/编辑弹窗 START ★★★★★ -->
+        <div id="modal-todo-plan" class="modal-overlay todo-modal-bg hidden">
+            <div class="todo-edit-box glass-panel">
+                <h3 id="todo-plan-modal-title" class="bianjixiaoxi">新增计划</h3>
+
+                <div class="todo-date-picker">
+                    <div class="todo-date-picker-header">
+                        <button type="button" id="todo-plan-prev-week" class="todo-date-nav-btn" title="上一周">‹</button>
+                        <button type="button" id="todo-plan-month-label" class="todo-month-pill" title="选择年份和月份">2026 - 05</button>
+                        <button type="button" id="todo-plan-next-week" class="todo-date-nav-btn" title="下一周">›</button>
+                    </div>
+                    <div id="todo-plan-month-panel" class="todo-month-panel hidden">
+                        <div class="todo-year-row">
+                            <button type="button" class="todo-year-btn" data-action="prev-year">-</button>
+                            <span id="todo-plan-year-label" class="todo-year-label">2026</span>
+                            <button type="button" class="todo-year-btn" data-action="next-year">+</button>
+                        </div>
+                        <div id="todo-plan-month-grid" class="todo-month-grid"></div>
+                    </div>
+                    <div id="todo-plan-week-row" class="todo-week-row"></div>
+                    <input type="date" id="todo-plan-date-input" class="todo-hidden-date-input">
+                </div>
+
+                <textarea id="todo-plan-text" class="todo-editor-textarea" placeholder="写下这一天要做的事..." rows="4"></textarea>
+
+                <div class="edit-buttons">
+                    <button id="todo-plan-save-btn" class="primary">保存</button>
+                    <button id="todo-plan-cancel-btn" class="cancel-btn">取消</button>
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ TO DO 计划：创建/编辑弹窗 END ★★★★★ -->
+
+        <!-- ★★★★★ 倒数日：创建/编辑弹窗 START ★★★★★ -->
+        <!-- ★★★★★ TODO 计划：时段选择弹窗 START ★★★★★ -->
+        <div id="modal-todo-time" class="modal-overlay todo-modal-bg hidden">
+            <div class="todo-time-box glass-panel">
+                <h3 class="todo-time-title">时段选择</h3>
+
+                <div class="todo-time-row">
+                    <div class="todo-time-field">
+                        <input type="text" id="todo-time-start" class="todo-time-input" inputmode="numeric" maxlength="5" placeholder="0900" aria-label="开始时间">
+                        <label class="todo-time-picker-btn" for="todo-time-start-picker" title="打开开始时间选择器">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <circle cx="12" cy="12" r="8"></circle>
+                                <path d="M12 8v4l3 2"></path>
+                                <path d="M9 2h6"></path>
+                                <path d="M12 2v2"></path>
+                            </svg>
+                        </label>
+                        <input type="time" id="todo-time-start-picker" class="todo-time-native-picker" tabindex="-1" aria-hidden="true">
+                    </div>
+                    <span class="todo-time-separator">~</span>
+                    <div class="todo-time-field">
+                        <input type="text" id="todo-time-end" class="todo-time-input" inputmode="numeric" maxlength="5" placeholder="1800" aria-label="结束时间">
+                        <label class="todo-time-picker-btn" for="todo-time-end-picker" title="打开结束时间选择器">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <circle cx="12" cy="12" r="8"></circle>
+                                <path d="M12 8v4l3 2"></path>
+                                <path d="M9 2h6"></path>
+                                <path d="M12 2v2"></path>
+                            </svg>
+                        </label>
+                        <input type="time" id="todo-time-end-picker" class="todo-time-native-picker" tabindex="-1" aria-hidden="true">
+                    </div>
+                    <button type="button" id="todo-time-clear-btn" class="todo-time-clear-btn" title="取消时间">×</button>
+                </div>
+
+                <div class="edit-buttons">
+                    <button id="todo-time-save-btn" class="primary">确定</button>
+                    <button id="todo-time-cancel-btn" class="cancel-btn">取消</button>
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ TODO 计划：时段选择弹窗 END ★★★★★ -->
+
+        <div id="modal-countdown" class="modal-overlay todo-modal-bg hidden">
+            <div class="todo-edit-box glass-panel">
+                <h3 id="countdown-modal-title" class="bianjixiaoxi">新增倒数日</h3>
+
+                <div class="countdown-modal-tabs" role="tablist" aria-label="日期类型">
+                    <button type="button" id="countdown-modal-down" class="countdown-modal-tab active" data-mode="down">倒数日</button>
+                    <button type="button" id="countdown-modal-up" class="countdown-modal-tab" data-mode="up">正数日</button>
+                </div>
+
+                <div class="todo-date-picker">
+                    <div class="todo-date-picker-header">
+                        <button type="button" id="countdown-prev-week" class="todo-date-nav-btn" title="上一周">‹</button>
+                        <button type="button" id="countdown-month-label" class="todo-month-pill" title="选择年份和月份">2026 - 05</button>
+                        <button type="button" id="countdown-next-week" class="todo-date-nav-btn" title="下一周">›</button>
+                    </div>
+                    <div id="countdown-month-panel" class="todo-month-panel hidden">
+                        <div class="todo-year-row">
+                            <button type="button" class="todo-year-btn" data-action="prev-year">-</button>
+                            <span id="countdown-year-label" class="todo-year-label">2026</span>
+                            <button type="button" class="todo-year-btn" data-action="next-year">+</button>
+                        </div>
+                        <div id="countdown-month-grid" class="todo-month-grid"></div>
+                    </div>
+                    <div id="countdown-week-row" class="todo-week-row"></div>
+                    <input type="date" id="countdown-date-input" class="todo-hidden-date-input">
+                </div>
+
+                <textarea id="countdown-text" class="todo-editor-textarea" placeholder="写下这一天的名称..." rows="4"></textarea>
+
+                <div class="edit-buttons">
+                    <button id="countdown-save-btn" class="primary">保存</button>
+                    <button id="countdown-cancel-btn" class="cancel-btn">取消</button>
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ 倒数日：创建/编辑弹窗 END ★★★★★ -->
+
+        <!-- ★★★★★ 角色日程：API 设置弹窗 START ★★★★★ -->
+        <div id="modal-character-schedule-settings" class="modal-overlay character-schedule-modal-bg hidden">
+            <div class="character-schedule-settings-box glass-panel">
+                <h3 class="bianjixiaoxi">角色日程设置</h3>
+                <div class="character-schedule-settings-scroll">
+                    <div class="input-group">
+                        <label>日程生成 API 预设:</label>
+                        <select id="character-schedule-api-preset" class="character-schedule-api-select"></select>
+                    </div>
+                </div>
+                <div class="modal-buttons fixed-footer">
+                    <button id="character-schedule-settings-cancel-btn" class="cancel-btn">取消</button>
+                    <button id="character-schedule-settings-save-btn" class="save-btn">保存</button>
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ 角色日程：API 设置弹窗 END ★★★★★ -->
+
+        <!-- ★★★★★ 角色记忆：API 设置弹窗 START ★★★★★ -->
+        <div id="modal-character-memory-settings" class="modal-overlay character-memory-modal-bg hidden">
+            <div class="character-memory-settings-box glass-panel">
+                <h3 class="bianjixiaoxi">角色记忆设置</h3>
+                <div class="character-memory-settings-scroll">
+                    <div class="input-group">
+                        <label>记忆生成 API 预设:</label>
+                        <select id="character-memory-api-preset" class="character-memory-api-select"></select>
+                    </div>
+                </div>
+                <div class="modal-buttons fixed-footer">
+                    <button id="character-memory-settings-cancel-btn" class="cancel-btn">取消</button>
+                    <button id="character-memory-settings-save-btn" class="save-btn">保存</button>
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ 角色记忆：API 设置弹窗 END ★★★★★ -->
+
+        <!-- ★★★★★ Agent：模型设置弹窗 START ★★★★★ -->
+        <div id="modal-agent-settings" class="modal-overlay agent-modal-bg hidden">
+            <div class="agent-settings-box glass-panel">
+                <h3 class="bianjixiaoxi">Agent 设置</h3>
+                <div class="agent-settings-scroll">
+                    <div class="input-group">
+                        <label>TODO 管理 API 预设:</label>
+                        <select id="agent-todo-api-preset" class="agent-api-select"></select>
+                    </div>
+                </div>
+                <div class="modal-buttons fixed-footer">
+                    <button id="agent-settings-cancel-btn" class="cancel-btn">取消</button>
+                    <button id="agent-settings-save-btn" class="save-btn">保存</button>
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ Agent：模型设置弹窗 END ★★★★★ -->
+
+        <!-- ★★★★★ 角色日程：编辑单条内容弹窗 START ★★★★★ -->
+        <div id="modal-character-schedule-entry" class="modal-overlay todo-modal-bg hidden">
+            <div class="todo-edit-box glass-panel">
+                <h3 class="bianjixiaoxi">编辑日程</h3>
+                <div id="character-schedule-entry-time" class="character-schedule-edit-time">--:-- - --:--</div>
+                <textarea id="character-schedule-entry-text" class="todo-editor-textarea" placeholder="写下这段时间角色在做什么..." rows="4"></textarea>
+                <div class="modal-buttons">
+                    <button id="character-schedule-entry-cancel-btn" class="cancel-btn">取消</button>
+                    <button id="character-schedule-entry-save-btn" class="primary">保存</button>
+                    
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ 角色日程：编辑单条内容弹窗 END ★★★★★ -->
+
+        <!-- ★★★★★ 角色记忆：编辑单条内容弹窗 START ★★★★★ -->
+        <div id="modal-character-memory-item" class="modal-overlay todo-modal-bg hidden">
+            <div class="todo-edit-box glass-panel">
+                <h3 id="character-memory-item-modal-title" class="bianjixiaoxi">编辑记忆</h3>
+                <textarea id="character-memory-item-text" class="todo-editor-textarea" placeholder="写下这条记忆..." rows="4"></textarea>
+                <div class="modal-buttons">
+                    <button id="character-memory-item-cancel-btn" class="cancel-btn">取消</button>
+                    <button id="character-memory-item-save-btn" class="primary">保存</button>
+                    
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ 角色记忆：编辑单条内容弹窗 END ★★★★★ -->
+
+        <!-- ★★★★★ 心笺：新增/编辑弹窗 START ★★★★★ -->
+        <div id="modal-heart-note-item" class="modal-overlay todo-modal-bg hidden">
+            <div class="todo-edit-box glass-panel heart-note-edit-box">
+                <h3 id="heart-note-item-modal-title" class="bianjixiaoxi">添加心笺</h3>
+                <textarea id="heart-note-item-text" class="todo-editor-textarea heart-note-editor-textarea" placeholder="写下这条心笺..." rows="4"></textarea>
+                <div class="modal-buttons">
+                    <button id="heart-note-item-cancel-btn" class="cancel-btn">取消</button>
+                    <button id="heart-note-item-save-btn" class="primary">保存</button>
+                </div>
+            </div>
+        </div>
+        <!-- ★★★★★ 心笺：新增/编辑弹窗 END ★★★★★ -->
+
+        <!-- ================================================= -->
+        <!-- TEMPLATES (模板区，不在页面直接显示，供JS调用) -->
+        <!-- ================================================= -->
+        
+        <!-- 联系人列表项模板 -->
+        <template id="tpl-contact-item">
+            <div class="contact-item">
+                <div class="contact-main-content">
+                    <!-- 头像容器 -->
+                    <div class="avatar-wrapper"></div>
+                    
+                    <!-- 信息容器 -->
+                    <div class="contact-info">
+                        <h3 class="contact-name">角色名称</h3>
+                        <p class="contact-preview">消息预览...</p>
+                    </div>
+                </div>
+                
+                <!-- 红点 (默认隐藏) -->
+                <div class="badge-count" style="display: none;">0</div>
+            </div>
+        </template>
+
+        <!-- ======================= -->
+        <!-- 页面 2：聊天窗口 (隐藏) -->
+        <!-- ======================= -->
+        <div id="view-chat" class="page-view"> 
+            <header class="app-header chat-header">
+                <!-- 左上角返回按钮 -->
+                <button id="back-btn" class="header-icon-btn left" title="返回列表">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <!-- 聊天页专用联系人信息：只在这里左对齐，不影响其它页面的通用 Header -->
+                <div class="chat-header-profile">
+                    <img id="chat-header-avatar" class="chat-header-avatar" src="./assets/images/char.jpg" alt="角色头像">
+                    <div class="chat-header-meta">
+                        <h1 id="chat-title">角色名</h1>
+                        <!-- 状态文本 -->
+                        <p id="typing-status" class="presence-status presence-online">
+                            <span class="presence-dot" aria-hidden="true"></span>
+                            <span class="presence-text">在线</span>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- 右上角设置按钮 (原来的清空按钮改成了这个，或者并在设置里) -->
+                <button id="chat-settings-btn" class="header-icon-btn right" title="设置/清空">
+                    <!-- 将 SVG 直接粘在按钮里 -->
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </header>
+            
+            <div id="chat-window">
+                <div id="chat-messages">
+                    <!-- 消息由 JS 动态插入 -->
+                </div>
+            </div>
+
+
+
+            <footer class="app-footer">
+                <!-- ★★★ 1. 把预览容器放在 footer 标签内部的第一行 ★★★ -->
+                <div id="image-preview-container">
+                    <div style="position: relative;">
+                        <img id="image-preview-img" src="">
+                        <button id="clear-image-btn" style="position: absolute; top: -8px; right: -8px; background: red; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 12px;">×</button>
+                    </div>
+                </div>
+
+                <!-- 2. 隐藏的文件输入框 -->
+                <input type="file" id="image-upload-input" accept="image/*" style="display: none;">
+
+                <!-- Reroll: 把 '✦' 换成了 星星/魔法图标 -->
+                <button id="reroll-footer-btn" class="footer-btn" title="重新生成">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2L14.8 8.4L22 12L14.8 15.6L12 22L9.2 15.6L2 12L9.2 8.4L12 2Z"/>
+                    </svg>
+                </button>
+
+                <textarea type="text" id="task-input" rows="1" placeholder="说点什么..."></textarea>
+
+                <!-- Upload: 把 '+' 换成了 圆角加号图标 -->
+                <button id="upload-image-btn" class="footer-btn" title="上传图片">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                </button>
+
+                <!-- Send: 把 '➤' 换成了 纸飞机图标 -->
+                <button id="send-button" title="发送">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </footer>
+
+
+        </div>
+
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 新增：消息气泡模板 (Template)               -->
+    <!-- 这是一个隐藏的模具，JS 会复制它来生成消息    -->
+    <!-- ========================================== -->
+    <template id="msg-template">
+        <div class="message-wrapper">
+            <!-- 1. 头像 -->
+            <div class="avatar-container">
+                <img class="avatar-img" src="" alt="avatar">
+                <div class="avatar-text" style="display:none;"></div>
+            </div>
+            
+            <!-- 2. 气泡内容 -->
+            <div class="message-content">
+                <div class="message-bubble"></div>
+            </div>
+
+            <!-- 3. 时间戳 (放在气泡外面) -->
+            <span class="msg-time"></span>
+        </div>
+    </template>
+
+    <!-- ======================= -->
+    <!-- 弹窗：编辑/添加角色 -->
+    <!-- ======================= -->
+    <!-- ======================= -->
+    <!-- 弹窗：编辑/添加角色 -->
+    <!-- ======================= -->
+    <div id="modal-overlay" class="hidden">
+        <div class="modal extra-layout" style="background: transparent; box-shadow: none; border: none;">
+            
+            <!-- ==================== 顶部：固定标题 ==================== -->
+            <h2 id="modal-title">编辑角色</h2>
+            
+            <!-- ==================== 中间：可滚动的内容区域 ==================== -->
+            <!-- 新增一个容器包裹所有输入框 -->
+            <!-- 【改动2】：把 "glass-panel" 加在这里！ -->
+            <!-- 这样只有中间这部分会有白底和毛玻璃效果 -->
+            <div class="modal-scroll-container glass-panel">
+                
+                <div class="input-group">
+                    <label>名字</label>
+                    <input type="text" id="edit-name" placeholder="例如：AI助手">
+                </div>
+
+               
+
+                <!-- 角色头像上传 -->
+                <div class="input-group avatar-upload-group">
+                    <label>角色头像</label>
+                    <div class="avatar-preview-wrapper">
+                        <img id="edit-avatar-preview" class="avatar-preview" src="./assets/images/char.jpg" alt="预览">
+                        <button type="button" id="edit-avatar-upload-btn" class="small-btn full-width-btn">
+                            上传本地图片
+                        </button>
+                        <input type="file" id="edit-avatar-file" accept="image/*" style="display:none;">
+                    </div>
+                </div>
+
+                <!-- 用户头像上传（同理） -->
+                <div class="input-group avatar-upload-group">
+                    <label>我的头像（用户头像）</label>
+                    <div class="avatar-preview-wrapper">
+                        <img id="user-avatar-preview" class="avatar-preview" src="./assets/images/user.jpg" alt="预览">
+                        <button type="button" id="user-avatar-upload-btn" class="small-btn full-width-btn">
+                            上传本地图片
+                        </button>
+                        <input type="file" id="user-avatar-file" accept="image/*" style="display:none;">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>User Prompt</label>
+                    <textarea id="edit-prompt" rows="5" placeholder="你是一个..."></textarea>
+                </div>
+
+                <!-- 角色专属模型选择 -->
+                <div class="input-group">
+                    <label>对话模型 (来自设置-API预设)</label>
+                    <select id="edit-char-preset" class="setting-input">
+                        <option value="">-- 跟随全局默认设置 --</option>
+                    </select>
+                    <p class="input-hint">
+                        选择后，该角色将使用此模型聊天。
+                    </p>
+                </div>
+
+                <!-- 角色专属 System Prompt 选择：空值时跟随主设置里的当前全局提示词 -->
+                <div class="input-group">
+                    <label>System Prompt</label>
+                    <select id="edit-char-system-preset" class="setting-input">
+                        <option value="">-- 跟随全局默认设置 --</option>
+                    </select>
+                    <p class="input-hint">
+                        选择后，该角色将使用对应的 system prompt。
+                    </p>
+                </div>
+
+
+
+                <!-- 【改动1】：搜索入口按钮 - 让它独占一行 -->
+                <div id="search-history-section" class="input-group search-entry-section">
+                    <label>查找消息</label>
+                    <button id="btn-open-search" class="history-btn primary-btn full-width-btn">
+                        🔍 搜索当前聊天记录
+                    </button>
+                </div>
+
+
+                <!-- 原有的聊天记录管理区域（保持不变） -->
+                <!-- <div id="history-manager-section" class="input-group"> ... </div> -->
+
+                <!-- 聊天记录导入导出区域 -->
+                <div id="history-manager-section" class="input-group">
+                    <label>聊天记录管理</label>
+                    <div class="history-buttons">
+                        <button id="btn-export-history" class="history-btn">📤 导出记录</button>
+                        <button id="btn-import-history" class="history-btn">📥 导入记录</button>
+                        <input type="file" id="file-import-history" accept=".json">
+                    </div>
+                </div>
+
+
+                
+                <!-- 危险区也放在这里面 -->
+                <div class="modal-danger-zone">
+                    <button id="modal-clear-history" class="danger-btn outline">清空聊天记录</button>
+                    <button id="modal-delete" class="danger-btn">【危险操作】删除此角色</button>
+                </div>
+
+            </div> <!-- 滚动区域结束 -->
+
+            <!-- 按钮：现在它也在白盒子外面了 -->
+            <div class="modal-buttons fixed-footer">
+                <button id="modal-cancel">取消</button>
+                <button id="modal-save" class="primary">保存</button>
+            </div>
+
+        </div>
+    </div>
+
+
+
+
+    <!-- 新增：主设置（复用 modal-overlay 的结构，JS 里会切换内容） -->
+    <div id="main-modal" class="modal-overlay hidden">
+    <div class="settings-modal glass-panel">
+        <!-- 标题 -->
+        <h2 class="settings-title">设置中心</h2>
+
+        <div class="settings-container">
+            <!-- ==================== 左侧竖排目录 ==================== -->
+            <div class="settings-sidebar">
+                <div class="tab-item active" data-target="appearance">
+                    <span class="tab-text">外观</span>
+                </div>
+                <div class="tab-item" data-target="model">
+                    <span class="tab-text">模型</span>
+                </div>
+                <div class="tab-item" data-target="prompt">
+                    <span class="tab-text">预设</span>
+                </div>
+                <div class="tab-item" data-target="storage">
+                    <span class="tab-text">存储</span>
+                </div>
+            </div>
+
+            <!-- ==================== 右侧内容区 ==================== -->
+            <div class="settings-content">
+
+                <!-- ====================== 1. 外观 ====================== -->
+                <div class="tab-pane active" id="appearance">
+
+                    <!-- 自定义壁纸 -->
+                    <h3 class="section-title">自定义壁纸</h3>
+                    <div class="main-options">
+
+                        <label class="wallpaper-option upload main-option">
+                            <input type="file" id="wallpaper-file-input" accept="image/*">
+                            <span>从相册选择本地图片</span>
+                        </label>
+
+                        <div id="wallpaper-preview" class="wallpaper-preview hidden" style="margin: 10px auto; text-align: center;">
+                            <img id="wallpaper-preview-img" src="" alt="预览" style="display: block; max-width: 100%; max-height: 200px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+                        </div>
+                    </div>
+
+                    <!-- 显示模式 -->
+                    <h3 class="section-title">显示模式</h3>
+                    <div class="main-options">
+                        <label class="main-option" style="justify-content: space-between; cursor: pointer;">
+                            <div style="display:flex; align-items:center;">
+                                <span style="font-size: 18px; margin-right: 10px;">☀️</span>
+                                <span>日间模式</span>
+                            </div>
+                            <input type="radio" name="theme-select" id="theme-light" value="light" style="accent-color: #666;">
+                        </label>
+
+                        <label class="main-option" style="justify-content: space-between; cursor: pointer;">
+                            <div style="display:flex; align-items:center;">
+                                <span style="font-size: 18px; margin-right: 10px;">🌙</span>
+                                <span>夜间模式</span>
+                            </div>
+                            <input type="radio" name="theme-select" id="theme-dark" value="dark" style="accent-color: #666;">
+                        </label>
+
+                        <!-- 新增：自定义模式 -->
+                        <label class="main-option custom-theme-trigger">
+                            <div class="option-content">
+                                <span class="option-icon">🎨</span>
+                                <span>自定义 (CSS)</span>
+                            </div>
+                            <input type="radio" name="theme-select" id="theme-custom" value="custom">
+                        </label>
+
+                        <!-- 新增：自定义CSS控制面板 (默认隐藏，JS控制显示) -->
+                        <div id="custom-css-panel" class="main-options hidden">
+                            
+                            <!-- 自定义模式底色：暗色保持旧版效果，浅色直接使用无前缀的默认亮色底座 -->
+                            <div class="panel-row custom-base-theme-row">
+                                <label class="custom-base-option">
+                                    <span>暗色底座</span>
+                                    <input type="radio" name="custom-base-theme" id="custom-base-dark" value="dark">
+                                </label>
+                                <label class="custom-base-option">
+                                    <span>浅色底座</span>
+                                    <input type="radio" name="custom-base-theme" id="custom-base-light" value="light">
+                                </label>
+                            </div>
+                            
+                            <!-- 第1行：预设下拉框 -->
+                            <div class="panel-row">
+                                <select id="css-preset-select" class="setting-input">
+                                    <option value="">-- 选择样式预设 --</option>
+                                </select>
+                            </div>
+
+                            <!-- 第2行：操作按钮 -->
+                            <div class="panel-row btn-group">
+                                <button id="save-css-btn" class="icon-btn">保存预设</button>
+                                <button id="del-css-btn" class="icon-btn danger">删除预设</button>
+                            </div>
+
+                            <!-- 第3行：CSS 编辑区域 -->
+                            <textarea id="custom-css-input" class="setting-input code-editor" placeholder="/* 在这里输入 CSS 代码 */&#10;.message-wrapper.user .message-bubble {&#10;    background: #95ec69;&#10;    color: black;&#10;}&#10;.msg-time（时间戳） {}等等"></textarea>
+                        </div>
+
+                    </div> 
+
+                    <!-- ★★★ 新增：主题色 HSL 调整，只改 --primary-btn-text 这一条主题强调色 ★★★ -->
+                    <h3 class="section-title">主题色</h3>
+                    <div class="main-options theme-color-options">
+                        <!-- ★★★ 主题色折叠组：样式独立，不再复用 TO DO，避免两个功能互相影响 ★★★ -->
+                        <details class="theme-color-card">
+                            <summary class="theme-color-header">
+                                <span class="theme-color-arrow">▼</span>
+                                <span>按钮文字 / 边框颜色</span>
+                                <span id="theme-color-preview" class="theme-color-preview"></span>
+                            </summary>
+
+                            <div class="theme-color-controls">
+                                <label class="theme-color-row">
+                                    <span>色相</span>
+                                    <input type="range" id="theme-color-h" min="0" max="360" step="1" value="250">
+                                    <em id="theme-color-h-value">250</em>
+                                </label>
+
+                                <label class="theme-color-row">
+                                    <span>饱和度</span>
+                                    <input type="range" id="theme-color-s" min="0" max="100" step="1" value="100">
+                                    <em id="theme-color-s-value">100%</em>
+                                </label>
+
+                                <label class="theme-color-row">
+                                    <span>明度</span>
+                                    <input type="range" id="theme-color-l" min="20" max="90" step="1" value="72">
+                                    <em id="theme-color-l-value">72%</em>
+                                </label>
+                            </div>
+                        </details>
+                    </div>
+
+                    <!-- 思考链显示开关：只影响聊天 UI，不改模型输出和历史原文 -->
+                    <h3 class="section-title">思考链</h3>
+                    <div class="main-options">
+                        <label class="appearance-switch-cell">
+                            <input type="checkbox" id="hide-thought-process-toggle">
+                            <span>不展示思考链</span>
+                        </label>
+                    </div>
+                    <!-- 字体大小调整 (保持不变) -->
+                    <h3 class="section-title">字体大小</h3>
+                    <div class="main-options">
+                        <div class="main-option" style="flex-direction: column; align-items: stretch; padding: 15px;">
+                            <div style="display:flex; justify-content: space-between; color: var(--text-color);">
+                                <span style="font-size: 0.9rem;">聊天文字缩放</span>
+                                <span id="font-size-value" style="font-weight:bold;">16px</span>
+                            </div>
+                            <input type="range" id="font-size-slider" min="12" max="24" step="1" value="16" style="width: 100%; accent-color: #666;">
+                        </div>
+                    </div>
+
+                    
+                </div>
+
+                <!-- ====================== 2. 模型 ====================== -->
+                <div class="tab-pane" id="model">
+
+                    <!-- ★★★★★ 图片处理方式 START ★★★★★ -->
+                    <!-- 两种方式互斥：旧用户默认继续使用单独视觉 API，多模态模式只在图片发送当轮携带原图。 -->
+                    <h3 class="section-title">图片处理方式</h3>
+                    <div class="main-options image-api-mode-options">
+                        <label class="main-option image-api-mode-option">
+                            <div class="image-api-mode-copy">
+                                <strong>使用单独识图 API</strong>
+                                <small>先把图片转成文字描述，再交给聊天模型；节省图片 Token，并能够将图片描述持久保存至上下文。</small>
+                            </div>
+                            <input type="radio" name="image-api-mode" id="image-api-mode-separate" value="separate">
+                        </label>
+
+                        <label class="main-option image-api-mode-option">
+                            <div class="image-api-mode-copy">
+                                <strong>图文使用同一 API</strong>
+                                <small>原图仅在发送图片的当轮交给主模型，后续不会重复携带；可减少转文字过程中的信息损失。当前模型和接口必须支持图片输入。</small>
+                            </div>
+                            <input type="radio" name="image-api-mode" id="image-api-mode-multimodal" value="multimodal">
+                        </label>
+                    </div>
+                    <!-- ★★★★★ 图片处理方式 END ★★★★★ -->
+
+                    <h3 class="section-title">主模型</h3>
+                    <div class="main-options api-section">
+
+                        <!-- ★★★ 新增：预设管理区域 ★★★ -->
+                        <!-- 这里的 ID 必须和 JS 里对应，不要改 ID，class 可以随便改 -->
+                        <div id="api-preset-container" class="preset-row">
+                            <select id="preset-select" class="setting-input" style="flex:1;">
+                                <option value="">-- 选择 API 预设 --</option>
+                            </select>
+
+                        </div>
+                        <!-- ★★★ 结束 ★★★ -->
+
+                        <!-- API 地址 -->
+                        <div class="main-option api-input-card">
+                            <label class="api-label">API 地址，结尾可加v1/chat/completions</label>
+                            <input type="url" id="custom-api-url" class="setting-input" 
+                                placeholder="例如: https://api.openai.com/v1">
+                        </div>
+
+                        <!-- API 密钥 -->
+                        <div class="main-option api-input-card">
+                            <label class="api-label">API 密钥</label>
+                            <div class="input-wrapper">
+                                <!-- 注意：这里多加了一个 has-eye-icon 类 -->
+                                <input type="password" id="custom-api-key" class="setting-input has-eye-icon" 
+                                    placeholder="sk-XXXXXXXXXXXXXXXXXXXXXXXX" autocomplete="off">
+                                
+                                <span class="eye-icon" id="toggle-api-key" title="显示/隐藏密钥">
+                                    <!-- 默认显示【闭眼】图标 (密码状态) -->
+                                    <span class="svg-eye-closed">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-off-icon lucide-eye-off"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                                    </span>
+                                    
+                                    <!-- 默认隐藏【睁眼】图标 (明文状态) -->
+                                    <span class="svg-eye-open" style="display: none;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-icon lucide-eye"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+
+
+                        <!-- 模型选择 -->
+                        <div class="main-option model-card">
+                            <label for="custom-model-select" class="api-label2">模型</label>
+
+
+                            <!-- 模型设置区域 -->
+                            <div class="model-setting-group">
+                                
+                                <!-- 1. 输入框 (去掉了右边的小图标) -->
+                                <!-- 主输入框保留手动填写能力；拉取结果统一放到独立的模型选择弹窗里。 -->
+                                <input type="text" id="custom-model-select" class="model-select" placeholder="手动输入或点击拉取...">
+
+                                <!-- 2. 按钮组 (模仿 Gist 的排版，左右并排) -->
+                                <div class="api-buttons-row">
+                                    <button type="button" id="fetch-models-btn" class="api-btn primary">
+                                        拉取模型
+                                    </button>
+                                    <button type="button" id="test-api-btn" class="api-btn">
+                                        测试 API
+                                    </button>
+                                </div>
+
+                                <!-- 3. 测试结果显示 (放在按钮下面) -->
+                                <div id="test-api-status" class="api-status-text status-idle">- API测试准备就绪 -</div>
+
+                            </div>
+
+
+                        </div>
+
+
+
+                        <!-- ★★★ 修改为：模型参数设置 ★★★ -->
+                        <div class="main-option param-card">
+
+                            <!-- 第一个参数行 -->
+                             
+                           <div class="param-item">
+                                <label class="api-label" for="custom-temperature">温度</label>
+                                <input type="number" id="custom-temperature" class="setting-input" 
+                                    placeholder="默认: 1.1" step="0.1" min="0" max="2">
+                            </div>
+                         
+                            <!-- 第二个参数行 -->
+                            
+                            <div class="param-item">
+                                <label class="api-label" for="custom-max-tokens">Max Tokens</label>
+                                <input type="number" id="custom-max-tokens" class="setting-input" 
+                                    placeholder="默认: 32700" step="1000" min="1">
+                            </div>
+
+                        </div>
+
+
+                        <!-- ====================== 缓存命中优化 ====================== -->
+                        <details class="cache-optimization-card">
+                            <summary class="cache-optimization-header">
+                                <span class="cache-optimization-arrow">▼</span>
+                                <span>缓存命中优化</span>
+                            </summary>
+
+                            <div class="cache-optimization-controls">
+                                <label class="cache-optimization-row cache-optimization-row-wide" for="dynamic-context-insert-mode">
+                                    <span>本轮触发世界知识插入方式</span>
+                                    <select id="dynamic-context-insert-mode" class="setting-input">
+                                        <option value="auto">自动优化（推荐）</option>
+                                        <option value="system">全部作为前置system发送</option>
+                                        <option value="user">全部合并到用户消息</option>
+                                    </select>
+                                </label>
+
+                                <div class="request-body-tip">
+                                    自动优化：今日稳定背景放在角色设定后，本轮触发世界书拼进user消息中发送；全部作为前置system时，本轮触发世界书会并入世界书system。
+                                </div>
+
+                                <label class="cache-optimization-row cache-optimization-row-wide" for="history-window-strategy">
+                                    <span>策略</span>
+                                    <select id="history-window-strategy" class="setting-input">
+                                        <option value="cache_friendly">缓存友好（推荐）</option>
+                                        <option value="strict_recent">严格最近 N 条</option>
+                                    </select>
+                                </label>
+
+                                <div id="history-window-cache-controls" class="cache-optimization-grid">
+                                    <label class="cache-optimization-row" for="custom-context-limit">
+                                        <span>最短上下文</span>
+                                        <input type="number" id="custom-context-limit" class="setting-input" min="1" max="100" step="1" placeholder="默认: 5">
+                                    </label>
+
+                                    <label id="history-window-max-context-row" class="cache-optimization-row" for="history-window-max-context">
+                                        <span>最长上下文</span>
+                                        <input type="number" id="history-window-max-context" class="setting-input" min="1" max="200" step="1" placeholder="默认: 25">
+                                    </label>
+                                </div>
+
+                                <div class="request-body-tip">
+                                    缓存友好会从最短上下文开始逐轮增长，到最长上下文后换新起点；严格模式会只发送最近的最短上下文条数。
+                                </div>
+
+                            </div>
+                        </details>
+
+
+
+
+                        <!-- ====================== 请求体附加参数 ====================== -->
+                        <details class="request-body-fold-card">
+                            <summary class="request-body-fold-header">
+                                <span class="request-body-fold-arrow">▼</span>
+                                <span>（可选）请求体附加参数</span>
+                            </summary>
+
+                            <div class="request-body-fold-controls">
+
+                            <div class="request-body-tip">
+                                这里填写会拼接进 API 请求体的 JSON 参数，可以设置思考模式、推理挡位等。
+                                注：当前版本暂不支持流式输出。
+                            </div>
+
+                            <!-- 第1行：请求体参数预设下拉框 -->
+                            <div class="panel-row">
+                                <select id="request-body-preset-select" class="setting-input">
+                                    <option value="">-- 选择请求体参数预设 --</option>
+
+                                </select>
+                            </div>
+
+                            <!-- 第2行：操作按钮 -->
+                            <div class="panel-row btn-group">
+                                <button id="save-request-body-preset-btn" type="button" class="icon-btn">保存参数预设</button>
+                                <button id="del-request-body-preset-btn" type="button" class="icon-btn danger">删除参数预设</button>
+                            </div>
+
+                            <!-- 第3行：JSON 编辑区域 -->
+                            <textarea
+                                id="custom-request-body-json"
+                                class="setting-input code-editor"
+                                placeholder='例如：&#10;{&#10;  "thinking": {"type": "enabled"},&#10;  "reasoning_effort": "high",&#10;  "stream": false&#10;}'
+                            ></textarea>
+                            </div>
+
+                        </details>
+
+                        
+                        <div class="preset-btn-group">
+                            <button id="save-preset-btn" type="button" class="icon-btn">保存API总预设</button>
+                            <button id="del-preset-btn" type="button" class="icon-btn danger">删除API总预设</button>
+                        </div>
+
+
+                    </div>
+
+
+                    <!-- ====================== 视觉模型设置 (重构版) ====================== -->
+                    <!-- 多模态模式只使用上面的聊天 API；这里整块隐藏，但保留用户已经保存的视觉配置。 -->
+                    <div id="separate-vision-settings">
+
+                    <!-- 分割线与标题 -->
+                    <h3 class="section-title" style="margin-top: 10px; border-top: 3px solid #ccc; padding-top: 20px;">视觉模型（可选）</h3>
+
+                    <div class="main-options api-section">
+
+                        <!-- ★★★ 新增：视觉预设管理区域 ★★★ -->
+                        <div id="vision-preset-container" class="preset-row">
+                            <select id="vision-preset-select" class="setting-input" style="flex:1;">
+                                <option value="">-- 选择视觉预设 --</option>
+                            </select>
+
+                        </div>
+                        <!-- ★★★ 结束 ★★★ -->
+
+                        <!-- 视觉 API 地址 -->
+                        <div class="main-option api-input-card">
+                            <label class="api-label">视觉 API 地址</label>
+                            <input type="url" id="vision-api-url" class="setting-input" 
+                                placeholder="例如: https://api.siliconflow.cn/v1/chat/completions">
+                        </div>
+
+                        <!-- 视觉 API Key -->
+                        <div class="main-option api-input-card">
+                            <label class="api-label">视觉 API Key (留空则共用上方)</label>
+                            <div class="input-wrapper"> <!-- 新增的包裹层 -->
+                                <!-- 注意：加上了 has-eye-icon 类 -->
+                                <input type="password" id="vision-api-key" class="setting-input has-eye-icon" 
+                                    placeholder="sk-..." autocomplete="off">
+                                
+                                <!-- 注意：ID 改成了 toggle-vision-api-key -->
+                                <span class="eye-icon" id="toggle-vision-api-key" title="显示/隐藏密钥">
+                                    <!-- 默认显示【闭眼】图标 (密码状态) -->
+                                    <span class="svg-eye-closed">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-off-icon lucide-eye-off"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                                    </span>
+                                    
+                                    <!-- 默认隐藏【睁眼】图标 (明文状态) -->
+                                    <span class="svg-eye-open" style="display: none;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-icon lucide-eye"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- 视觉 模型选择 (带拉取和测试) -->
+                        <div class="main-option model-card">
+                            <label for="vision-model-name" class="api-label2">视觉模型</label>
+
+                            <!-- 模型设置区域 (与主模型一致的布局) -->
+                            <div class="model-setting-group">
+                                
+                                <!-- 1. 输入框（拉取结果由独立模型选择弹窗展示） -->
+                                <input type="text" id="vision-model-name" class="model-select"
+                                    placeholder="手动输入或点击拉取..." value="Qwen/Qwen3-VL-30B-A3B-Instruct">
+
+                                <!-- 2. 按钮组 -->
+                                <div class="api-buttons-row">
+                                    <button type="button" id="fetch-vision-models-btn" class="api-btn primary">
+                                        拉取模型
+                                    </button>
+                                    <button type="button" id="test-vision-api-btn" class="api-btn">
+                                        测试 API
+                                    </button>
+                                </div>
+
+                                <!-- 3. 测试结果显示 -->
+                                <div id="test-vision-api-status" class="api-status-text status-idle">- 视觉API待测试 -</div>
+
+                            </div>
+                        </div>
+
+                        <!-- 视觉 提示词 -->
+                        <div class="main-option api-input-card">
+                            <label class="api-label">识图提示词 (Prompt)</label>
+                            <textarea id="vision-prompt" class="setting-input" rows="3" style="resize: vertical;">请详细地描述这张图片的内容。不要发表评论，只需客观描述。</textarea>
+                        </div>
+
+                    </div>
+
+
+                    <div class="preset-btn-group">
+                        <button id="save-vision-preset-btn" type="button" class="icon-btn">保存</button>
+                        <button id="del-vision-preset-btn" type="button" class="icon-btn danger">删除</button>
+                    </div>
+
+                    </div>
+
+
+                </div>
+
+                <!-- ====================== 3. 预设 ====================== -->
+                <div class="tab-pane" id="prompt">
+
+                    <h3 class="section-title">System Prompt</h3>
+                    <div class="main-options api-section">
+
+                        <!-- System Prompt 预设：逻辑跟 API / CSS 预设一样，保存到 settings 里 -->
+                        <div id="system-prompt-preset-container" class="preset-row">
+                            <select id="system-prompt-preset-select" class="setting-input" style="flex:1;">
+                                <option value="">-- 选择 System Prompt 预设 --</option>
+                            </select>
+                        </div>
+
+                        <div class="panel-row btn-group">
+                            <button id="save-system-prompt-preset-btn" type="button" class="icon-btn">保存预设</button>
+                            <button id="del-system-prompt-preset-btn" type="button" class="icon-btn danger">删除预设</button>
+                        </div>
+
+                        <!-- 恢复内置原文：独占一行，只回填输入框，保存设置后才生效。 -->
+                        <div class="panel-row btn-group">
+                            <button id="restore-default-system-prompt-btn" type="button" class="icon-btn" style="flex:1;">恢复默认预设</button>
+                        </div>
+
+                        <div class="main-option system-prompt-card">
+                            <label class="api-label">全局默认 System Prompt</label>
+                            <textarea
+                                id="global-system-prompt"
+                                class="setting-input code-editor"
+                                rows="8"
+                                placeholder="在这里输入全局默认 system prompt"
+                            ></textarea>
+                            <p class="input-hint">
+                                角色未选择专属 System Prompt 时，会跟随这里当前保存的内容。
+                            </p>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- ====================== 4. 存储 ====================== -->
+                <div class="tab-pane" id="storage">
+
+                    <!-- A. 本地文件导入导出 (保持不变) -->
+                    <h3 class="section-title">本地文件备份</h3>
+                    <div class="main-options">
+                        <!-- 导出按钮 -->
+                        <div class="main-option" onclick="exportData()" style="justify-content: center; font-weight: 500;">
+                            <span>导出配置（下载 .json 文件）</span>
+                        </div>
+
+                        <!-- 导入按钮 (通过 hidden input 实现) -->
+                        <label class="main-option" style="justify-content: center; font-weight: 500; cursor: pointer;">
+                            <span>从文件恢复配置</span>
+                            <input type="file" id="file" accept=".json,application/json" 
+                                style="display: none;" onchange="importData(this)">
+                        </label>
+                    </div>
+
+                    <!-- B. 云端同步区域 (双模版) -->
+                    <h3 class="section-title">云端同步</h3>
+                    <div class="gist-sync-card">
+                        
+                        <!-- 1. 模式选择下拉菜单 -->
+                        <div class="input-group">
+                            <label class="input-label">选择同步方式</label>
+                            <select id="sync-provider" class="setting-input" onchange="CloudSync.toggleMode()">
+                                <option value="gist">GitHub Gist (公共云)</option>
+                                <option value="custom">自定义服务器 (私有云)</option>
+                            </select>
+                        </div>
+
+                        <!-- 2. 服务器地址 (自定义模式显示，Gist模式隐藏) -->
+                        <!-- 注意 id="group-custom-url" 对应 JS 里的控制逻辑 -->
+                        <div class="input-group" id="group-custom-url">
+                            <label class="input-label">后端 API 地址</label>
+                            <input type="text" id="custom-url" class="setting-input" 
+                                placeholder="例如: https://sync.your-url.com/api/data">
+                        </div>
+
+                        <!-- 3. Gist 教程入口 (Gist模式显示，自定义模式隐藏) -->
+                        <div class="input-group gist-tutorial-group" id="group-gist-tutorial" style="display:none;">
+                            <button type="button" class="gist-btn gist-tutorial-btn" onclick="CloudSync.openGistTutorial()">
+                                查看Gist云备份教程
+                            </button>
+                        </div>
+                        <div class="input-group" id="group-gist-id" style="display:none;">
+                            <label class="input-label">Gist ID</label>
+                            <!-- Flex 布局：左边输入框，右边查找按钮 -->
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="gist-id-input" class="setting-input" 
+                                    placeholder="新建留空，恢复必填" style="flex: 1;">
+                                
+                                <button type="button" class="gist-btn" onclick="CloudSync.findBackup()" 
+                                    style="width: auto; padding: 0 12px; font-size: 0.9em; white-space: nowrap;">
+                                    🔍 自动查找
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 4. 密码/Token 输入框 (共用) -->
+                        <!-- id="auth-label" 用于 JS 动态修改文字 (Secret Key 或 Token) -->
+                        <div class="input-group">
+                            <label class="input-label" id="auth-label">访问密码 (Secret Key)</label>
+                            <!-- 小眼睛显示/隐藏密码：结构和 API Key 输入框保持一致，JS 会自动绑定 -->
+                            <div class="input-wrapper">
+                                <input type="password" id="gist-token" class="setting-input has-eye-icon" autocomplete="off">
+                                
+                                <span class="eye-icon" id="toggle-gist-token" title="显示/隐藏密钥">
+                                    <!-- 默认显示【闭眼】图标 (密码状态) -->
+                                    <span class="svg-eye-closed">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-off-icon lucide-eye-off"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                                    </span>
+                                    
+                                    <!-- 默认隐藏【睁眼】图标 (明文状态) -->
+                                    <span class="svg-eye-open" style="display: none;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-icon lucide-eye"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </span>
+                                </span>
+                            </div>
+                            <small class="input-hint">新填写的key，上传完请【先】点击页面下方“保存设置”以记住密码，再同步/恢复</small>
+                        </div>
+
+                        <!-- 5. 操作按钮 -->
+                        <div class="gist-buttons">
+                            <!-- 直接绑定 onclick 事件，防止 main.js 里漏绑 -->
+                            <button type="button" id="gist-backup" class="gist-btn primary" onclick="CloudSync.updateBackup()">
+                                上传 / 同步
+                            </button>
+                            <button type="button" id="gist-restore" class="gist-btn" onclick="CloudSync.restoreBackup()">
+                                拉取 / 恢复
+                            </button>
+                            <button type="button" id="sync-forget-passphrase" class="gist-btn sync-forget-passphrase-btn">
+                                删除本地密码记忆
+                            </button>
+                        </div>
+
+                        <!-- 6. 状态显示 -->
+                        <div id="gist-status" class="gist-status">
+                            准备就绪
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+        </div>
+
+        <!-- 底部按钮 -->
+        <div class="modal-buttons">
+            <button id="main-cancel">取消</button>
+            <button id="main-confirm" class="primary">应用并关闭</button>
+        </div>
+
+    </div>
+    </div>
+
+
+    <!-- 1. 长按上下文菜单 -->
+    <!-- 联系人列表长按操作菜单：样式参考消息气泡菜单，但类名独立 -->
+    <!-- ★★★★★ 联系人列表长按操作菜单 START ★★★★★ -->
+    <!-- 样式参考消息气泡菜单，但类名全部独立，避免两个菜单互相影响 -->
+    <div id="contact-action-menu" class="contact-action-menu" style="display: none;">
+        <div class="contact-menu-backdrop"></div>
+        <div class="contact-menu-panel">
+            <div class="contact-menu-title">联系人操作</div>
+            <button data-action="toggle-pin">置顶</button>
+            <button data-action="sort">排序</button>
+            <div class="contact-menu-gap"></div>
+            <button data-action="cancel" class="btn-cancel">取消</button>
+        </div>
+    </div>
+    <!-- ★★★★★ 联系人列表长按操作菜单 END ★★★★★ -->
+
+    <div id="msg-context-menu" class="msg-context-menu" style="display: none;">
+        <div class="menu-backdrop"></div>
+        <div class="menu-panel">
+            <!-- ★★★ 新增标题 ★★★ -->
+            <div class="menu-title">编辑整组</div>
+
+            <button data-action="edit">编辑</button>
+            <button data-action="copy">复制</button>
+            <button data-action="multi-select">多选</button>
+            <button data-action="toggle-hidden" id="btn-toggle-hidden">向Ta隐藏</button> 
+            
+            <!-- 删除通常是危险操作，用 CSS 单独标红 -->
+            <button data-action="delete">删除</button> 
+            
+            
+            <!-- 取消按钮与其他按钮稍微隔开一点 -->
+            <div class="menu-gap"></div>
+            <button data-action="cancel" class="btn-cancel">取消</button>
+        </div>
+
+    </div>
+
+    <!-- 轻量操作反馈独立于弹窗存在，消息菜单关闭后仍能继续显示。 -->
+    <div id="toast-stack" class="toast-stack" aria-live="polite" aria-atomic="false"></div>
+
+    <!-- 2. 编辑消息的弹窗 (顺便检查下有没有加这个) -->
+    <div id="msg-edit-modal" class="modal-overlay" style="display: none;">
+        <div class="edit-box">
+            <h3 class="bianjixiaoxi">编辑消息</h3>  <!-- 加了个 class -->
+            <textarea id="edit-msg-textarea" placeholder="在这里输入..."></textarea>
+            <div class="edit-buttons">
+                <button id="btn-edit-cancel">取消</button>
+                <button id="btn-edit-confirm" class="primary">确定</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ================= 6. 朋友圈本身的长按操作菜单 Modal ================= -->
+        <div id="modal-moment-actions" class="modal-overlay hidden">
+            <!-- 这里用了一个底部弹出的样式结构 -->
+            <div class="action-sheet glass-panel">
+                <button id="btn-m-action-copy" class="momment-btn">复制内容</button>
+                <button id="btn-m-action-edit" class="momment-btn">编辑朋友圈</button>
+                <button id="btn-m-action-delete" class="momment-btn danger">删除朋友圈</button>
+                <div class="action-divider"></div>
+                <button id="btn-m-action-cancel" class="momment-btn cancel">取消</button>
+            </div>
+        </div>
+
+<!-- ================= 7. 朋友圈评论操作菜单 Modal (新增删除按钮) ================= -->
+    <div id="modal-comment-actions" class="modal-overlay moments-bg hidden">
+        <div class="action-sheet glass-panel">
+            <button id="btn-c-action-reply" class="momment-btn">回复</button>
+            <button id="btn-c-action-edit" class="momment-btn">编辑</button>
+            <button id="btn-c-action-copy" class="momment-btn">复制</button>
+            <button id="btn-c-action-regen" class="momment-btn">重新生成</button>
+            <!-- 新增：删除按钮 -->
+            <button id="btn-c-action-delete" class="momment-btn">删除</button>
+            <div class="action-divider"></div>
+            <button id="btn-c-action-cancel" class="momment-btn cancel">取消</button>
+        </div>
+    </div>
+
+
+    <!-- ================= 8. 评论回复输入框 Modal撰写朋友圈 ================= -->
+    <div id="modal-reply-comment" class="modal-overlay hidden">
+        <div class="edit-box glass-panel">
+            <!-- 保留原本的 ID -->
+            <h3 id="modal-reply-title" class="bianjixiaoxi">回复</h3>
+            
+            <textarea id="m-reply-text" placeholder="写下你的回复..." rows="4"></textarea>
+            
+            <div class="edit-buttons">
+                <button id="btn-close-m-reply" class="cancel-btn">取消</button>
+                <button id="btn-publish-m-reply" class="primary">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 9. 云同步主密码 Modal ================= -->
+    <div id="sync-passphrase-modal" class="modal-overlay hidden">
+        <div class="sync-passphrase-box glass-panel">
+            <!-- 这里做成独立类名，避免影响消息编辑/倒数日等弹窗样式。 -->
+            <div class="sync-passphrase-header">
+                <h3 id="sync-passphrase-title">同步主密码</h3>
+                <p id="sync-passphrase-desc">请输入用于加密云备份的同步主密码。</p>
+            </div>
+
+            <div class="sync-passphrase-fields">
+                <label class="sync-passphrase-field">
+                    <span>同步主密码</span>
+                    <!-- 小眼睛结构沿用 API Key 的显示/隐藏逻辑，外层定位，图标由 script.js 自动绑定。 -->
+                    <div class="input-wrapper sync-passphrase-input-wrapper">
+                        <input id="sync-passphrase-input" class="sync-passphrase-input-control has-eye-icon" type="password" autocomplete="current-password" placeholder="输入你记得住的主密码">
+                        <span class="eye-icon sync-passphrase-eye" id="toggle-sync-passphrase-input" title="显示/隐藏主密码">
+                            <span class="svg-eye-closed">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                            </span>
+                            <span class="svg-eye-open" style="display: none;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                            </span>
+                        </span>
+                    </div>
+                </label>
+
+                <label id="sync-passphrase-confirm-wrap" class="sync-passphrase-field">
+                    <span>再次确认</span>
+                    <div class="input-wrapper sync-passphrase-input-wrapper">
+                        <input id="sync-passphrase-confirm" class="sync-passphrase-input-control has-eye-icon" type="password" autocomplete="new-password" placeholder="再输入一次，防止手滑">
+                        <span class="eye-icon sync-passphrase-eye" id="toggle-sync-passphrase-confirm" title="显示/隐藏确认密码">
+                            <span class="svg-eye-closed">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                            </span>
+                            <span class="svg-eye-open" style="display: none;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                            </span>
+                        </span>
+                    </div>
+                </label>
+            </div>
+
+            <label class="sync-passphrase-remember">
+                <input id="sync-passphrase-remember" type="checkbox">
+                <span class="sync-passphrase-check"></span>
+                <span class="sync-passphrase-remember-text">本设备记住同步主密码</span>
+            </label>
+
+            <div class="sync-passphrase-warning">
+                本设备记住后，若页面被注入脚本或浏览器数据泄露，云备份可能被解密。
+            </div>
+
+            <div id="sync-passphrase-error" class="sync-passphrase-error" aria-live="polite"></div>
+
+            <div class="sync-passphrase-actions">
+                <button type="button" id="sync-passphrase-forget" class="sync-passphrase-secondary">删除本地密码记忆</button>
+                <button type="button" id="sync-passphrase-cancel" class="sync-passphrase-secondary">取消</button>
+                <button type="button" id="sync-passphrase-confirm-btn" class="sync-passphrase-primary">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 10. GitHub Gist 教程 Modal ================= -->
+    <div id="gist-tutorial-modal" class="modal-overlay hidden" onclick="CloudSync.closeGistTutorial(event)">
+        <div class="gist-tutorial-box glass-panel" onclick="event.stopPropagation()">
+            <!-- Gist 教程只服务云同步，不复用主设置弹窗，避免小白来回找不到关闭入口。 -->
+            <div class="sync-passphrase-header">
+                <h3>GitHub Gist 备份教程</h3>
+                <p>第一次使用时，按下面步骤创建一个只拥有 gist 权限的 GitHub Token。</p>
+            </div>
+
+            <ol class="gist-tutorial-list">
+                <li>进入网页 github.com</li>
+                <li>注册登录</li>
+                <li>右上角点击自己头像</li>
+                <li>Settings</li>
+                <li>【电脑版】看左边列表，拉到最下面，点 Developer settings / 【手机版】点击 Public profile 上方的 Menu，拉到最下面，点 Developer settings</li>
+                <li>点 Personal access tokens</li>
+                <li>Tokens(classic)</li>
+                <li>点击 Generate new token</li>
+                <li>选择 Generate new token(classic)</li>
+                <li>填写三个地方：【① Note - 为这个 token 起名】【② Expiration - 选 No expiration】【③ 一堆复选框中，找到一个 gist - Create gist 的复选框，勾起来】</li>
+                <li>拉到最下面，选择 Generate token</li>
+                <li>复制 ghp 带头的 token（请妥善保存，它只会展示一次）</li>
+                <li>粘贴进 TeleWindy</li>
+                <li>直接点“上传云备份”，输入加密密码，即可备份</li>
+            </ol>
+
+            <div class="sync-passphrase-actions gist-tutorial-actions">
+                <button type="button" class="sync-passphrase-primary" onclick="CloudSync.closeGistTutorial()">知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 和风天气教程 Modal ================= -->
+    <div id="qweather-tutorial-modal" class="modal-overlay hidden">
+        <div class="gist-tutorial-box glass-panel">
+            <!-- ★ 外观和 Gist 教程保持一致，但弹窗独立，避免两个功能共用内容和关闭事件。 -->
+            <div class="sync-passphrase-header">
+                <h3>和风天气配置教程</h3>
+                <p>和风天气官网：<a href="https://dev.qweather.com/" target="_blank" rel="noopener noreferrer">https://dev.qweather.com/</a></p>
+            </div>
+
+            <ol class="gist-tutorial-list">
+                <li>打开上面的和风天气开发服务网址，注册并登录。</li>
+                <li>进入控制台，在项目管理中创建一个项目。</li>
+                <li>给项目创建“API KEY”类型的凭据，并复制生成的 API Key。</li>
+                <li>进入控制台-设置，找到自己的专属 API Host。</li>
+                <li>把 API Host 和 API Key 分别粘贴到 TeleWindy 的对应输入框。</li>
+                <li>填写城市，点击“搜索地点”并选择正确地点。</li>
+                <li>点击“测试天气”；页面显示“来源：和风天气”就是配置成功。</li>
+            </ol>
+
+            <div class="sync-passphrase-actions gist-tutorial-actions">
+                <button type="button" id="qweather-tutorial-close-btn" class="sync-passphrase-primary">知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= 天气地点候选 Modal ================= -->
+    <div id="world-sense-location-modal" class="modal-overlay hidden">
+        <div class="gist-tutorial-box world-sense-location-modal-box glass-panel">
+            <div class="sync-passphrase-header">
+                <h3>选择具体地点</h3>
+                <p id="world-sense-location-modal-desc">请选择与你输入城市对应的地点。</p>
+            </div>
+
+            <div id="world-sense-location-candidates" class="world-sense-location-candidates"></div>
+
+            <div class="sync-passphrase-actions gist-tutorial-actions">
+                <button type="button" id="world-sense-location-cancel-btn" class="sync-passphrase-secondary">取消</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 新增：多选操作栏 (Action Bar)               -->
+    <!-- ========================================== -->
+    <div id="multi-select-bar" class="multi-select-bar hidden">
+        <div class="select-count">已选择 <span id="select-count-num">0</span> 条</div>
+        <div class="select-actions">
+            <button id="btn-batch-copy" class="action-btn">复制</button>
+            
+            <!-- ★★★ 新增：批量隐藏按钮 ★★★ -->
+            <button id="btn-batch-hide" class="action-btn">隐藏</button>
+
+            <button id="btn-batch-delete" class="action-btn delete">删除</button>
+            <button id="btn-exit-select" class="action-btn cancel">取消</button>
+        </div>
+    </div>
+
+   
+    <!-- 【新增弹窗】：专门用于显示日志的弹窗 -->
+    <div id="log-display-modal" class="log-modal hidden">
+        <div class="glass-panel log-modal-content">
+            <!-- 顶部：标题和关闭按钮 -->
+            <div class="log-modal-header">
+                <div>
+                    <h3 class="shangxiawen">上下文日志</h3>
+
+                </div>
+                <button id="btn-close-log" class="log-close-btn">&times;</button>
+            </div>
+            
+            <!-- 内容区域：可滚动 -->
+            <div class="log-modal-body">
+                <pre><code id="log-content">暂无发送记录...</code></pre>
+            </div>
+            
+            <!-- 底部说明 -->
+
+            <div id="log-token-count" class="log-token-count">
+                <div>输入 Token：0</div>
+                <div>输出 Token：0</div>
+                <div>总 Token：0</div>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ==================== 拉取模型后的选择弹窗 ==================== -->
+    <!-- 文字模型和视觉模型共用这个面板；上方既能搜索，也能直接填写接口未返回的模型名。 -->
+    <div id="model-picker-modal-overlay" class="modal-overlay hidden">
+        <div class="modal glass-panel model-picker-modal" role="dialog" aria-modal="true" aria-labelledby="model-picker-title">
+            <h2 id="model-picker-title">选择模型</h2>
+
+            <!-- 搜索词独立于当前已选模型，打开弹窗时不会用旧模型名过滤列表。 -->
+            <div class="search-input-group model-picker-input-group">
+                <input type="text" id="model-picker-input" placeholder="搜索或手动输入模型名称..." autocomplete="off">
+                <button type="button" id="model-picker-use-input" class="search-btn">使用此名称</button>
+            </div>
+
+            <div class="model-picker-list-header">
+                <span id="model-picker-count">0 个模型</span>
+                <span>点击模型即可选择</span>
+            </div>
+
+            <!-- 拉取到的模型会动态注入到这里。 -->
+            <div id="model-picker-results" class="model-picker-results"></div>
+
+            <div class="modal-buttons">
+                <button type="button" id="model-picker-close">关闭</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 【改动2】：搜索聊天记录弹窗 -->
+    <div id="search-modal-overlay" class="modal-overlay hidden">
+        <div class="modal glass-panel search-modal">
+            <h2>搜索聊天记录</h2>
+            
+            <!-- 关键字搜索 -->
+            <div class="search-input-group">
+                <input type="text" id="search-keyword-input" placeholder="输入关键字...">
+                <button id="btn-search-keyword" class="search-btn">搜索</button>
+            </div>
+
+            <!-- 按日期查找 -->
+            <div class="search-input-group">
+                <input type="date" id="search-date-input">
+                <button id="btn-search-date" class="search-btn">按日期跳转</button>
+            </div>
+
+            <!-- 搜索结果列表 -->
+            <div id="search-results-list" class="search-results">
+                <!-- 搜索结果会动态注入到这里 -->
+            </div>
+
+            <div class="modal-buttons">
+                <button id="btn-close-search">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 在这里，你的主脚本之前，引入这两个库 -->
+    <script src="./vendor/marked.min.js"></script>
+    <script src="./vendor/purify.min.js"></script>
+
+    <!-- 3. 引入 KaTeX 核心库 -->
+    <script src="./vendor/katex/katex.min.js"></script>
+    
+
+    <!-- 项目脚本：先加载独立服务，再加载主业务入口 -->
+    <script src="./js/config.js?v=20260927-worker-deploy-1"></script>
+    <script src="./js/storage.js"></script>
+    <script src="./js/world-info.js"></script>
+    <script src="./js/cloud-sync.js"></script>
+    <script src="./js/history-visibility.js"></script>
+    <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->
+    <script src="./js/world-sense.js?v=20260829"></script>
+    <script src="./js/todo-countdown-context.js"></script>
+    <script src="./js/character-schedule.js"></script>
+    <script src="./js/character-memory.js"></script>
+    <script src="./js/agent-skill-router.js?v=20260907-agent-panel-2"></script>
+    <script src="./js/agent-runtime.js"></script>
+    <script src="./js/agent-todo-manager.js"></script>
+    <script src="./js/agent-heart-note-manager.js"></script>
+    <script src="./js/pomodoro.js"></script>
+    <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
+    <script src="./js/proactive-messages.js?v=20260927-proactive-relative-wake-1"></script>
+    <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
+    <script src="./script.js?v=20260927-worker-deploy-1"></script>
+</body>
+</html>
+

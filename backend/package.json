@@ -1,0 +1,12 @@
+{
+  "name": "telewindy-private-worker",
+  "private": true,
+  "version": "1.0.0",
+  "cloudflare": {
+    "bindings": {
+      "APP_TOKEN": {
+        "description": "填写一串自己生成的随机长口令；部署后在 TeleWindy 的后台运行服务中填写同一口令。请替换示例值。"
+      }
+    }
+  }
+}

@@ -1,0 +1,44 @@
+name = "telewindy-chat-jobs"
+main = "worker.js"
+compatibility_date = "2026-09-27"
+
+# ★ 部署按钮会为每位用户创建独立 KV，并把此占位 ID 改成真实 ID。
+# 已部署用户的 wrangler.toml 由本人仓库保留，自动更新只同步 worker.js。
+[[kv_namespaces]]
+binding = "CHAT_JOBS"
+id = "replace-with-your-kv-namespace-id"
+
+[[queues.producers]]
+binding = "CHAT_JOB_QUEUE"
+queue = "telewindy-chat-jobs"
+
+[[queues.consumers]]
+queue = "telewindy-chat-jobs"
+max_batch_size = 1
+max_batch_timeout = 5
+max_retries = 0
+
+[[durable_objects.bindings]]
+name = "CHAT_JOB_OBJECT"
+class_name = "ChatJobObject"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatJobObject"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[vars]
+# ★ 这里只放公开配置；APP_TOKEN 与模型 Key 必须放 Worker Secret。
+ALLOWED_ORIGIN = "https://795799.xyz,https://www.795799.xyz"
+UPSTREAM_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
+DEFAULT_MODEL = "deepseek-ai/DeepSeek-V3.2"
+DEEPSEEK_CHAT_URL = "https://api.deepseek.com/v1/chat/completions"
+SILICONFLOW_CHAT_URL = "https://api.siliconflow.cn/v1/chat/completions"
+OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions"
+GLM_CHAT_URL = "https://api.z.ai/api/paas/v4/chat/completions"
+CUSTOM1_CHAT_URL = ""
+CUSTOM1_MATCH_HOSTS = ""
+ALLOWED_MODELS = ""

@@ -1,0 +1,2 @@
+# ★ 部署时请为 APP_TOKEN 填写自己的随机长口令，不要把真实口令提交到 GitHub。
+APP_TOKEN=replace-with-your-own-long-random-token
