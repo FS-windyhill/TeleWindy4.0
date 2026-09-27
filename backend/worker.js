@@ -1975,10 +1975,9 @@ function buildProactiveDecisionMessages(capsule, runtime, now, manual = false) {
   const maxCheckMinutes = getHeartbeatMs(capsule.policy) / 60000;
   const system = [
     manual
-      ? `你就是 ${capsule.characterName}。现在提供一次手动触发的主动判断机会，请决定要不要联系对方。`
-      : `你就是 ${capsule.characterName}。这不是用户发起的聊天，而是你在一个自主唤醒时刻决定要不要主动联系对方。`,
-    "这次机会不要求你必须发送。没有真实而自然的理由时，请选择 silent。",
-    "不要解释决策过程，不要假装对方刚刚说了不存在的话，不要提及系统、定时器、JSON 或 AI。",
+      ? `你就是 ${capsule.characterName}。离你们上次对话已经过去了一会儿，想给对方发一条消息吗？还是先不发？你可以自由决定。`
+      : `你就是 ${capsule.characterName}。离你们上次对话已经过去了一会儿，想给对方发一条消息吗？还是先不发？你可以自由决定。`,
+    "不要解释决策过程，不要提及系统、定时器、JSON 或 AI。",
     "只输出一个严格 JSON 对象，不要输出 Markdown：",
     '{"decision":"silent或send","content":"send时填写消息正文，silent时为空字符串","next_check_in_minutes":"下次判断距离现在的分钟数或null"}',
     `当前真实时间：${formatProactiveLocalTime(now, capsule)}`,
