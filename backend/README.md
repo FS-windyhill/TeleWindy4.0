@@ -8,10 +8,11 @@
 
    [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/FS-windyhill/TeleWindy4.0/tree/main/backend)
 
-2. 在部署页面把 `APP_TOKEN` 的示例值换成你自己生成的随机长口令。记下这串口令；**不要把模型 API Key 填在这里，也不要把真实口令提交到 GitHub**。
-3. **中国大陆用户先绑定自己的域名。** 准备一个域名，把域名托管到 Cloudflare，然后在刚部署的 Worker 中打开 **Domains & Routes → Add → Custom Domain**，填写专用子域名，例如 `chat-jobs.你的域名.com`。[购买、托管和绑定的详细步骤](ADVANCED.md#中国大陆访问绑定自定义域名)
-4. 打开 TeleWindy → 探索 → 后台运行服务，填入 `https://chat-jobs.你的域名.com` 和刚才的口令，保存并点“测试连接”。切屏回复的调用模式默认是“跟随前端 API Key”，模型 Key 仍在 TeleWindy 的 API 预设中填写。
-5. 需要主动消息时，再去主动消息页面选择“私人 Worker 后台”，按页面提示授权保存加密凭据。
+2. **创建私有仓库。** 部署页面会为你在 GitHub 创建一份项目；在仓库可见性选项中选择 **Private（私有）**，不要选 Public（公开）。部署完成后打开自己的 GitHub 仓库，确认名称旁有锁头标志、仓库显示 Private。用户不需要手动 Fork。
+3. 在部署页面把 `APP_TOKEN` 的示例值换成你自己生成的随机长口令。记下这串口令；**不要把模型 API Key 填在这里，也不要把真实口令提交到 GitHub**。
+4. **中国大陆用户先绑定自己的域名。** 准备一个域名，把域名托管到 Cloudflare，然后在刚部署的 Worker 中打开 **Domains & Routes → Add → Custom Domain**，填写专用子域名，例如 `chat-jobs.你的域名.com`。[购买、托管和绑定的详细步骤](ADVANCED.md#中国大陆访问绑定自定义域名)
+5. 打开 TeleWindy → 探索 → 后台运行服务，填入 `https://chat-jobs.你的域名.com` 和刚才的口令，保存并点“测试连接”。切屏回复的调用模式默认是“跟随前端 API Key”，模型 Key 仍在 TeleWindy 的 API 预设中填写。
+6. 需要主动消息时，再去主动消息页面选择“私人 Worker 后台”，按页面提示授权保存加密凭据。
 
 Cloudflare 首次部署给出的 `workers.dev` 地址在中国大陆网络通常无法直接使用；自定义域名绑定后，也请以 TeleWindy 的“测试连接”结果确认当前网络可访问。首次部署页面在手机上的具体布局可能随 Cloudflare 更新。
 
