@@ -1283,6 +1283,122 @@ const ProactiveMessages = {
         }
     },
 
+    // ★★★★★ 主动消息独立重生成 START ★★★★★
+    buildRerollMessages(contact, message) {
+        const index = contact.history.indexOf(message);
+        // ★ 固定到原消息发出之前的历史，不把旧正文或请求期间的新消息喂回本次重生成。
+        const capsule = this.buildCapsule({ ...contact, history: contact.history.slice(0, index) });
+        const historyText = capsule.messages.map(item =>
+            `[${this.formatChatTime(item.eventAt)}] ${item.role === 'user' ? '对方' : '你'}：${item.content}`
+        ).join('\n') || '无';
+        return [
+            { role: 'system', content: `你是 ${contact.name || '角色'}。\n${capsule.characterPrompt}\n${capsule.contextPrompt}` },
+            { role: 'user', content: `【消息发送时间】\n${message.timestamp || this.formatChatTime(message.eventAt)}\n【此前聊天】\n${historyText}\n【任务】\n重新写一条你主动联系对方的消息，保持人设与当时对话连贯。这条消息已经决定发送，不再判断是否发送，不要回答成对方刚刚发来了新消息。直接输出消息正文，不要输出 JSON、时间戳、解释或动作描写。` }
+        ];
+    },
+
+    async applyRerollResult(contact, context, rawText, jobId = null) {
+        const rerollState = contact?.proactiveRerollState;
+        // ★ 原消息点击后已经像普通聊天一样删除；用联系人级版本校验后台迟到结果，不能再依赖旧气泡占位。
+        if (!rerollState || rerollState.messageId !== context.messageId || rerollState.revision !== context.revision) return false;
+        const text = HistoryVisibility.stripThought(rawText).replace(/^\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*/, '').trim();
+        if (!text) throw new Error('主动消息重生成未返回正文');
+
+        const originalMessage = context.originalMessage || {};
+        const timestamp = originalMessage.timestamp || this.formatChatTime(originalMessage.eventAt);
+        const message = {
+            ...originalMessage,
+            role: 'assistant',
+            content: `[${timestamp}] ${text}`,
+            timestamp,
+            messageId: context.messageId,
+            proactiveSource: originalMessage.proactiveSource || 'proactive'
+        };
+        message.updatedAt = Date.now();
+        if (jobId) message.rerollJobId = jobId;
+        delete message.rerollRevision;
+        contact.history.push(message);
+        delete contact.proactiveRerollState;
+        await Storage.saveContacts();
+
+        // ★ 与普通聊天共用 waterfall；正文入库仍带时间，气泡播放时隐藏主动消息的时间前缀。
+        const isViewingChat = typeof App !== 'undefined' && typeof App.isViewingContactChat === 'function'
+            ? App.isViewingContactChat(contact.id)
+            : STATE.currentContactId === contact.id;
+        if (isViewingChat && typeof UI.playWaterfall === 'function') {
+            await UI.playWaterfall(this.displayContent(message), contact.avatar, timestamp, contact.history.length - 1, contact.name);
+        } else if (isViewingChat) {
+            UI.renderChatHistory(contact);
+        }
+        // ★ 只同步新正文，不把 reroll 算作新一条主动消息或新的用户活动。
+        await this.onAssistantMessage(contact).catch(error => console.warn('[主动消息] 重生成快照同步失败:', error));
+        return true;
+    },
+
+    async clearReroll(contact, context) {
+        const rerollState = contact?.proactiveRerollState;
+        if (!rerollState || rerollState.messageId !== context.messageId || rerollState.revision !== context.revision) return false;
+        delete contact.proactiveRerollState;
+        await Storage.saveContacts();
+        // ★ 生成失败时原消息维持已删除状态，并把这份历史同步给 Worker，避免后台继续读到旧正文。
+        await this.onAssistantMessage(contact).catch(error => console.warn('[主动消息] 删除快照同步失败:', error));
+        return true;
+    },
+
+    async reroll(contact) {
+        const message = contact?.history?.at(-1);
+        if (!message?.proactiveSource || message.role !== 'assistant') return;
+        if (!this.rerollingContacts) this.rerollingContacts = new Set();
+        if (this.rerollingContacts.has(String(contact.id))) return;
+        const mode = this.executionMode();
+        // ★ 按主动消息当前模式请求；Worker 配置不完整时明确报错，不能悄悄改成前端直连。
+        if (mode !== 'frontend' && !this.workerConfigured()) throw new Error('请先配置当前主动消息模式对应的 Worker');
+        const revision = this.makeId('proactive_reroll');
+        const originalMessage = { ...message };
+        const context = { scope: 'proactive_reroll', messageId: message.messageId, revision,
+            originalContent: message.content, originalMessage };
+        const messages = this.buildRerollMessages(contact, message);
+        const settings = { ...this.getRequestSettings(contact), CONTACT_ID: contact.id,
+            ASYNC_BACKEND_CONTEXT: context, COUNT_AS_INTERACTION: false };
+        if (mode !== 'frontend') {
+            settings.ASYNC_BACKEND_ENABLED = true;
+            settings.ASYNC_BACKEND_URL = STATE.settings.ASYNC_BACKEND_URL;
+            settings.ASYNC_BACKEND_TOKEN = STATE.settings.ASYNC_BACKEND_TOKEN;
+            settings.ASYNC_BACKEND_TTL_HOURS = STATE.settings.ASYNC_BACKEND_TTL_HOURS;
+            settings.ASYNC_BACKEND_KEY_MODE = mode === 'server_secret' ? 'server_secret' : 'client_key';
+            settings.ASYNC_BACKEND_PROACTIVE_REROLL = {
+                objectName: `${this.installationId()}:${String(contact.id)}`,
+                messageId: message.messageId, revision, capsule: this.buildCapsule(contact)
+            };
+        }
+        this.rerollingContacts.add(String(contact.id));
+        // ★ 与普通聊天 reroll 一致：确认后立刻删除旧消息和旧气泡，新正文回来后再作为新回复播放。
+        contact.proactiveRerollState = { messageId: message.messageId, revision };
+        contact.history.pop();
+        if (typeof App !== 'undefined' && typeof App.discardAgentConfirmationsForMessages === 'function') {
+            App.discardAgentConfirmationsForMessages([message]);
+        }
+        if (STATE.currentContactId === contact.id && typeof UI.removeLatestAiBubbles === 'function') {
+            UI.removeLatestAiBubbles();
+        }
+        UI.setLoading(true, contact.id);
+        try {
+            await Storage.saveContacts();
+            const rawText = await API.chat(messages, settings);
+            await this.applyRerollResult(contact, context, rawText, API.lastAsyncBackendResult?.jobId || null);
+        } catch (error) {
+            if (error.isAsyncBackendPending) {
+                App.scheduleAsyncBackendResumeCheck(1200);
+                return;
+            }
+            await this.clearReroll(contact, context);
+            throw error;
+        } finally {
+            this.rerollingContacts.delete(String(contact.id));
+            if (STATE.typingContactId === contact.id) UI.setLoading(false, contact.id);
+        }
+    },    // ★★★★★ 主动消息独立重生成 END ★★★★★
+
     async insertMessage(contact, source) {
         if (!contact || !source?.messageId || !String(source.content || '').trim()) return false;
         if ((contact.history || []).some(message => String(message?.messageId) === String(source.messageId))) return false;

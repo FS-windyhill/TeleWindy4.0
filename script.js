@@ -1,4 +1,4 @@
-﻿// =========================================
+// =========================================
 // 项目分区总览（部分独立服务已拆到 js/ 目录）
 //
 // 3.5. WORLD SENSE (世界感知)
@@ -602,13 +602,14 @@
 //     - switchMainTab(tab): 切换底部导航栏的主视图（聊天、探索、朋友圈）
 //     - renderMomentsUI() / openMomentProfile() / showMomentsFeed(): 渲染公开动态流与用户/角色个人主页
 //     - maybeGenerateCharacterMoment(): 按可见名单与用户概率设置生成角色动态
+//     - rerollCharacterMoment() / applyCharacterMomentReroll(): 原帖正文重生成与后台原位回填，保留互动和时间
 //     - toggleMomentLike() / openMomentCommentComposer(): 处理动态点赞和用户主动评论
 //     - loadMoreMoments(): 加载更多朋友圈动态，增加可见数量并重新渲染
 //     - openMomentsSettings(): 打开朋友圈设置弹窗，填充API预设下拉框和允许评论的联系人复选框列表
 //     - saveMomentsSettings(): 保存朋友圈设置（API预设索引、允许评论的角色列表）到STATE和存储
 //     - publishMoment(): 异步发布新的朋友圈动态，处理文本和图片，并触发AI评论
 //     - triggerAIComments(targetMoment): 异步为新建的朋友圈动态触发所有允许角色的AI评论生成
-//     - handleMomentAction(action): 处理朋友圈动态的右键菜单动作（复制、编辑、删除）
+//     - handleMomentAction(action): 处理朋友圈动态的右键菜单动作（复制、编辑、角色动态重生成、删除）
 //     - saveAndRenderMoments(): 辅助函数，保存朋友圈数据到存储并刷新朋友圈列表视图
 //     - handleCommentAction(action): 处理朋友圈评论的右键菜单动作（复制、编辑、重新生成、删除）
 //     - openReplyModal(): 打开回复评论的输入弹窗
@@ -1293,6 +1294,12 @@ const API = {
             && ProactiveMessages.settings().characterIds.map(String).includes(String(settings.CONTACT_ID))) {
             payload.proactive_object_name = `${ProactiveMessages.installationId()}:${String(settings.CONTACT_ID)}`;
         }
+        // ★ 主动 reroll 复用 job 轮询与恢复，但创建入口交给角色 DO 解析当前模式凭据。
+        const proactiveReroll = settings.ASYNC_BACKEND_PROACTIVE_REROLL;
+        if (proactiveReroll) {
+            delete payload.proactive_object_name; // 替换旧消息，不能追加成一条普通后台回复。
+            payload.proactive_reroll = proactiveReroll;
+        }
         const payloadText = JSON.stringify(payload);
         const payloadBytes = new Blob([payloadText]).size;
         console.info('[AsyncBackend] job payload', {
@@ -1321,7 +1328,9 @@ const API = {
 
         let response;
         try {
-            response = await fetch(`${backendUrl}/jobs`, {
+            response = await fetch(proactiveReroll
+                ? `${backendUrl}/proactive/${encodeURIComponent(proactiveReroll.objectName)}/reroll`
+                : `${backendUrl}/jobs`, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Bearer ${settings.ASYNC_BACKEND_TOKEN}`,
@@ -4589,6 +4598,28 @@ const App = {
                         continue;
                     }
 
+                    // ★ 主动 reroll 只更新指定消息，不能走普通 job 的追加回复分支。
+                    if (pending.context?.scope === 'proactive_reroll') {
+                        const contact = STATE.contacts.find(item => item.id === pending.contactId);
+                        try {
+                            if (job.status === 'done') {
+                                await ProactiveMessages.applyRerollResult(contact, pending.context, job.result, pending.jobId);
+                            } else if (job.status === 'failed') {
+                                await ProactiveMessages.clearReroll(contact, pending.context);
+                                API.markPendingJobFailed(pending.jobId, job.error || '主动消息重生成失败');
+                                continue;
+                            }
+                        } catch (error) {
+                            await ProactiveMessages.clearReroll(contact, pending.context);
+                            console.warn('[主动消息] 后台重生成回填失败:', error);
+                            API.markPendingJobFailed(pending.jobId, error.message);
+                            continue;
+                        }
+                        await API.deleteChatJob(pending.backendUrl, pending.jobId, pending.token);
+                        API.forgetPendingJob(pending.jobId);
+                        continue;
+                    }
+
                     // ★★★★★ 朋友圈后台任务恢复 START ★★★★★
                     // 聊天 pending job 用 contactId 回填；朋友圈没有 contactId，
                     // 所以这里改用创建 job 时保存的 context，知道结果该写回哪条动态/评论。
@@ -4599,7 +4630,7 @@ const App = {
                             API.forgetPendingJob(pending.jobId);
                             if (applied) await Storage.saveMoments();
                             this.renderMomentsUI();
-                            if (applied && !['regenerate_comment', 'generate_character_moment'].includes(pending.context.type)) {
+                            if (applied && !['regenerate_comment', 'generate_character_moment', 'regenerate_character_moment'].includes(pending.context.type)) {
                                 this.showMomentReplyNotice(pending.context.charId);
                             }
                             console.info('[AsyncBackend] resume saved moment result', {
@@ -4781,6 +4812,13 @@ const App = {
             contactId: pending.contactId || null
         });
 
+        if (pending.context?.scope === 'proactive_reroll') {
+            await ProactiveMessages.clearReroll(STATE.contacts.find(item => item.id === pending.contactId), pending.context);
+            API.markPendingJobFailed(pending.jobId, message);
+            this.renderAsyncBackendPendingJobs();
+            return;
+        }
+
         if (pending.context && pending.context.scope === 'moments') {
             await this.markAsyncMomentJobFailed(pending.context);
             API.markPendingJobFailed(pending.jobId, message);
@@ -4836,6 +4874,15 @@ const App = {
     // 朋友圈没有聊天页的 contactId + history，所以必须在 pending context 里记录回填位置。
     // Worker 只负责生成文本；回到前端后，这里根据 context 写回对应动态或评论。
     async applyAsyncMomentJob(context, job, jobId) {
+        // ★ 动态正文 roll 回填到原帖，不能复用自动发帖的新增动态分支。
+        if (context?.type === 'regenerate_character_moment') {
+            try { return await this.applyCharacterMomentReroll(context, job.result, jobId); }
+            catch (error) {
+                await this.markAsyncMomentJobFailed(context);
+                console.warn('[朋友圈] 动态重生成回填失败:', error);
+                return false;
+            }
+        }
         // ★ 角色发动态没有预先存在的 momentId，要先解析 JSON 并创建动态，再走其它评论回填分支。
         if (context?.type === 'generate_character_moment') {
             try {
@@ -4887,6 +4934,13 @@ const App = {
     },
 
     async markAsyncMomentJobFailed(context) {
+        if (context?.type === 'regenerate_character_moment') {
+            const moment = STATE.moments.find(item => item.id === context.momentId);
+            if (moment?.rerollRevision !== context.revision) return false;
+            delete moment.rerollRevision; // 原正文始终保留，只清理属于本次任务的状态。
+            await Storage.saveMoments();
+            return true;
+        }
         if (!context || context.type !== 'regenerate_comment') return false;
         const moment = STATE.moments.find(item => item.id === context.momentId);
         const comment = moment?.comments?.find(item => item.id === context.commentId);
@@ -10306,8 +10360,34 @@ const App = {
     async handleSend(isReroll = false) {
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!contact) return;
-
-
+        // ★ 主动消息沿用自己的前端/Worker 请求方式，但删除旧气泡和 waterfall 与普通聊天保持一致。
+        if (isReroll && contact.history?.at(-1)?.proactiveSource) {
+            if (STATE.typingContactId === contact.id || !confirm('重新生成这条主动消息？')) return;
+            if (STATE.chatMode === 'jump') {
+                STATE.chatMode = 'normal';
+                STATE.visibleMsgCount = Math.max(CONFIG.CHAT_PAGE_SIZE, STATE.visibleMsgCount || 15);
+                UI.renderChatHistory(contact);
+            }
+            if (typeof UI.touchContactPresence === 'function') UI.touchContactPresence(contact);
+            try {
+                await ProactiveMessages.reroll(contact);
+            } catch (error) {
+                console.warn('[主动消息] 重生成失败:', error);
+                const isViewingChat = typeof this.isViewingContactChat === 'function'
+                    ? this.isViewingContactChat(contact.id)
+                    : STATE.currentContactId === contact.id;
+                if (isViewingChat) {
+                    const errorIndex = contact.history.length > 0 ? contact.history.length - 1 : 0;
+                    UI.appendMessageBubble(`(发送失败: ${error.message || '主动消息重生成失败'})`, 'ai', contact.avatar, null, errorIndex);
+                }
+            } finally {
+                const isViewingChat = typeof this.isViewingContactChat === 'function'
+                    ? this.isViewingContactChat(contact.id)
+                    : STATE.currentContactId === contact.id;
+                if (isViewingChat && typeof UI.updateRerollState === 'function') UI.updateRerollState(contact);
+            }
+            return;
+        }
         // ============================================================
         // 1. 准备 API 配置
         // ============================================================
@@ -10493,6 +10573,8 @@ const App = {
             const lastUserMsg = [...contact.history].reverse().find(m => m.role === 'user');
             if (!lastUserMsg) return;
             agentUserMessage = lastUserMsg;
+            // ★ 重 roll 图片时同样绑定原用户消息 ID，主动消息插入历史后也不会把描述回填到错误位置。
+            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = lastUserMsg.messageId || null;
             // 朋友圈按“用户消息轮次”消费；重 roll 复用同一个 turnId，不再额外扣次数。
             if (!lastUserMsg.momentInjectionTurnId) {
                 lastUserMsg.momentInjectionTurnId = `moment_turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -10689,7 +10771,9 @@ const App = {
             .map(record => record.msg)
             .map(msg => HistoryVisibility.buildVisibleMessage(msg, {
                 preserveTimestamp: true,
-                includeImageDescription: true
+                includeImageDescription: true,
+                // ★ 只给本轮图片保留占位，等待后台识图时不能把当前 user 清洗掉。
+                preserveImagePlaceholder: msg === agentUserMessage && !!currentImageBase64
             }))
             .filter(m => m !== null);
         historyWindow.log.sentCount = recentHistory.length;
@@ -10703,11 +10787,7 @@ const App = {
             currentUserMessage = historyForPayload.pop();
         }
 
-        // ★ 纯图片多模态消息没有 image_description，历史清洗会自然得到空文本。
-        // 这里仅给本轮请求补一个很短的文字块，不写回聊天记录，也不会多渲染一个用户气泡。
-        if (!currentUserMessage && currentImageBase64 && requestSettings.IMAGE_API_MODE === 'multimodal') {
-            currentUserMessage = { role: 'user', content: '请查看这张图片。' };
-        }
+        // ★ 纯图片的占位与时间已由统一清洗保留，隐藏图片不在这里额外补回。
 
 
         // 构造最终 Payload
@@ -13404,28 +13484,8 @@ const App = {
     `;
 
             try {
-                // 默认使用全局配置
-                let targetApiConfig = {
-                    API_URL: STATE.settings.API_URL,
-                    API_KEY: STATE.settings.API_KEY,
-                    MODEL: STATE.settings.MODEL,
-                    MAX_TOKENS: STATE.settings.MAX_TOKENS || 200, 
-                    TEMPERATURE: 1.1 
-                };
-
-                // 检查是否使用了朋友圈专属预设
-                const presetIndex = STATE.momentsSettings.apiPresetIndex;
-                if (typeof presetIndex === 'number' && presetIndex >= 0) {
-                    const preset = STATE.settings.API_PRESETS[presetIndex];
-                    if (preset) {
-                        console.log(`[朋友圈] 角色 ${char.name} 使用预设: ${preset.name}`);
-                        targetApiConfig.API_URL = preset.url;
-                        targetApiConfig.API_KEY = preset.key;
-                        targetApiConfig.MODEL = preset.model;
-                        if(preset.max_tokens) targetApiConfig.MAX_TOKENS = parseInt(preset.max_tokens);
-                        if(preset.temperature) targetApiConfig.TEMPERATURE = parseFloat(preset.temperature);
-                    }
-                }
+                // ★ 朋友圈评论与发帖共用同一份 API 配置，完整继承全局或所选预设。
+                let targetApiConfig = this.getMomentsApiConfig();
 
                 // 2.2 发送请求
                 const messages = [{ role: 'user', content: promptText }];
@@ -13478,13 +13538,15 @@ const App = {
     },
 
     // ★★★★★ 角色自动动态 START ★★★★★
-    getMomentsApiConfig(maxTokens = 1200) {
+    getMomentsApiConfig() {
+        const globalMaxTokens = Number(STATE.settings.MAX_TOKENS);
         let config = {
             API_URL: STATE.settings.API_URL,
             API_KEY: STATE.settings.API_KEY,
             MODEL: STATE.settings.MODEL,
-            MAX_TOKENS: maxTokens,
-            TEMPERATURE: 1.1
+            // ★ 朋友圈没有单独的输出上限：未选预设时跟随全局设置，选中预设后完整采用预设值。
+            MAX_TOKENS: Number.isFinite(globalMaxTokens) && globalMaxTokens > 0 ? globalMaxTokens : 32700,
+            TEMPERATURE: STATE.settings.TEMPERATURE !== undefined ? STATE.settings.TEMPERATURE : 1.1
         };
         const presetIndex = STATE.momentsSettings?.apiPresetIndex;
         if (typeof presetIndex === 'number' && presetIndex >= 0) {
@@ -13493,8 +13555,9 @@ const App = {
                 config.API_URL = preset.url;
                 config.API_KEY = preset.key;
                 config.MODEL = preset.model;
-                if (preset.max_tokens) config.MAX_TOKENS = Math.min(parseInt(preset.max_tokens, 10), maxTokens);
-                if (preset.temperature) config.TEMPERATURE = parseFloat(preset.temperature);
+                const presetMaxTokens = Number(preset.max_tokens);
+                if (Number.isFinite(presetMaxTokens) && presetMaxTokens > 0) config.MAX_TOKENS = presetMaxTokens;
+                if (preset.temperature !== undefined && preset.temperature !== '') config.TEMPERATURE = Number(preset.temperature);
             }
         }
         return config;
@@ -13625,6 +13688,80 @@ const App = {
         return true;
     },
 
+    // ★★★★★ 角色朋友圈正文重生成 START ★★★★★
+    buildCharacterMomentRerollPrompt(moment, contact) {
+        const eventAt = Number(moment.timestamp) || Date.now();
+        // ★ 旧帖按当时已存在的聊天和动态构建参考；旧正文不进入最近动态，避免被当成必须避开的已发布新帖。
+        const historyContact = { ...contact, history: (contact.history || []).filter(message => {
+            const time = Number(message.eventAt) || ProactiveMessages.parseChatTime(message.timestamp);
+            return !time || time <= eventAt;
+        }) };
+        const history = HistoryVisibility.collectVisibleMessages(historyContact, {
+            limit: 5, preserveTimestamp: true, includeImageDescription: true
+        });
+        const historyText = HistoryVisibility.formatForRoleLines(contact, history, { assistantName: '你', userName: '用户' }) || '无';
+        const recentMoments = STATE.moments.filter(item => item.id !== moment.id
+            && String(item.authorId) === String(contact.id) && Number(item.timestamp) <= eventAt)
+            .sort((a, b) => Number(b.timestamp) - Number(a.timestamp)).slice(0, 3)
+            .map(item => `- ${formatTimeForMoments(item.timestamp)}：${item.text}`).join('\n') || '无';
+        const schedule = CharacterSchedule.buildChatPrompt(contact.id, new Date(eventAt));
+        const worldInfo = WorldInfoEngine.scan(historyText, [], contact.id, contact.name);
+        return `【系统设定】\n${contact.prompt || ''}\n【角色日程】\n${schedule || '无'}\n【世界知识/环境信息】\n${worldInfo || '无'}\n【当时聊天】\n${historyText}\n【此前动态】\n${recentMoments}\n【原发帖时间】\n${formatTimeForMoments(eventAt)}\n【任务】\n你是 ${contact.name}。重新写一条自然、独立的朋友圈文字动态，保持人设和当时情境。可写日常、心情或原创表达，不要复述聊天原句，不要重复此前动态，不要提到 AI 或重生成，不要写动作括号或解释。正文建议 10～180 字。只输出严格 JSON：{"text":"动态正文"}。发帖时间由程序保留。`;
+    },
+
+    async applyCharacterMomentReroll(context, rawText, jobId = null) {
+        const moment = STATE.moments.find(item => item.id === context.momentId);
+        // ★ 编辑、删除或下一次 roll 后，旧后台结果不能覆盖用户的新决定。
+        if (!moment || moment.rerollRevision !== context.revision || String(moment.authorId) !== String(context.charId)) return false;
+        if (moment.text !== context.originalText) {
+            await this.markAsyncMomentJobFailed(context); // 编辑优先，只清掉本次状态，不回滚编辑后的正文。
+            return false;
+        }
+        const data = this.extractMomentJson(rawText);
+        const text = typeof data?.text === 'string' ? data.text.trim().slice(0, 1200) : '';
+        if (!text) throw new Error('朋友圈重生成未返回正文，已保留原动态');
+        // ★ 原帖原位更新：ID、时间、点赞、评论和聊天注入剩余次数都保持原值，不重复增加发帖次数。
+        moment.text = text;
+        moment.updatedAt = Date.now();
+        if (jobId) moment.rerollJobId = jobId;
+        delete moment.rerollRevision;
+        await Storage.saveMoments();
+        this.renderMomentsUI();
+        return true;
+    },
+
+    async rerollCharacterMoment(momentId) {
+        const moment = STATE.moments.find(item => item.id === momentId);
+        if (!moment || String(moment.authorId || 'user') === 'user') return;
+        const contact = STATE.contacts.find(item => String(item.id) === String(moment.authorId));
+        if (!contact) { Toast.show('该动态的角色已不存在'); return; }
+        if (!this._rerollingMomentIds) this._rerollingMomentIds = new Set();
+        if (this._rerollingMomentIds.has(momentId)) return;
+        const context = this.buildMomentsAsyncContext('regenerate_character_moment', {
+            momentId, charId: contact.id, originalText: moment.text, revision: ProactiveMessages.makeId('moment_reroll')
+        });
+        const prompt = this.buildCharacterMomentRerollPrompt(moment, contact);
+        let config = this.getMomentsApiConfig();
+        config.COUNT_AS_INTERACTION = false;
+        config = this.applyAsyncBackendToMomentConfig(config, context);
+        this._rerollingMomentIds.add(momentId);
+        moment.rerollRevision = context.revision;
+        try {
+            await Storage.saveMoments();
+            Toast.show('正在重新生成朋友圈…');
+            const rawText = await API.chat([{ role: 'user', content: prompt }], config);
+            await this.applyCharacterMomentReroll(context, rawText, API.lastAsyncBackendResult?.jobId || null);
+        } catch (error) {
+            if (error.isAsyncBackendPending) { this.scheduleAsyncBackendResumeCheck(1200); return; }
+            await this.markAsyncMomentJobFailed(context);
+            console.warn('[朋友圈] 动态重生成失败:', error);
+            alert(error.message || '朋友圈重生成失败，已保留原动态');
+        } finally {
+            this._rerollingMomentIds.delete(momentId);
+        }
+    },
+    // ★★★★★ 角色朋友圈正文重生成 END ★★★★★
+
     async maybeGenerateCharacterMoment(reason = 'startup') {
         // ★ 一次页面生命周期只掷一次；pageshow 和延时启动同时触发也不会重复请求 API。
         if (this._autoMomentGenerationChecked || this._autoMomentGenerationRunning) return false;
@@ -13708,7 +13845,7 @@ const App = {
             const endText = new Date(now).toLocaleString('zh-CN', { hour12: false });
             const promptText = `【系统设定】\n${contact.prompt || ''}\n${characterScheduleSection}${worldInfoSection}\n【近期聊天】\n${historyText}\n\n【你最近的三条动态】\n${recentMoments}\n\n【本次内容方向】\n${direction}\n\n【可用发帖时间】\n${startText} 至 ${endText}\n\n【任务】\n你是 ${contact.name}。像真人使用朋友圈一样，发布一条自然、独立的文字动态。可以联系近期聊天，也可以写自己的生活和心情，也可以分享你喜欢的诗句、歌词或书摘。不要提到你是 AI，不要写动作括号，不要解释，不要重复最近动态，不要凭空创造会改变人物关系的重大事件。正文建议 10～180 字。\n只输出严格 JSON：{"text":"动态正文","timestamp":"带时区的 ISO 8601 时间"}`;
 
-            let apiConfig = this.getMomentsApiConfig(1200);
+            let apiConfig = this.getMomentsApiConfig();
             // ★ 角色自动发朋友圈不是用户互动；朋友圈里的评论、回复仍沿用默认计数。
             apiConfig.COUNT_AS_INTERACTION = false;
             apiConfig = this.applyAsyncBackendToMomentConfig(
@@ -13801,7 +13938,7 @@ const App = {
         const promptText = `【系统设定】\n${contact.prompt || ''}\n${worldInfoSection}\n【你的动态】\n${moment.text}\n\n【评论区】\n${threadText}\n\n【任务】\n用户刚刚评论了你的动态。请以 ${contact.name} 的身份自然回复用户，像朋友圈评论一样简短。不要输出动作描写、括号或解释，直接输出回复正文。`;
 
         try {
-            let apiConfig = this.getMomentsApiConfig(700);
+            let apiConfig = this.getMomentsApiConfig();
             apiConfig = this.applyAsyncBackendToMomentConfig(
                 apiConfig,
                 this.buildMomentsAsyncContext('reply_to_character_moment', {
@@ -13858,6 +13995,14 @@ const App = {
         // 2. 隐藏弹出的操作菜单
         const actionModal = document.getElementById('modal-moment-actions');
         if (actionModal) actionModal.classList.add('hidden');
+
+        // ★ 只有角色动态提供正文重生成；保留原帖，生成失败也不会丢掉评论。
+        if (action === 'reroll') {
+            if (String(momentData.authorId || 'user') !== 'user' && confirm('重新生成这条朋友圈？点赞和评论将保留。')) {
+                this.rerollCharacterMoment(momentId);
+            }
+            return;
+        }
 
         // 3. 执行对应的动作
         if (action === 'copy') {
@@ -14049,24 +14194,8 @@ const App = {
             this.saveAndRenderMoments();
 
             try {
-                let targetApiConfig = {
-                    API_URL: STATE.settings.API_URL,
-                    API_KEY: STATE.settings.API_KEY,
-                    MODEL: STATE.settings.MODEL,
-                    MAX_TOKENS: 5000, 
-                    TEMPERATURE: 1.1
-                };
-                const presetIndex = STATE.momentsSettings?.apiPresetIndex;
-                if (typeof presetIndex === 'number' && presetIndex >= 0) {
-                    const preset = STATE.settings.API_PRESETS[presetIndex];
-                    if (preset) {
-                        targetApiConfig.API_URL = preset.url;
-                        targetApiConfig.API_KEY = preset.key;
-                        targetApiConfig.MODEL = preset.model;
-                        if(preset.max_tokens) targetApiConfig.MAX_TOKENS = parseInt(preset.max_tokens);
-                        if(preset.temperature) targetApiConfig.TEMPERATURE = parseFloat(preset.temperature);
-                    }
-                }
+                // ★ 评论重生成也跟随朋友圈当前预设，不再使用单独的 5000 token。
+                let targetApiConfig = this.getMomentsApiConfig();
                 
                 // 【补上这行请求代码】
                 targetApiConfig = this.applyAsyncBackendToMomentConfig(
@@ -14227,25 +14356,8 @@ const App = {
     `;
 
         try {
-            let targetApiConfig = {
-                API_URL: STATE.settings.API_URL,
-                API_KEY: STATE.settings.API_KEY,
-                MODEL: STATE.settings.MODEL,
-                MAX_TOKENS: 2000, 
-                TEMPERATURE: 1.1
-            };
-
-            const presetIndex = STATE.momentsSettings?.apiPresetIndex;
-            if (typeof presetIndex === 'number' && presetIndex >= 0) {
-                const preset = STATE.settings.API_PRESETS[presetIndex];
-                if (preset) {
-                    targetApiConfig.API_URL = preset.url;
-                    targetApiConfig.API_KEY = preset.key;
-                    targetApiConfig.MODEL = preset.model;
-                    if(preset.max_tokens) targetApiConfig.MAX_TOKENS = parseInt(preset.max_tokens);
-                    if(preset.temperature) targetApiConfig.TEMPERATURE = parseFloat(preset.temperature);
-                }
-            }
+            // ★ 评论区追问回复继续使用朋友圈当前预设，不再另设 2000 token。
+            let targetApiConfig = this.getMomentsApiConfig();
 
             targetApiConfig = this.applyAsyncBackendToMomentConfig(
                 targetApiConfig,
@@ -16404,6 +16516,10 @@ const App = {
                     // ★ 用户对自己和角色动态都使用同一套编辑/复制/删除面板。
                     document.getElementById('btn-m-action-edit')?.classList.remove('hidden');
                     document.getElementById('btn-m-action-delete')?.classList.remove('hidden');
+                    // ★ 用户自己的动态不能让角色代写；角色动态才显示重新生成入口。
+                    const selectedMoment = STATE.moments.find(item => item.id === momentId);
+                    document.getElementById('btn-m-action-reroll')?.classList.toggle('hidden',
+                        !selectedMoment || String(selectedMoment.authorId || 'user') === 'user');
                     
                     // 3. 弹出操作菜单
                     const actionModal = document.getElementById('modal-moment-actions');
@@ -16433,6 +16549,9 @@ const App = {
         // ================= 操作菜单的按钮点击事件 =================
         const actionModal = document.getElementById('modal-moment-actions');
         
+        document.getElementById('btn-m-action-reroll')?.addEventListener('click', () => {
+            this.handleMomentAction('reroll');
+        });
         document.getElementById('btn-m-action-copy')?.addEventListener('click', () => {
             if (typeof this.handleMomentAction === 'function') this.handleMomentAction('copy');
         });

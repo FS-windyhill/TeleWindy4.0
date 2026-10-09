@@ -1,6 +1,6 @@
 const DEFAULT_JOB_TTL_HOURS = 6;
 // ★ 前端只用此版本识别已部署的 Worker；发布新版 worker.js 时同步递增。
-const WORKER_VERSION = "2026.09.27.1";
+const WORKER_VERSION = "2026.10.09.1";
 const WORKER_PROTOCOL_VERSION = 1;
 const MIN_JOB_TTL_HOURS = 0.25;
 const MAX_JOB_TTL_HOURS = 24;
@@ -229,6 +229,71 @@ export class ProactiveCharacterObject {
       await this.state.storage.put("outbox", nextOutbox);
       return Response.json({ ok: true });
     }
+
+    // ★★★★★ 主动消息重生成 job START ★★★★★
+    if (request.method === "POST" && action === "reroll") {
+      const payload = await request.json();
+      const reroll = payload.proactive_reroll || {};
+      const messageId = String(reroll.messageId || "").slice(0, 120);
+      const revision = String(reroll.revision || "").slice(0, 120);
+      const objectName = decodeURIComponent(url.pathname.split("/").filter(Boolean).at(-2) || "");
+      if (!messageId || !revision || reroll.objectName !== objectName) {
+        return Response.json({ error: "proactive_reroll_target_invalid" }, { status: 400 });
+      }
+      // ★ 本次配置只决定模型与凭据，不同步 capsule，不修改 Alarm、冷却或每日计数。
+      const rawCapsule = reroll.capsule || {};
+      const capsule = sanitizeProactiveCapsule(rawCapsule);
+      let apiKey = "";
+      if (capsule.credentialMode === "stored_client_key") {
+        apiKey = String(rawCapsule.apiKey || "");
+        if (!apiKey) {
+          const credential = await this.state.storage.get("credential");
+          if (credential?.apiUrl !== capsule.apiUrl) {
+            return Response.json({ error: "stored_credential_unavailable" }, { status: 400 });
+          }
+          try { apiKey = await decryptProactiveCredential(credential, this.env); }
+          catch (error) { return Response.json({ error: "stored_credential_unavailable" }, { status: 400 }); }
+        }
+      }
+      const versions = await this.state.storage.get("rerollVersions") || {};
+      versions[messageId] = revision;
+      await this.state.storage.put("rerollVersions", Object.fromEntries(Object.entries(versions).slice(-100)));
+      return await createJob(new Request(request.url, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, api_url: capsule.apiUrl, api_key: apiKey,
+          auth_mode: capsule.credentialMode === "stored_client_key" ? "client_key" : "server_secret",
+          proactive_object_name: "" })
+      }), this.env, { objectName, messageId, revision });
+    }
+
+    if (request.method === "POST" && action === "replace-message") {
+      // ★ 只由 Queue 经 DO binding 调用；外部路由不暴露回填动作。
+      const body = await request.json();
+      const text = stripProactiveRerollText(body.content);
+      if (!text) return Response.json({ error: "proactive_reroll_empty" }, { status: 422 });
+      // ★ 同一事务内校验版本并替换三个存储层，防止同步/重复回填只更新一半。
+      const applied = await this.state.storage.transaction(async transaction => {
+        const versions = await transaction.get("rerollVersions") || {};
+        if (versions[body.messageId] !== body.revision) return false;
+        const capsule = await transaction.get("capsule");
+        if (capsule) {
+          capsule.messages = (capsule.messages || []).map(message => message.messageId === body.messageId
+            ? { ...message, content: text } : message);
+          // ★ 生成前已发出的旧快照不能在回填之后把旧正文重新覆盖回来。
+          capsule.contextRevision = Math.max(Number(capsule.contextRevision || 0), Date.now());
+          await transaction.put("capsule", capsule);
+        }
+        const pending = await transaction.get("pendingMessages") || [];
+        await transaction.put("pendingMessages", pending.map(message => message.messageId === body.messageId
+          ? { ...message, content: text } : message));
+        const outbox = await transaction.get("outbox") || [];
+        await transaction.put("outbox", outbox.map(message => message.messageId === body.messageId
+          ? { ...message, content: text, acknowledged: true, acknowledgedAt: Date.now() } : message));
+        return true;
+      });
+      return Response.json({ ok: true, applied });
+    }
+    // ★★★★★ 主动消息重生成 job END ★★★★★
 
     if (request.method === "POST" && action === "run") {
       const rawCapsule = await request.json().catch(() => null);
@@ -594,7 +659,7 @@ export default {
       }
 
       // ★ 新版优先复用 CHAT_JOB_OBJECT；旧 binding 只在读取/确认消息时参与，帮助已部署用户排空旧 outbox。
-      const proactiveMatch = url.pathname.match(/^\/proactive\/([^/]+)\/(sync|activity|status|request-log|messages|run|ack)$/i);
+      const proactiveMatch = url.pathname.match(/^\/proactive\/([^/]+)\/(sync|activity|status|request-log|messages|run|reroll|ack)$/i);
       if (proactiveMatch && (env.CHAT_JOB_OBJECT || env.PROACTIVE_CHARACTER_OBJECT)) {
         const objectName = decodeURIComponent(proactiveMatch[1]);
         const action = proactiveMatch[2].toLowerCase();
@@ -648,7 +713,7 @@ export default {
   }
 };
 
-async function createJob(request, env) {
+async function createJob(request, env, proactiveReplacement = null) {
   const contentLength = Number(request.headers.get("content-length") || 0);
   if (contentLength > MAX_BODY_BYTES) {
     console.warn("job_request_too_large", {
@@ -749,6 +814,8 @@ async function createJob(request, env) {
 
   const jobPayload = {
     upstream: upstream.provider,
+    // ★ 只有角色 DO 创建的 reroll job 才能携带替换定位，普通外部 job 无权指定回填目标。
+    proactiveReplacement,
     // ★ 后台普通回复完成后可直接补入同一安装实例的主动角色对象，页面关闭也能衔接上下文。
     proactiveObjectName: String(payload.proactive_object_name || "").slice(0, 240),
     messages,
@@ -759,7 +826,9 @@ async function createJob(request, env) {
     vision,
     agent,
     dynamicContextInsertMode: sanitizeDynamicContextInsertMode(payload.dynamic_context_insert_mode),
-    requestUserMessageIndex: clampInteger(payload.request_user_message_index, -1, 100000, -1),
+    // ★ sanitizeMessages 只保留末尾 80 条，目标索引必须随裁剪平移。
+    requestUserMessageIndex: Number.isInteger(payload.request_user_message_index) && payload.request_user_message_index >= 0
+      ? payload.request_user_message_index - Math.max(0, payload.messages.length - messages.length) : -1,
     ttlSeconds
   };
 
@@ -907,7 +976,7 @@ async function runJob(jobId, body, env) {
     let messagesForChat = body.messages;
     if (body.vision) {
       imageDescription = await analyzeVisionImage(body.vision, env, jobId, body.ttlSeconds);
-      messagesForChat = injectImageDescription(body.messages, imageDescription);
+      messagesForChat = injectImageDescription(body.messages, imageDescription, body.requestUserMessageIndex);
     }
 
     if (body.agent?.todoManager) {
@@ -1041,6 +1110,19 @@ async function runJob(jobId, body, env) {
       hasUsage: !!data.usage
     });
 
+    if (body.proactiveReplacement) {
+      // ★ 空正文按生成失败处理，旧消息保留；回填只替换指定 ID，不计作新的主动发送。
+      if (!stripProactiveRerollText(content)) throw new Error("proactive_reroll_empty");
+      const namespace = env.CHAT_JOB_OBJECT || env.PROACTIVE_CHARACTER_OBJECT;
+      if (!namespace) throw new Error("proactive_binding_missing");
+      const replacement = body.proactiveReplacement;
+      const objectName = env.CHAT_JOB_OBJECT ? `proactive:${replacement.objectName}` : replacement.objectName;
+      const result = await namespace.get(namespace.idFromName(objectName)).fetch("https://proactive.local/proactive/replace-message", {
+        method: "POST", body: JSON.stringify({ ...replacement, content })
+      });
+      if (!result.ok) throw new Error(`proactive_replace_failed_${result.status}`);
+    }
+
     if (body.proactiveObjectName) {
       try {
         const namespace = env.CHAT_JOB_OBJECT || env.PROACTIVE_CHARACTER_OBJECT;
@@ -1155,14 +1237,21 @@ async function analyzeVisionImage(vision, env, jobId, ttlSeconds) {
   }
 }
 
-function injectImageDescription(messages, description) {
+// ★ 与前端独立 roll 使用同一正文规则，不把模型思考或自带时间戳写入原消息。
+function stripProactiveRerollText(content) {
+  return String(content || "")
+    .replace(/<(?:think|thinking|thought)[^>]*>[\s\S]*?(?:<\/(?:think|thinking|thought)>|$)/gi, "").trim()
+    .replace(/^\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\]\s*/, "").trim();
+}
+
+function injectImageDescription(messages, description, userMessageIndex) {
   const nextMessages = messages.map((message) => ({ ...message }));
-  for (let i = nextMessages.length - 1; i >= 0; i--) {
-    if (nextMessages[i].role === "user") {
-      nextMessages[i].content = `${nextMessages[i].content || ""}\n\n[System Info: 对方发送了一张图片，图片内容描述: ${description}]`;
-      break;
-    }
-  }
+  // ★ 描述只能写入前端指定的本轮图片消息，不能倒查并污染上一轮 user。
+  // 老请求未携带索引时，只兼容末尾本身就是 user 的情形。
+  const index = Number.isInteger(userMessageIndex) && userMessageIndex >= 0
+    ? userMessageIndex : nextMessages.length - 1;
+  if (nextMessages[index]?.role !== "user") throw new Error("vision_user_message_missing");
+  nextMessages[index].content = `${nextMessages[index].content || ""}\n\n[System Info: 对方发送了一张图片，图片内容描述: ${description}]`;
   return nextMessages;
 }
 

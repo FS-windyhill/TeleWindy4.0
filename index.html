@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
@@ -2665,6 +2665,8 @@
             <div class="action-sheet glass-panel">
                 <button id="btn-m-action-copy" class="momment-btn">复制内容</button>
                 <button id="btn-m-action-edit" class="momment-btn">编辑朋友圈</button>
+                <!-- ★ 角色动态支持正文重生成，用户动态打开菜单时隐藏此入口。 -->
+                <button id="btn-m-action-reroll" class="momment-btn hidden">重新生成</button>
                 <button id="btn-m-action-delete" class="momment-btn danger">删除朋友圈</button>
                 <div class="action-divider"></div>
                 <button id="btn-m-action-cancel" class="momment-btn cancel">取消</button>
@@ -2961,9 +2963,9 @@
     <script src="./js/agent-heart-note-manager.js"></script>
     <script src="./js/pomodoro.js"></script>
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
-    <script src="./js/proactive-messages.js?v=20260927-proactive-relative-wake-1"></script>
+    <script src="./js/proactive-messages.js?v=20261009-proactive-reroll-waterfall-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20260927-worker-deploy-1"></script>
+    <script src="./script.js?v=20261009-moments-preset-tokens-1"></script>
 </body>
 </html>
 

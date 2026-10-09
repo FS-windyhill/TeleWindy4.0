@@ -85,9 +85,6 @@ const HistoryVisibility = {
             .map(part => part.trim());
 
         let content = keptParagraphs.join('\n\n');
-        if (preserveTimestamp && msg.role === 'user' && content) {
-            content = normalized.timestampPart + content;
-        }
 
         if (includeImageDescription && msg.image_description) {
             // ★ 图片气泡的索引等于文本气泡数量，和 render/delete/隐藏逻辑保持一致。
@@ -98,6 +95,15 @@ const HistoryVisibility = {
             }
         }
 
+        // ★ 本轮尚未识图的纯图片也要占住自己的 user 位置；隐藏图片不能借占位重新进入上下文。
+        if (!content && options.preserveImagePlaceholder === true && msg.role === 'user'
+            && msg.images?.length && !hiddenIndices.includes(paragraphs.length)) {
+            content = '[用户发送了一张图片]';
+        }
+        // ★ 描述和占位组装完成后再加时间，纯图片与文字消息使用同一个发送时间。
+        if (preserveTimestamp && msg.role === 'user' && content) {
+            content = (normalized.timestampPart || (msg.timestamp ? `[${msg.timestamp}] ` : '')) + content;
+        }
         content = String(content || '').trim();
         if (!content) return null;
 
