@@ -1384,6 +1384,8 @@ const ProactiveMessages = {
         UI.setLoading(true, contact.id);
         try {
             await Storage.saveContacts();
+            settings.USAGE_CHAT = true;
+            settings.USAGE_REROLL = true;
             const rawText = await API.chat(messages, settings);
             await this.applyRerollResult(contact, context, rawText, API.lastAsyncBackendResult?.jobId || null);
         } catch (error) {

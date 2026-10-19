@@ -892,7 +892,7 @@ const API = {
         }
 
         try {
-            const response = await fetch(fetchUrl, options);
+            const response = await UsageStats.fetch(fetchUrl, options, { API_URL: url, MODEL: model }, '连接测试');
             
             if (!response.ok) {
                 // 尝试读取错误信息
@@ -1117,12 +1117,14 @@ const API = {
             status: job.status,
             ttlSeconds: job.ttlSeconds
         });
+        UsageStats.jobStart(job, settings);
         this.rememberPendingJob(job.jobId, settings);
 
         try {
             const result = await this.waitForChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN, {
                 onJobUpdate: settings.ASYNC_BACKEND_ON_JOB_UPDATE
             });
+            UsageStats.jobFinish({ ...result, jobId: job.jobId });
             if (result.status !== 'done') {
                 const jobFailedError = new Error(result.error || 'Async job failed');
                 jobFailedError.isAsyncBackendJobFailed = true; // Worker 明确说失败，不能当成手机切后台轮询中断
@@ -1411,6 +1413,7 @@ const API = {
             });
             this.mergeAsyncBackendJobEvents(jobId, job.events);
             job.jobId = job.jobId || jobId;
+        if (job.status === 'done' || job.status === 'failed') UsageStats.jobFinish(job);
             if (typeof options.onJobUpdate === 'function') {
                 try {
                     // ★ 分段后台结果：
@@ -2137,7 +2140,7 @@ const API = {
             console.error("【API日志记录失败】", error);
         }
 
-        let response = await fetch(fetchUrl, options);
+        let response = await UsageStats.fetch(fetchUrl, options, settings);
 
         if (!response.ok) {
             let finalErrorText = await response.text();
@@ -2156,7 +2159,7 @@ const API = {
                 requestBody.stream = false;
                 options.body = JSON.stringify(requestBody);
 
-                response = await fetch(fetchUrl, options);
+                response = await UsageStats.fetch(fetchUrl, options, settings);
                 if (!response.ok) finalErrorText = await response.text();
                 if (response.ok) this.notifyMultimodalFallback(`direct_${Date.now()}`);
             }
@@ -2311,14 +2314,14 @@ const API = {
         };
 
         try {
-            const response = await fetch(url, {
+            const response = await UsageStats.fetch(url, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${key}`
                 },
                 body: JSON.stringify(payload)
-            });
+            }, { API_URL: url, MODEL: model }, '识图');
 
             if (!response.ok) {
                 throw new Error(`Vision API Error: ${response.status} ${await response.text()}`);
@@ -2760,6 +2763,8 @@ const UI = {
         const viewMoments = document.getElementById('view-moments');
         const bottomTabBar = document.getElementById('bottom-tab-bar');
 
+        const usageView = document.getElementById('view-usage');
+        if (usageView && viewName !== 'usage') usageView.style.display = 'none';
         // ★ Agent 是后加的探索子页：旧分支里没有逐个隐藏它，这里先统一收口。
         if (viewAgent && viewName !== 'agent') viewAgent.style.display = 'none';
         // ★ 角色记忆也是探索子页，先统一隐藏，再在对应分支打开。
@@ -2778,7 +2783,12 @@ const UI = {
         // 先清除底栏的全部高亮状态
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-        if (viewName === 'pomodoro') {
+        if (viewName === 'usage') {
+            appContainer.classList.remove('in-chat-mode');
+            document.querySelectorAll('.page-view').forEach(view => { view.style.display = 'none'; });
+            usageView.style.display = 'flex';
+            if (bottomTabBar) bottomTabBar.style.display = 'none';
+        } else if (viewName === 'pomodoro') {
             App.rememberReturnView('pomodoro', STATE.currentMainView || 'explore');
             appContainer.classList.remove('in-chat-mode');
             document.querySelectorAll('.page-view').forEach(view => { view.style.display = 'none'; });
@@ -11057,6 +11067,8 @@ const App = {
         // 4. 发送请求给 AI (Step 4)
         // ============================================================
         try {
+            requestSettings.USAGE_CHAT = true;
+            requestSettings.USAGE_REROLL = isReroll;
             const aiText = await API.chat(messagesToSend, requestSettings);
             
             const aiTimestamp = formatTimestamp();

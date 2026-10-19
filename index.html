@@ -243,7 +243,7 @@
                         </svg>
                     </span>
                 </li>
-                <!-- 未来可以加：AI朋友圈、世界画廊等 -->
+                
 
                 <!-- ★★★★★ 角色记忆：探索页入口 START ★★★★★ -->
                 <li id="explore-character-memory-btn">
@@ -520,9 +520,14 @@
 
 
 
-
-
+                <!-- ★★★★★ 用量统计 ★★★★★ -->
+                <li class="list-item" id="usage-entry" role="button" tabindex="0"><span class="icon">◴</span><span class="text">用量统计</span><span class="arrow">›</span></li>
+                <!-- ★★★★★ 用量统计 END ★★★★★ -->
                 
+
+
+
+
                 <!-- 👇 新加的：原本的“查看日志”按钮，现在伪装成了列表项 👇 -->
                 <!-- 重点：保留 ID="btn-show-log"，这样你的 JS 依然能找到它！ -->
                 <li id="btn-show-log">
@@ -635,6 +640,10 @@
             </button>
         </div>
         <!-- ★★★★★ TO DO 计划页面 END ★★★★★ -->
+        <div id="view-usage" class="page-view" style="display:none">
+          <header class="app-header"><button id="usage-back" class="header-icon-btn left" aria-label="返回探索">‹</button><h1>用量统计</h1></header>
+          <main class="usage-page"><p id="usage-status" role="status"></p><div id="usage-body"></div></main>
+        </div>
 
         <!-- ★★★★★ 倒数日页面 START ★★★★★ -->
         <div id="view-countdown" class="page-view" style="display: none;">
@@ -2949,6 +2958,7 @@
     <!-- 项目脚本：先加载独立服务，再加载主业务入口 -->
     <script src="./js/config.js?v=20260927-worker-deploy-1"></script>
     <script src="./js/storage.js"></script>
+    <script src="./js/usage-stats.js?v=20261019-1"></script>
     <script src="./js/world-info.js"></script>
     <script src="./js/cloud-sync.js"></script>
     <script src="./js/history-visibility.js"></script>
@@ -2963,9 +2973,14 @@
     <script src="./js/agent-heart-note-manager.js"></script>
     <script src="./js/pomodoro.js"></script>
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
-    <script src="./js/proactive-messages.js?v=20261009-proactive-reroll-waterfall-1"></script>
+    <script src="./js/proactive-messages.js?v=20261019-usage-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261009-moments-preset-tokens-1"></script>
+    <script src="./script.js?v=20261019-usage-1"></script>
+<script>
+    document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
+    document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });
+    document.getElementById('usage-back').addEventListener('click', () => UI.switchView('explore'));
+    </script>
 </body>
 </html>
 
