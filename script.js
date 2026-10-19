@@ -5455,6 +5455,8 @@ const App = {
             ['explore', 'view-explore'],
             ['pomodoro', 'view-pomodoro'],
             ['todo-plan', 'view-todo-plan'],
+            // ★ 用量统计沿用全局边缘滑返回，手势成立后统一触发现有返回按钮。
+            ['usage', 'view-usage'],
             ['countdown', 'view-countdown'],
             ['character-schedule', 'view-character-schedule'],
             ['character-schedule-detail', 'view-character-schedule-detail'],
@@ -5506,6 +5508,7 @@ const App = {
             explore: 'explore-back-btn',
             pomodoro: 'pomodoro-back-btn',
             'todo-plan': 'todo-plan-back-btn',
+            usage: 'usage-back',
             countdown: 'countdown-back-btn',
             'character-schedule': 'character-schedule-back-btn',
             'character-schedule-detail': 'character-schedule-detail-back-btn',

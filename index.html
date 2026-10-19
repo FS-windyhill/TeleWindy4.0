@@ -521,7 +521,14 @@
 
 
                 <!-- ★★★★★ 用量统计 ★★★★★ -->
-                <li class="list-item" id="usage-entry" role="button" tabindex="0"><span class="icon">◴</span><span class="text">用量统计</span><span class="arrow">›</span></li>
+                <li class="list-item" id="usage-entry" role="button" tabindex="0">
+                    <span class="icon">
+                        <!-- ★ 用量统计使用饼图线性图标，与探索页现有图标的尺寸和线宽保持一致。 -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-chart-pie preview-icon"><path d="M21 12c.552 0 1.005-.449.95-.998a10 10 0 0 0-8.953-8.951c-.55-.055-.998.398-.998.95v8a1 1 0 0 0 1 1z"/><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/></svg>
+                    </span>
+                    <span class="text">用量统计</span>
+                    <span class="arrow">›</span>
+                </li>
                 <!-- ★★★★★ 用量统计 END ★★★★★ -->
                 
 
@@ -640,10 +647,23 @@
             </button>
         </div>
         <!-- ★★★★★ TO DO 计划页面 END ★★★★★ -->
-        <div id="view-usage" class="page-view" style="display:none">
-          <header class="app-header"><button id="usage-back" class="header-icon-btn left" aria-label="返回探索">‹</button><h1>用量统计</h1></header>
-          <main class="usage-page"><p id="usage-status" role="status"></p><div id="usage-body"></div></main>
+        <!-- ★★★★★ 用量统计页面 START：整体结构跟随世界感知母版 ★★★★★ -->
+        <div id="view-usage" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button id="usage-back" class="header-icon-btn left" title="返回探索" aria-label="返回探索">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <h1>用量统计</h1>
+            </header>
+
+            <main class="usage-page">
+                <p id="usage-status" role="status"></p>
+                <div id="usage-body"></div>
+            </main>
         </div>
+        <!-- ★★★★★ 用量统计页面 END ★★★★★ -->
 
         <!-- ★★★★★ 倒数日页面 START ★★★★★ -->
         <div id="view-countdown" class="page-view" style="display: none;">
