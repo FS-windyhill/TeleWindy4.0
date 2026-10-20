@@ -222,7 +222,7 @@ const CharacterMemory = {
     buildGenerationMessages(contact, dateKey) {
         const dayMessages = this.collectMessagesForDate(contact, dateKey);
         const prompt = [
-            '你是 TeleWindy 的角色记忆整理器，要根据某一天的聊天记录，为该角色整理对用户的长期记忆。',
+            '你要使用json格式，选出这天，你最希望能记下来的五条内容，并写下一句给用户的寄语。',
             '请只返回 JSON，不要 Markdown，不要解释。',
             '',
             'JSON 格式必须是：',
@@ -235,13 +235,11 @@ const CharacterMemory = {
             '- 不要输出 Markdown。',
             '- 不要输出解释。',
             '- 只输出 JSON。',
-            '- 不要编造聊天记录中没有的信息。',
-            '- 优先保留任务进展、用户状态、重要事实、关系变化、承诺、身体状况、压力来源。',
             '- 尽量不要在记忆中称用户为“用户”，而是使用用户的名字，或角色对用户的称谓',
             '',
             `日期：${dateKey}`,
             '',
-            '【角色信息】',
+            '【你的角色设定】',
             `角色名：${contact?.name || '未知角色'}`,
             contact?.prompt || '暂无角色设定。',
             '',
