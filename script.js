@@ -3687,6 +3687,8 @@ const UI = {
         // 4. 绑定索引
         bubble.dataset.msgIndex = historyIndex;
         bubble.dataset.partIndex = partIndex; 
+        // ★ 多选操作保留消息对象身份；主动消息插入后数组下标会变化。
+        bubble.messageRef = STATE.contacts.find(c => c.id === STATE.currentContactId)?.history?.[historyIndex] || null;
         bubble.className += ' selectable-message';
 
         // 5. 时间
@@ -3825,8 +3827,9 @@ const UI = {
         // ============================================
         let startIndex, endIndex;
         if (STATE.chatMode === 'jump') {
-            startIndex = STATE.jumpStartIndex;
-            endIndex = STATE.jumpEndIndex;
+            // ★ 删除或插入历史消息后，旧跳转窗口可能越过数组末尾，渲染范围必须重新夹紧。
+            startIndex = Math.max(0, Math.min(totalMsgs, STATE.jumpStartIndex));
+            endIndex = Math.max(startIndex, Math.min(totalMsgs, STATE.jumpEndIndex));
         } else {
             endIndex = totalMsgs;
             startIndex = totalMsgs - STATE.visibleMsgCount;
@@ -12140,7 +12143,7 @@ const App = {
     // 【7. APP CONTROLLER】
     handleMessageAction(action) {
         // 1. 获取选中索引
-        const msgIndex = STATE.selectedMessageIndex;
+        const selectedMessage = STATE.selectedMessageRef;
 
         // 2. 获取当前角色
         const currentId = STATE.currentContactId;
@@ -12152,7 +12155,11 @@ const App = {
         }
 
         // --- 核心数据获取 ---
-        const msgData = currentContact.history[msgIndex]; 
+        // ★ 主动消息可能按发送时间插进历史；菜单打开后的旧下标不能再用来删除/编辑别的消息。
+        const msgIndex = selectedMessage
+            ? currentContact.history.indexOf(selectedMessage)
+            : STATE.selectedMessageIndex;
+        const msgData = msgIndex >= 0 ? currentContact.history[msgIndex] : null;
 
         if (!msgData) {
             console.error("找不到该条消息，索引:", msgIndex);
@@ -12181,7 +12188,10 @@ const App = {
                 // 如果文本有变化
                 if (newText && newText !== cleanContent) {
                     // ★ 核心：保存时把原时间戳拼回去
+                    const oldContent = msgData.content;
                     msgData.content = timestampPart + newText;
+                    // ★ 气泡数量变化后，按原文匹配隐藏气泡，避免新增段落继承旧下标的隐藏状态。
+                    msgData.hiddenIndices = remapHiddenBubbleIndices(msgData, oldContent, msgData.content);
                     
                     Storage.saveContacts(); 
 
@@ -12381,8 +12391,8 @@ const App = {
         
         // 1. 排序 (兼容 'thought' 排序)
         const sortedBubbles = Array.from(STATE.selectedBubbles).sort((a, b) => {
-            const msgIndexA = parseInt(a.dataset.msgIndex);
-            const msgIndexB = parseInt(b.dataset.msgIndex);
+            const msgIndexA = a.messageRef ? contact.history.indexOf(a.messageRef) : parseInt(a.dataset.msgIndex);
+            const msgIndexB = b.messageRef ? contact.history.indexOf(b.messageRef) : parseInt(b.dataset.msgIndex);
             if (msgIndexA !== msgIndexB) return msgIndexA - msgIndexB;
             
             const getPartVal = (bubble) => {
@@ -12398,7 +12408,9 @@ const App = {
                 const img = bubble.querySelector('img'); 
                 const expiredPlaceholder = bubble.querySelector('.expired-image-placeholder');
                 
-                const mIdx = parseInt(bubble.dataset.msgIndex);
+                const mIdx = bubble.messageRef
+                    ? contact.history.indexOf(bubble.messageRef)
+                    : parseInt(bubble.dataset.msgIndex);
                 const msg = contact ? contact.history[mIdx] : null;
                 
                 // A & B: 处理图片
@@ -12491,7 +12503,10 @@ const App = {
         let anyVisibleFound = false;
 
         STATE.selectedBubbles.forEach(bubble => {
-            const mIdx = parseInt(bubble.dataset.msgIndex);
+            const mIdx = bubble.messageRef
+                ? currentContact.history.indexOf(bubble.messageRef)
+                : parseInt(bubble.dataset.msgIndex);
+            if (mIdx < 0 || !currentContact.history[mIdx]) return;
             
             // ★★★ 核心修改 1：兼容 'thought' 索引的解析 ★★★
             const rawPIdx = bubble.dataset.partIndex;
@@ -12559,7 +12574,10 @@ const App = {
         const deletionMap = {};
 
         STATE.selectedBubbles.forEach(bubble => {
-            const mIdx = parseInt(bubble.dataset.msgIndex);
+            const mIdx = bubble.messageRef
+                ? currentContact.history.indexOf(bubble.messageRef)
+                : parseInt(bubble.dataset.msgIndex);
+            if (mIdx < 0 || !currentContact.history[mIdx]) return;
             // ★★★ 核心修改 1：兼容思考气泡的字符串索引 'thought' ★★★
             const rawPIdx = bubble.dataset.partIndex;
             const pIdx = rawPIdx === 'thought' ? 'thought' : parseInt(rawPIdx);
@@ -12575,7 +12593,8 @@ const App = {
             const msg = currentContact.history[msgIndex];
             const partsToDelete = deletionMap[msgIndex]; // 例如: [0, 2, 'thought']
 
-            let content = msg.content || '';
+            const oldContent = msg.content || '';
+            let content = oldContent;
             const timestampRegex = /^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/;
             let timestampPart = '';
             
@@ -12635,6 +12654,9 @@ const App = {
                 }
                 
                 msg.content = newContent.trim();
+                // ★ 删除前面的气泡后，幸存气泡的隐藏索引也必须一起移动。
+                msg.hiddenIndices = remapHiddenBubbleIndices(msg, oldContent, msg.content);
+                if (!hasImagesLeft) msg.hiddenIndices = msg.hiddenIndices.filter(index => index !== newParagraphs.length);
             }
         });
 
@@ -12751,17 +12773,11 @@ const App = {
     // ★★★★★ 联系人列表长按菜单 END ★★★★★
 
 
-    hideMessageContextMenu() {
-        if (this.els.msgContextMenu) {
-            this.els.msgContextMenu.style.display = 'none';
-        }
-        STATE.selectedMessageIndex = null;
-    },
-
-
     // 【7. APP CONTROLLER】
     showMessageContextMenu(msgIndex, rect) {
         STATE.selectedMessageIndex = msgIndex;
+        const selectedContact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        STATE.selectedMessageRef = selectedContact?.history?.[msgIndex] || null;
 
         const menu = document.getElementById('msg-context-menu');
 
@@ -12826,6 +12842,8 @@ const App = {
     hideMessageContextMenu() {
         const menu = document.getElementById('msg-context-menu');
         if (menu) menu.style.display = 'none';
+        STATE.selectedMessageIndex = null;
+        STATE.selectedMessageRef = null;
     },
 
 
@@ -17917,6 +17935,69 @@ function splitMessageIntoBubbleParts(text) {
 
     pushCurrentPart();
     return parts;
+}
+
+/**
+ * 编辑整条消息后，按气泡正文重新定位隐藏标记；图片仍占文字气泡之后的一个索引。
+ * 相同正文优先一一匹配，只有两个已匹配锚点之间各剩一个气泡时才视为改写。
+ */
+function remapHiddenBubbleIndices(message, oldContent, newContent) {
+    const hidden = Array.isArray(message.hiddenIndices) ? message.hiddenIndices : [];
+    if (!hidden.length) return hidden;
+
+    const getParts = content => {
+        let text = String(content || '');
+        if (message.role === 'user') {
+            text = text.replace(/^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/, '');
+        } else {
+            if (message.proactiveSource && typeof ProactiveMessages !== 'undefined') {
+                text = ProactiveMessages.displayContent(message, text);
+            }
+            text = normalizeChatQuoteBreaks(text);
+            text = text.replace(/<(?:think|thinking|thought)>([\s\S]*?)<\/(?:think|thinking|thought)>/gi, '');
+        }
+        return splitMessageIntoBubbleParts(text);
+    };
+
+    const oldParts = getParts(oldContent);
+    const newParts = getParts(newContent);
+    const rows = Array.from({ length: oldParts.length + 1 }, () => Array(newParts.length + 1).fill(0));
+    for (let i = oldParts.length - 1; i >= 0; i--) {
+        for (let j = newParts.length - 1; j >= 0; j--) {
+            rows[i][j] = oldParts[i] === newParts[j]
+                ? rows[i + 1][j + 1] + 1
+                : Math.max(rows[i + 1][j], rows[i][j + 1]);
+        }
+    }
+
+    const matches = [];
+    let i = 0, j = 0;
+    while (i < oldParts.length && j < newParts.length) {
+        if (oldParts[i] === newParts[j]) {
+            matches.push([i++, j++]);
+        } else if (rows[i + 1][j] >= rows[i][j + 1]) {
+            i++;
+        } else {
+            j++;
+        }
+    }
+
+    const indexMap = new Map(matches);
+    const anchors = [[-1, -1], ...matches, [oldParts.length, newParts.length]];
+    for (let k = 1; k < anchors.length; k++) {
+        const [oldStart, newStart] = anchors[k - 1];
+        const [oldEnd, newEnd] = anchors[k];
+        if (oldEnd - oldStart === 2 && newEnd - newStart === 2) {
+            indexMap.set(oldStart + 1, newStart + 1);
+        }
+    }
+
+    const remapped = hidden.map(index => {
+        if (index === 'thought') return index;
+        if (index === oldParts.length) return newParts.length;
+        return indexMap.get(index);
+    }).filter(index => index !== undefined);
+    return [...new Set(remapped)];
 }
 
 /**

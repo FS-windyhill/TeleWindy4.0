@@ -48,7 +48,9 @@ const HistoryVisibility = {
 
         if (msg?.role === 'assistant') {
             // ★ 和 UI 气泡边界保持一致：AI 引用块在界面里会被拆成独立气泡。
-            content = content.replace(/(^|\n)>\s*/g, '\n\n');
+            content = typeof normalizeChatQuoteBreaks === 'function'
+                ? normalizeChatQuoteBreaks(content)
+                : content.replace(/(^|\n)>\s*/g, '\n\n');
         }
 
         if (options.stripThought !== false) {
@@ -63,9 +65,10 @@ const HistoryVisibility = {
 
     getTextParagraphs(msg, options = {}) {
         const normalized = this.normalizeBubbleTextForMessage(msg, options);
-        return normalized.content
-            .split(/\n\s*\n/)
-            .filter(part => part.trim());
+        // ★ 给模型的隐藏索引沿用聊天页切分规则，代码块内部空行不能多算气泡。
+        return typeof splitMessageIntoBubbleParts === 'function'
+            ? splitMessageIntoBubbleParts(normalized.content)
+            : normalized.content.split(/\n\s*\n/).filter(part => part.trim());
     },
 
     buildVisibleMessage(msg, options = {}) {
@@ -76,9 +79,7 @@ const HistoryVisibility = {
         const preserveTimestamp = options.preserveTimestamp === true;
         const includeImageDescription = options.includeImageDescription !== false;
         const normalized = this.normalizeBubbleTextForMessage(msg, options);
-        const paragraphs = normalized.content
-            .split(/\n\s*\n/)
-            .filter(part => part.trim());
+        const paragraphs = this.getTextParagraphs(msg, options);
 
         const keptParagraphs = paragraphs
             .filter((_, index) => !hiddenIndices.includes(index))
