@@ -2977,11 +2977,13 @@
 
     <!-- 项目脚本：先加载独立服务，再加载主业务入口 -->
     <script src="./js/config.js?v=20260927-worker-deploy-1"></script>
-    <script src="./js/storage.js"></script>
+    <!-- ★ 气泡身份要先于存储迁移、历史过滤和聊天页加载。 -->
+    <script src="./js/chat-bubbles.js?v=20261023-bubble-id-1"></script>
+    <script src="./js/storage.js?v=20261023-bubble-id-1"></script>
     <script src="./js/usage-stats.js?v=20261019-1"></script>
     <script src="./js/world-info.js"></script>
     <script src="./js/cloud-sync.js"></script>
-    <script src="./js/history-visibility.js"></script>
+    <script src="./js/history-visibility.js?v=20261023-bubble-id-1"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->
     <script src="./js/world-sense.js?v=20260829"></script>
     <script src="./js/todo-countdown-context.js"></script>
@@ -2995,7 +2997,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261019-usage-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261019-usage-1"></script>
+    <script src="./script.js?v=20261023-bubble-id-1"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

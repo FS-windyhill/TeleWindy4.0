@@ -30,7 +30,8 @@ global.CONFIG = {
     }
 };
 global.STATE = { settings: {}, contacts: [] };
-global.HistoryVisibility = vm.runInNewContext(`${fs.readFileSync(require.resolve('../js/history-visibility.js'), 'utf8')}\nHistoryVisibility`);
+global.ChatBubbles = require('../js/chat-bubbles.js');
+global.HistoryVisibility = vm.runInNewContext(`${fs.readFileSync(require.resolve('../js/history-visibility.js'), 'utf8')}\nHistoryVisibility`, { ChatBubbles: global.ChatBubbles });
 
 const ProactiveMessages = require('../js/proactive-messages.js');
 

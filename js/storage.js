@@ -210,6 +210,13 @@ const Storage = {
             STATE.contacts = [];
         }
 
+        // ★ 旧聊天只存 hiddenIndices；加载时一次迁移到气泡 key，立即落库以免刷新后重新分配身份。
+        let bubbleMigrationChanged = false;
+        STATE.contacts.forEach(contact => (contact.history || []).forEach(message => {
+            if (ChatBubbles.ensure(message)) bubbleMigrationChanged = true;
+        }));
+        if (bubbleMigrationChanged) await DB.set(CONFIG.STORAGE_KEY, STATE.contacts);
+
         // 兜底默认联系人
         if (STATE.contacts.length === 0) {
             STATE.contacts.push({
@@ -353,6 +360,8 @@ const Storage = {
     // 保存联系人
     async saveContacts() {
         // IndexedDB 可以直接存对象，不需要 JSON.stringify
+        // ★ 外部链路也会改正文；落库前同步气泡身份和兼容用的隐藏下标。
+        STATE.contacts.forEach(contact => (contact.history || []).forEach(message => ChatBubbles.ensure(message)));
         await DB.set(CONFIG.STORAGE_KEY, STATE.contacts);
     },
 

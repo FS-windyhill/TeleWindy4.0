@@ -2,7 +2,7 @@
 // HISTORY VISIBILITY (AI 可见历史清洗)
 // 统一所有“把聊天历史发给 AI”的隐藏规则：
 //   - 整条隐藏 isHidden：不进入 AI 上下文
-//   - 气泡隐藏 hiddenIndices：只剔除对应气泡
+//   - 气泡隐藏 hiddenBubbleKeys：只剔除对应气泡，hiddenIndices 用于旧数据兼容
 //   - 图片气泡隐藏：不注入 image_description
 //   - AI 思考链：默认不进入业务模型上下文
 // 新增需要注入 contact.history 的功能时，优先走这里，避免各模块各写一套隐私口径。
@@ -35,62 +35,39 @@ const HistoryVisibility = {
     },
 
     normalizeBubbleTextForMessage(msg, options = {}) {
-        let content = String(msg?.content || '');
-        let timestampPart = '';
-
-        if (msg?.role === 'user') {
-            const match = content.match(this.timestampRegex);
-            if (match) {
-                timestampPart = match[0];
-                content = content.replace(this.timestampRegex, '');
-            }
-        }
-
-        if (msg?.role === 'assistant') {
-            // ★ 和 UI 气泡边界保持一致：AI 引用块在界面里会被拆成独立气泡。
-            content = typeof normalizeChatQuoteBreaks === 'function'
-                ? normalizeChatQuoteBreaks(content)
-                : content.replace(/(^|\n)>\s*/g, '\n\n');
-        }
-
-        if (options.stripThought !== false) {
-            content = this.stripThought(content);
-        }
-
-        return {
-            timestampPart,
-            content
-        };
+        const parsed = ChatBubbles.parse(msg);
+        return { timestampPart: msg?.role === 'user' ? parsed.prefix : '', content: parsed.parts.join('\n\n') };
     },
 
     getTextParagraphs(msg, options = {}) {
-        const normalized = this.normalizeBubbleTextForMessage(msg, options);
-        // ★ 给模型的隐藏索引沿用聊天页切分规则，代码块内部空行不能多算气泡。
-        return typeof splitMessageIntoBubbleParts === 'function'
-            ? splitMessageIntoBubbleParts(normalized.content)
-            : normalized.content.split(/\n\s*\n/).filter(part => part.trim());
+        // ★ 界面和模型读取同一个切分器；围栏代码里的空行不会错算为气泡。
+        return ChatBubbles.parse(msg).parts;
     },
 
     buildVisibleMessage(msg, options = {}) {
         if (!msg || msg.role === 'system' || msg.isHidden === true || msg.isTransientError === true) return null;
         if (msg?.asyncJobId && String(msg.content || '').startsWith('(发送失败:')) return null;
 
-        const hiddenIndices = Array.isArray(msg.hiddenIndices) ? msg.hiddenIndices : [];
+        ChatBubbles.ensure(msg);
+        const hiddenKeys = new Set(msg.hiddenBubbleKeys);
         const preserveTimestamp = options.preserveTimestamp === true;
         const includeImageDescription = options.includeImageDescription !== false;
         const normalized = this.normalizeBubbleTextForMessage(msg, options);
         const paragraphs = this.getTextParagraphs(msg, options);
 
         const keptParagraphs = paragraphs
-            .filter((_, index) => !hiddenIndices.includes(index))
+            .filter((_, index) => !hiddenKeys.has(msg.bubbleIds[index]))
             .map(part => part.trim());
 
         let content = keptParagraphs.join('\n\n');
+        // ★ 保留原有防护：用户正文里的思考标签也不送入模型，但气泡位置仍按界面原文计算。
+        if (options.stripThought !== false) content = this.stripThought(content);
+        // ★ 主动消息的时间前缀属于可见正文元数据；隐藏全部正文时也不能单独留下前缀。
+        if (content && msg.proactiveSource) content = ChatBubbles.parse(msg).prefix + content;
 
         if (includeImageDescription && msg.image_description) {
-            // ★ 图片气泡的索引等于文本气泡数量，和 render/delete/隐藏逻辑保持一致。
-            const imagePartIndex = paragraphs.length;
-            if (!hiddenIndices.includes(imagePartIndex)) {
+            // ★ 图片描述使用图片气泡自己的 key；文字数量变化也不能让隐藏描述泄漏。
+            if (!hiddenKeys.has(msg.imageBubbleKey)) {
                 const imageText = `[System Info: 对方发送了一张图片，图片内容描述: ${msg.image_description}]`;
                 content = content ? `${content}\n\n${imageText}` : imageText;
             }
@@ -98,7 +75,7 @@ const HistoryVisibility = {
 
         // ★ 本轮尚未识图的纯图片也要占住自己的 user 位置；隐藏图片不能借占位重新进入上下文。
         if (!content && options.preserveImagePlaceholder === true && msg.role === 'user'
-            && msg.images?.length && !hiddenIndices.includes(paragraphs.length)) {
+            && msg.images?.length && !hiddenKeys.has(msg.imageBubbleKey)) {
             content = '[用户发送了一张图片]';
         }
         // ★ 描述和占位组装完成后再加时间，纯图片与文字消息使用同一个发送时间。

@@ -23,6 +23,7 @@ const context = vm.createContext({ console, Date, Intl, Set, window: { crypto: r
     formatTimeForMoments: time => String(time), localStorage: { getItem: () => 'install' },
     Blob, alert: () => {}, confirm: () => true, Toast: { show: () => {} }, removedAiBubbles: 0, waterfalls: []
 });
+vm.runInContext(fs.readFileSync('js/chat-bubbles.js', 'utf8') + '\nthis.ChatBubbles = ChatBubbles;', context);
 vm.runInContext(fs.readFileSync('js/history-visibility.js', 'utf8') + '\nthis.HistoryVisibility = HistoryVisibility;', context);
 vm.runInContext(fs.readFileSync('js/proactive-messages.js', 'utf8') + '\nthis.ProactiveMessages = ProactiveMessages;', context);
 const p = context.ProactiveMessages;
@@ -66,10 +67,12 @@ test('纯图片首发保留独立 user 及时间，历史描述也保留发送�
         '[2026-10-09 09:30] [System Info: 对方发送了一张图片，图片内容描述: 一只猫]');
 });
 test('隐藏图片或整条隐藏不会因占位和时间戳泄漏，隐藏文字仍可保留可见图片', () => {
-    for (const message of [{ ...image, isHidden: true }, { ...image, hiddenIndices: [0], image_description: '秘密' }]) {
+    // ★ 每条旧消息独立构造，避免复用上个测试已迁移出的气泡 key。
+    const legacyImage = () => ({ role: 'user', content: image.content, timestamp: image.timestamp, images: [...image.images] });
+    for (const message of [{ ...legacyImage(), isHidden: true }, { ...legacyImage(), hiddenIndices: [0], image_description: '秘密' }]) {
         assert.equal(h.buildVisibleMessage(message, { preserveTimestamp: true, preserveImagePlaceholder: true }), null);
     }
-    const visible = h.buildVisibleMessage({ ...image, content: '[2026-10-09 09:30] 隐藏文字', hiddenIndices: [0], image_description: '猫' }, { preserveTimestamp: true });
+    const visible = h.buildVisibleMessage({ ...legacyImage(), content: '[2026-10-09 09:30] 隐藏文字', hiddenIndices: [0], image_description: '猫' }, { preserveTimestamp: true });
     assert.ok(visible.content.startsWith('[2026-10-09 09:30] '));
     assert.doesNotMatch(visible.content, /隐藏文字/);
 });

@@ -3589,7 +3589,7 @@ const UI = {
         return details;
     },
 
-    createSingleBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex, shouldAnimate = true, partIndex = 0, imageUrl = null, isThought = false) {
+    createSingleBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex, shouldAnimate = true, partIndex = 0, imageUrl = null, isThought = false, isTransient = false, messageRecord = null) {
         const template = document.getElementById('msg-template');
         const clone = template.content.cloneNode(true);
         
@@ -3687,8 +3687,16 @@ const UI = {
         // 4. 绑定索引
         bubble.dataset.msgIndex = historyIndex;
         bubble.dataset.partIndex = partIndex; 
-        // ★ 多选操作保留消息对象身份；主动消息插入后数组下标会变化。
-        bubble.messageRef = STATE.contacts.find(c => c.id === STATE.currentContactId)?.history?.[historyIndex] || null;
+        // ★ 临时失败提示没有真实历史身份，不能借用上一条消息的下标执行操作。
+        const currentHistory = STATE.contacts.find(c => c.id === STATE.currentContactId)?.history || [];
+        const record = !isTransient ? (messageRecord || currentHistory[historyIndex]) : null;
+        if (record && currentHistory.includes(record) && record.role === (sender === 'ai' ? 'assistant' : 'user')) {
+            ChatBubbles.ensure(record);
+            bubble.messageRef = record;
+            if (record.messageId) bubble.dataset.messageId = String(record.messageId);
+            const key = ChatBubbles.keyAt(record, partIndex);
+            if (key) bubble.dataset.bubbleKey = key;
+        }
         bubble.className += ' selectable-message';
 
         // 5. 时间
@@ -3860,6 +3868,7 @@ const UI = {
             const historyIndex = i; 
 
             if (msg.role === 'system') continue;
+            ChatBubbles.ensure(msg);
             
             const sender = msg.role === 'assistant' ? 'ai' : 'user';
             let cleanText = typeof msg === 'string' ? msg : msg.content || '';
@@ -3869,9 +3878,10 @@ const UI = {
                 cleanText = ProactiveMessages.displayContent(msg, cleanText);
             }
             
-            // 处理 User 时间戳
+            // ★ 用户时间前缀与气泡身份共用同一解析规则；删光正文只剩图片时，也不能把前缀画成文字气泡。
             if (sender === 'user') {
-                cleanText = cleanText.replace(/^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/, '');
+                const timePrefix = ChatBubbles.parse(msg).prefix;
+                if (timePrefix) cleanText = cleanText.slice(timePrefix.length);
             }
 
             // 处理 AI 引用格式
@@ -3884,7 +3894,7 @@ const UI = {
             // 提取历史消息中的思考过程
             let thoughtContent = null;
             if (sender === 'ai') {
-                cleanText = cleanText.replace(/<(?:think|thinking|thought)>([\s\S]*?)<\/(?:think|thinking|thought)>/gi, (match, inner) => {
+                cleanText = cleanText.replace(ChatBubbles.thoughtRegex, (match, inner) => {
                     thoughtContent = inner.trim();
                     return '';
                 });
@@ -3914,7 +3924,9 @@ const UI = {
             if (msg.isHidden) group.classList.add('is-hidden'); 
             group.dataset.msgIndex = historyIndex;
             group.dataset.sender = sender;
-            const hiddenIndices = msg.hiddenIndices || [];
+            group.messageRef = msg;
+            if (msg.messageId) group.dataset.messageId = String(msg.messageId);
+            const hiddenKeys = new Set(msg.hiddenBubbleKeys || []);
 
             // ===============================================
             // ★★★ 新增：如果是跳转查找到的目标，给最外层容器加 ID ★★★
@@ -3929,7 +3941,7 @@ const UI = {
                  const thoughtBubble = this.createSingleBubble(
                      formattedThought, sender, contact.avatar, msgTime, historyIndex, false, 'thought', null, true
                  );
-                 if (msg.isHidden || hiddenIndices.includes('thought')) {
+                 if (msg.isHidden || hiddenKeys.has(msg.thoughtBubbleKey)) {
                      thoughtBubble.querySelector('.message-bubble').classList.add('is-hidden-bubble');
                  }
                  group.appendChild(thoughtBubble);
@@ -3951,13 +3963,13 @@ const UI = {
                             formattedContent, sender, contact.avatar, msgTime, historyIndex, false, part.partIndex, null
                         );
 
-                        if (hiddenIndices.includes(part.partIndex)) {
+                        if (hiddenKeys.has(ChatBubbles.keyAt(msg, part.partIndex))) {
                             bubbleClone.querySelector('.message-bubble').classList.add('is-hidden-bubble');
                         }
                         group.appendChild(bubbleClone);
                     }
                 });
-            } else if (!displayImage) {
+            } else if (!displayImage && !thoughtContent) {
                 const formattedContent = parseCustomMarkdown(cleanText.trim());
                 const bubbleClone = this.createSingleBubble(formattedContent, sender, contact.avatar, msgTime, historyIndex, false, 0, null);
                 group.appendChild(bubbleClone);
@@ -3969,7 +3981,7 @@ const UI = {
                 const imgBubble = this.createSingleBubble(
                     "", sender, contact.avatar, msgTime, historyIndex, false, imgPartIndex, displayImage
                 );
-                if (hiddenIndices.includes(imgPartIndex) || msg.isHidden) {
+                if (hiddenKeys.has(msg.imageBubbleKey) || msg.isHidden) {
                     imgBubble.querySelector('.message-bubble').classList.add('is-hidden-bubble');
                 }
                 group.appendChild(imgBubble);
@@ -4058,23 +4070,14 @@ const UI = {
         }
 
         // ★★★ 修改：最后一个参数传 true，表示新消息需要动画 ★★★
-        const clone = this.createSingleBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex, true, 0);
+        const clone = this.createSingleBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex, true, 0, null, false, true);
 
-        const existingGroup = Array.from(this.els.chatMsgs.children)
-            .reverse()
-            .find(group => group.classList.contains('message-group') && 
-                        parseInt(group.dataset.msgIndex) === historyIndex);
-
-        if (existingGroup) {
-            existingGroup.appendChild(clone);
-        } else {
-            const group = document.createElement('div');
-            group.className = 'message-group';
-            group.dataset.msgIndex = historyIndex; 
-            group.dataset.sender = sender;
-            group.appendChild(clone);
-            this.els.chatMsgs.appendChild(group);
-        }
+        // ★ 失败提示是独立的临时组，不和上一条真实历史消息共享组身份。
+        const group = document.createElement('div');
+        group.className = 'message-group';
+        group.dataset.sender = sender;
+        group.appendChild(clone);
+        this.els.chatMsgs.appendChild(group);
 
         this.scrollToBottom();
     },
@@ -4220,12 +4223,14 @@ const UI = {
         // ★★★ 1. 强制重置滚动状态（新消息开始时默认跟随，除非你不想） ★★★
         this.autoScrollEnabled = true;
         this.scrollToBottom(); // 初始先滚到底一次
+        // ★ 播放期间主动消息可能插入历史；后续气泡始终绑定开始播放时的那条消息。
+        const waterfallRecord = STATE.contacts.find(c => c.id === STATE.currentContactId)?.history?.[historyIndex] || null;
 
         // ============================================
         // ★★★ 新增：前置提取思考过程 (防止被换行符切碎) ★★★
         // ============================================
         let thoughtContent = null;
-        let processedText = fullText.replace(/<(?:think|thinking|thought)>([\s\S]*?)<\/(?:think|thinking|thought)>/gi, (match, innerText) => {
+        let processedText = fullText.replace(ChatBubbles.thoughtRegex, (match, innerText) => {
             thoughtContent = innerText.trim();
             return ''; // 将思考内容从正文中抹除
         });
@@ -4239,6 +4244,8 @@ const UI = {
         group.className = 'message-group';
         group.dataset.sender = 'ai';
         group.dataset.msgIndex = historyIndex;
+        group.messageRef = waterfallRecord;
+        if (waterfallRecord?.messageId) group.dataset.messageId = String(waterfallRecord.messageId);
 
         this.els.chatMsgs.appendChild(group);
         
@@ -4251,7 +4258,7 @@ const UI = {
             // 解析里面可能的 Markdown，传入 isThought = true 参数
             const htmlContent = parseCustomMarkdown(thoughtContent);
             const thoughtBubble = this.createSingleBubble(
-                htmlContent, 'ai', avatar, timestamp, historyIndex, true, 'thought', null, true
+                htmlContent, 'ai', avatar, timestamp, historyIndex, true, 'thought', null, true, false, waterfallRecord
             );
             group.appendChild(thoughtBubble);
             
@@ -4281,7 +4288,7 @@ const UI = {
             } else {
                 const htmlContent = parseCustomMarkdown(part.text.trim());
                 // 这里 isThought 默认为 false，正常渲染文本
-                const bubbleClone = this.createSingleBubble(htmlContent, 'ai', avatar, timestamp, historyIndex, true, part.partIndex);
+                const bubbleClone = this.createSingleBubble(htmlContent, 'ai', avatar, timestamp, historyIndex, true, part.partIndex, null, false, false, waterfallRecord);
                 group.appendChild(bubbleClone);
             }
             
@@ -10625,14 +10632,35 @@ const App = {
                 currentImageBase64 = STATE.pendingImage;
             }
 
+            // ★ 新消息先入库并生成气泡身份，首次上屏的菜单和多选才能直接定位原消息。
+            const currentMsgIndex = contact.history.length;
+            const momentInjectionTurnId = `moment_turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const newUserMsg = {
+                role: 'user',
+                content: `[${timestamp}] ${userText}`, // 注意：content 里不含描述，描述是后台用的
+                timestamp,
+                messageId: ProactiveMessages.makeId('user'),
+                eventAt: Date.now(),
+                recordedAt: Date.now(),
+                momentInjectionTurnId,
+                images: currentImageBase64 ? [currentImageBase64] : null,
+                image_description: null
+            };
+            ChatBubbles.ensure(newUserMsg);
+            contact.history.push(newUserMsg);
+            agentUserMessage = newUserMsg;
+            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = newUserMsg.messageId;
+            currentMomentTurnId = momentInjectionTurnId;
+
             // 2. 立即在 UI 显示用户消息
-            const currentMsgIndex = contact.history.length; // 即将存入的索引
             const paragraphs = splitMessageIntoBubbleParts(userText);
             
             const group = document.createElement('div');
             group.className = 'message-group';
             group.dataset.msgIndex = currentMsgIndex;
             group.dataset.sender = 'user';
+            group.messageRef = newUserMsg;
+            group.dataset.messageId = newUserMsg.messageId;
 
             // --- 修复点开始 ---
             
@@ -10648,7 +10676,8 @@ const App = {
                     } else {
                         // ★ 纯文本气泡，传 null (不带图)
                         const bubble = UI.createSingleBubble(
-                            parseCustomMarkdown(p.trim()), 'user', null, timestamp, currentMsgIndex, true, index, null
+                            parseCustomMarkdown(p.trim()), 'user', null, timestamp, currentMsgIndex, true, index, null,
+                            false, false, newUserMsg
                         );
                         group.appendChild(bubble);
                     }
@@ -10663,7 +10692,8 @@ const App = {
                 // 这是一个只有图的气泡
                 // 注意：index 使用 paragraphs.length，这样如果上面有文本，图片的 index 就是接在文本后面的
                 const imgBubble = UI.createSingleBubble(
-                    "", 'user', null, timestamp, currentMsgIndex, true, paragraphs.length, currentImageBase64
+                    "", 'user', null, timestamp, currentMsgIndex, true, paragraphs.length, currentImageBase64,
+                    false, false, newUserMsg
                 );
                 group.appendChild(imgBubble);
             }
@@ -10721,27 +10751,15 @@ const App = {
                 }
             }
 
-            // 5. 存入历史记录 (Step 3 - Storage)
-            // 构造新消息对象
-            const momentInjectionTurnId = `moment_turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-            const newUserMsg = { 
-                role: 'user', 
-                content: `[${timestamp}] ${userText}`, // 注意：content 里不含描述，描述是后台用的
-                timestamp: timestamp,
-                // ★ 稳定消息身份让主动补发可以按时间插入，而不会让后台任务只靠易变的数组下标找错消息。
-                messageId: ProactiveMessages.makeId('user'),
-                eventAt: Date.now(),
-                recordedAt: Date.now(),
-                momentInjectionTurnId: momentInjectionTurnId,
-                // ★ 存图和描述
-                images: currentImageBase64 ? [currentImageBase64] : null,
-                image_description: imageDescription || null
-            };
+            // ★ 识图结果补到同一条已上屏消息，保留原消息和气泡身份。
+            newUserMsg.image_description = imageDescription || null;
 
             // ★ 存储优化：只保留最后 3 张图的 base64，旧的删掉 base64 省空间
             let imgCount = 0;
             if (newUserMsg.images) imgCount++; 
             for (let i = contact.history.length - 1; i >= 0; i--) {
+                // ★ 本轮图片已计数；消息提前入库后，这里不能再把它算成第二张。
+                if (contact.history[i] === newUserMsg) continue;
                 if (contact.history[i].images && contact.history[i].images.length > 0) {
                     imgCount++;
                     if (imgCount > 3) {
@@ -10751,10 +10769,6 @@ const App = {
                 }
             }
             
-            contact.history.push(newUserMsg);
-            agentUserMessage = newUserMsg;
-            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = newUserMsg.messageId;
-            currentMomentTurnId = momentInjectionTurnId;
         }
 
         // 保存一次（包含刚刚优化的图片数据）
@@ -12156,13 +12170,13 @@ const App = {
 
         // --- 核心数据获取 ---
         // ★ 主动消息可能按发送时间插进历史；菜单打开后的旧下标不能再用来删除/编辑别的消息。
-        const msgIndex = selectedMessage
-            ? currentContact.history.indexOf(selectedMessage)
-            : STATE.selectedMessageIndex;
+        const msgIndex = STATE.selectedMessageId
+            ? currentContact.history.findIndex(item => String(item?.messageId) === STATE.selectedMessageId)
+            : (selectedMessage ? currentContact.history.indexOf(selectedMessage) : -1);
         const msgData = msgIndex >= 0 ? currentContact.history[msgIndex] : null;
 
         if (!msgData) {
-            console.error("找不到该条消息，索引:", msgIndex);
+            // ★ 菜单打开后目标可能已被别的操作删除；直接停止，不能改动旧下标上的邻居。
             return;
         }
 
@@ -12187,11 +12201,9 @@ const App = {
             UI.showEditModal(cleanContent, (newText) => {
                 // 如果文本有变化
                 if (newText && newText !== cleanContent) {
+                    if (!currentContact.history.includes(msgData)) return;
                     // ★ 核心：保存时把原时间戳拼回去
-                    const oldContent = msgData.content;
-                    msgData.content = timestampPart + newText;
-                    // ★ 气泡数量变化后，按原文匹配隐藏气泡，避免新增段落继承旧下标的隐藏状态。
-                    msgData.hiddenIndices = remapHiddenBubbleIndices(msgData, oldContent, msgData.content);
+                    ChatBubbles.edit(msgData, timestampPart + newText);
                     
                     Storage.saveContacts(); 
 
@@ -12203,13 +12215,15 @@ const App = {
         } 
         else if (action === 'delete') {
             if (confirm("确定要删除这条消息吗？")) {
+                const liveIndex = currentContact.history.indexOf(msgData);
+                if (liveIndex < 0) return;
 
                 // 1. 获取当前滚动条位置（保险起见，虽然通常不需要手动恢复）
                 const scrollContainer = UI.els.chatMsgs.parentElement;
                 const currentScrollTop = scrollContainer.scrollTop;
 
                 // 2. 执行删除数据
-                currentContact.history.splice(msgIndex, 1);
+                currentContact.history.splice(liveIndex, 1);
 
                 // 3. 保存
                 Storage.saveContacts();
@@ -12365,6 +12379,19 @@ const App = {
         document.getElementById('select-count-num').innerText = count;
     },
 
+    resolveSelectedBubble(contact, bubble) {
+        const messageId = bubble?.dataset?.messageId;
+        const message = messageId
+            ? contact.history.find(item => String(item?.messageId) === messageId)
+            : bubble?.messageRef;
+        // ★ 有 ID 却找不到时绝不退回下标；临时提示也没有 bubbleKey，直接跳过。
+        if (!message || !contact.history.includes(message)) return null;
+        const key = bubble?.dataset?.bubbleKey;
+        if (!key) return null;
+        const partIndex = ChatBubbles.indexOf(message, key);
+        return partIndex === null ? null : { message, key, partIndex, msgIndex: contact.history.indexOf(message) };
+    },
+
     // 6. 绑定底部按钮事件 (只绑定一次)
     bindSelectBarEvents() {
         if (this._selectBarEventsBound) return;
@@ -12386,95 +12413,23 @@ const App = {
     // ==========================================
     handleBatchCopy() {
         if (STATE.selectedBubbles.size === 0) return;
-
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
-        
-        // 1. 排序 (兼容 'thought' 排序)
-        const sortedBubbles = Array.from(STATE.selectedBubbles).sort((a, b) => {
-            const msgIndexA = a.messageRef ? contact.history.indexOf(a.messageRef) : parseInt(a.dataset.msgIndex);
-            const msgIndexB = b.messageRef ? contact.history.indexOf(b.messageRef) : parseInt(b.dataset.msgIndex);
-            if (msgIndexA !== msgIndexB) return msgIndexA - msgIndexB;
-            
-            const getPartVal = (bubble) => {
-                const pIdx = bubble.dataset.partIndex;
-                return pIdx === 'thought' ? -1 : parseInt(pIdx);
-            };
-            return getPartVal(a) - getPartVal(b);
-        });
-
-        // 2. 提取内容 (★★★ 核心修改：直接从数据源读取，无视 DOM 折叠状态 ★★★)
-        const textParts = sortedBubbles.map(bubble => {
-            try {
-                const img = bubble.querySelector('img'); 
-                const expiredPlaceholder = bubble.querySelector('.expired-image-placeholder');
-                
-                const mIdx = bubble.messageRef
-                    ? contact.history.indexOf(bubble.messageRef)
-                    : parseInt(bubble.dataset.msgIndex);
-                const msg = contact ? contact.history[mIdx] : null;
-                
-                // A & B: 处理图片
-                if (img || expiredPlaceholder) {
-                    if (!contact) return img ? "[图片]" : "[图片已清理]";
-                    if (msg && msg.image_description) {
-                        return `[图片描述: ${msg.image_description}]`;
-                    } else {
-                        return img ? "[图片]" : "[图片（原图已清理）]";
-                    }
-                } 
-
-                // C. 处理文本 / 思考块
-                // 如果找不到数据兜底用 DOM 提取
-                if (!msg) return cleanMarkdownForCopy(bubble.innerText); 
-
-                const rawPIdx = bubble.dataset.partIndex;
-                const pIdx = rawPIdx === 'thought' ? 'thought' : parseInt(rawPIdx);
-
-                let contentToParse = msg.content || '';
-                
-                // 1) 去除时间戳
-                if (msg.role === 'user') {
-                    contentToParse = contentToParse.replace(/^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/, '');
-                }
-                
-                // 2) AI 引用切分兼容
-                if (msg.role === 'assistant') {
-                    contentToParse = normalizeChatQuoteBreaks(contentToParse);
-                }
-
-                // 3) 把思考过程抽离出来
-                let thoughtText = '';
-                contentToParse = contentToParse.replace(/<(?:think|thinking|thought)>([\s\S]*?)<\/(?:think|thinking|thought)>/gi, (match, inner) => {
-                    thoughtText = inner.trim();
-                    return '';
-                });
-
-                // 4) 根据选中的索引，精准返回数据
-                if (pIdx === 'thought') {
-                    // 如果勾选的是思考过程，直接返回这段文字，不受界面折叠影响
-                    // 这里加了个 [思考过程] 标识，复制出来排版更清晰
-                    return `[思考过程]\n${cleanMarkdownForCopy(thoughtText)}`;
-                } else {
-                    // 如果勾选的是正文气泡
-                    const paragraphs = splitMessageIntoBubbleParts(contentToParse);
-                    if (paragraphs[pIdx]) {
-                        return cleanMarkdownForCopy(paragraphs[pIdx]);
-                    } else {
-                        // 兜底防错
-                        return cleanMarkdownForCopy(bubble.innerText);
-                    }
-                }
-                
-            } catch (e) {
-                console.error("提取单条消息失败:", e);
-                return ""; 
+        if (!contact) return;
+        const targets = [...STATE.selectedBubbles].map(bubble => this.resolveSelectedBubble(contact, bubble))
+            .filter(Boolean).sort((a, b) => a.msgIndex - b.msgIndex
+                || (a.partIndex === 'thought' ? -1 : a.partIndex)
+                - (b.partIndex === 'thought' ? -1 : b.partIndex));
+        if (!targets.length) { this.exitSelectMode(); return; }
+        // ★ 复制也从 key 找正文；过期图片和思考气泡无需依赖 DOM 中的 img 标签。
+        const fullText = targets.map(({ message, partIndex }) => {
+            if (partIndex === 'thought') return `[思考过程]\n${cleanMarkdownForCopy(ChatBubbles.parse(message).thought)}`;
+            if (partIndex === message.bubbleIds.length) {
+                return message.image_description ? `[图片描述: ${message.image_description}]`
+                    : message.isImageExpired ? '[图片（原图已清理）]' : '[图片]';
             }
-        });
+            return cleanMarkdownForCopy(ChatBubbles.parse(message).parts[partIndex]);
+        }).filter(Boolean).join('\n\n');
 
-        // 拼接所有选中的内容
-        const fullText = textParts.filter(t => t).join('\n\n');
-        
-        // 3. 执行复制
         navigator.clipboard.writeText(fullText)
             .then(() => {
                 Toast.show('已复制');
@@ -12498,61 +12453,11 @@ const App = {
         const currentContact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!currentContact) return;
 
-        // 1. 整理选中的目标
-        const selectionMap = {};
-        let anyVisibleFound = false;
-
-        STATE.selectedBubbles.forEach(bubble => {
-            const mIdx = bubble.messageRef
-                ? currentContact.history.indexOf(bubble.messageRef)
-                : parseInt(bubble.dataset.msgIndex);
-            if (mIdx < 0 || !currentContact.history[mIdx]) return;
-            
-            // ★★★ 核心修改 1：兼容 'thought' 索引的解析 ★★★
-            const rawPIdx = bubble.dataset.partIndex;
-            const pIdx = rawPIdx === 'thought' ? 'thought' : parseInt(rawPIdx);
-            
-            if (!selectionMap[mIdx]) selectionMap[mIdx] = [];
-            selectionMap[mIdx].push(pIdx);
-
-            // 检查当前状态
-            const msg = currentContact.history[mIdx];
-            const currentHiddenList = msg.hiddenIndices || [];
-            
-            if (!currentHiddenList.includes(pIdx)) {
-                anyVisibleFound = true;
-            }
-        });
-
-        // 2. 目标动作
-        const shouldHide = anyVisibleFound;
-
-        // 3. 执行更新
-        Object.keys(selectionMap).forEach(key => {
-            const mIdx = parseInt(key);
-            const pIndices = selectionMap[mIdx]; 
-            const msg = currentContact.history[mIdx];
-
-            if (!msg.hiddenIndices) msg.hiddenIndices = [];
-
-            pIndices.forEach(pIdx => {
-                if (shouldHide) {
-                    if (!msg.hiddenIndices.includes(pIdx)) {
-                        msg.hiddenIndices.push(pIdx);
-                    }
-                } else {
-                    msg.hiddenIndices = msg.hiddenIndices.filter(id => id !== pIdx);
-                }
-            });
-            
-            // ★★★ 核心修改 2：兼容 'thought' 的排序逻辑 ★★★
-            // 让 'thought' 排在最前面，其他数字按大小排
-            msg.hiddenIndices.sort((a, b) => {
-                const valA = a === 'thought' ? -1 : a;
-                const valB = b === 'thought' ? -1 : b;
-                return valA - valB;
-            });
-        });
+        const targets = [...STATE.selectedBubbles]
+            .map(bubble => this.resolveSelectedBubble(currentContact, bubble)).filter(Boolean);
+        if (!targets.length) { this.exitSelectMode(); return; }
+        const shouldHide = targets.some(target => !ChatBubbles.isHidden(target.message, target.key));
+        targets.forEach(target => ChatBubbles.setHidden(target.message, target.key, shouldHide));
 
         // 4. 保存并刷新
         Storage.saveContacts();
@@ -12570,95 +12475,20 @@ const App = {
         const currentContact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!currentContact) return;
 
-        // 1. 将待删除项按 msgIndex 分组
-        const deletionMap = {};
-
+        // ★ 显式选择已经给出了气泡 key；直接删除这些 key，幸存者的 key 和隐藏状态原样保留。
+        const deletionMap = new Map();
         STATE.selectedBubbles.forEach(bubble => {
-            const mIdx = bubble.messageRef
-                ? currentContact.history.indexOf(bubble.messageRef)
-                : parseInt(bubble.dataset.msgIndex);
-            if (mIdx < 0 || !currentContact.history[mIdx]) return;
-            // ★★★ 核心修改 1：兼容思考气泡的字符串索引 'thought' ★★★
-            const rawPIdx = bubble.dataset.partIndex;
-            const pIdx = rawPIdx === 'thought' ? 'thought' : parseInt(rawPIdx);
-            
-            if (!deletionMap[mIdx]) deletionMap[mIdx] = [];
-            deletionMap[mIdx].push(pIdx);
+            const target = this.resolveSelectedBubble(currentContact, bubble);
+            if (!target) return;
+            if (!deletionMap.has(target.message)) deletionMap.set(target.message, new Set());
+            deletionMap.get(target.message).add(target.key);
         });
-
-        // 2. 遍历分组，执行删除 (从后往前删)
-        const affectedIndices = Object.keys(deletionMap).map(Number).sort((a, b) => b - a);
-
-        affectedIndices.forEach(msgIndex => {
-            const msg = currentContact.history[msgIndex];
-            const partsToDelete = deletionMap[msgIndex]; // 例如: [0, 2, 'thought']
-
-            const oldContent = msg.content || '';
-            let content = oldContent;
-            const timestampRegex = /^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/;
-            let timestampPart = '';
-            
-            if (match = content.match(timestampRegex)) {
-                timestampPart = match[0];
-                content = content.replace(timestampRegex, '');
-            }
-
-            // ==============================================================
-            // ★★★ 核心修改 2：切分段落前，必须先将思考过程抽离，保证段落索引准确 ★★★
-            // ==============================================================
-            let thoughtMatchText = ""; 
-            if (msg.role === 'assistant') {
-                // 找出并保存原生的 <think> 块，同时把它从 content 里挖掉
-                content = content.replace(/<(?:think|thinking|thought)>([\s\S]*?)<\/(?:think|thinking|thought)>/gi, (match) => {
-                    thoughtMatchText = match; 
-                    return ''; 
-                });
-                
-                content = normalizeChatQuoteBreaks(content);
-            }
-            
-            // 现在 content 里只有纯文本了，切分出来的索引绝对准确
-            let paragraphs = splitMessageIntoBubbleParts(content);
-            const imagePartIndex = paragraphs.length;
-            
-            // --- B. 处理文本删除 ---
-            let newParagraphs = paragraphs.filter((_, index) => !partsToDelete.includes(index));
-
-            // --- C. 处理图片删除 ---
-            if (partsToDelete.includes(imagePartIndex)) {
-                msg.images = null;
-                msg.image_description = null; 
-                msg.isImageExpired = false;   
-            }
-
-            // --- D. 重组 ---
-            const hasImagesLeft = (msg.images && msg.images.length > 0) || msg.isImageExpired;
-            // ★★★ 判断思考气泡是否幸存（存在，且没被勾选删除） ★★★
-            const hasThoughtLeft = (msg.role === 'assistant' && thoughtMatchText && !partsToDelete.includes('thought'));
-            
-            // 如果 文字没了 AND 图片没了 AND 思考过程也没了，这消息就废了
-            if (newParagraphs.length === 0 && !hasImagesLeft && !hasThoughtLeft) {
-                // 彻底删除整条消息
-                currentContact.history.splice(msgIndex, 1);
-            } else {
-                // 更新文本
-                let newContent = newParagraphs.join('\n\n');
-                
-                if (msg.role === 'user') {
-                    newContent = timestampPart + newContent;
-                } else if (msg.role === 'assistant') {
-                    // ★★★ 如果思考气泡幸存，把它拼回最前面 ★★★
-                    if (hasThoughtLeft) {
-                        newContent = thoughtMatchText + '\n\n' + newContent;
-                    }
-                }
-                
-                msg.content = newContent.trim();
-                // ★ 删除前面的气泡后，幸存气泡的隐藏索引也必须一起移动。
-                msg.hiddenIndices = remapHiddenBubbleIndices(msg, oldContent, msg.content);
-                if (!hasImagesLeft) msg.hiddenIndices = msg.hiddenIndices.filter(index => index !== newParagraphs.length);
-            }
-        });
+        [...deletionMap].sort((a, b) => currentContact.history.indexOf(b[0]) - currentContact.history.indexOf(a[0]))
+            .forEach(([message, keys]) => {
+                const index = currentContact.history.indexOf(message);
+                if (index < 0) return;
+                if (!ChatBubbles.deleteParts(message, keys)) currentContact.history.splice(index, 1);
+            });
 
         // 3. 保存并刷新
         Storage.saveContacts();
@@ -12774,10 +12604,19 @@ const App = {
 
 
     // 【7. APP CONTROLLER】
-    showMessageContextMenu(msgIndex, rect) {
+    showMessageContextMenu(msgIndex, rect, target) {
+        STATE.selectedMessageId = null;
+        STATE.selectedMessageRef = null;
         STATE.selectedMessageIndex = msgIndex;
         const selectedContact = STATE.contacts.find(c => c.id === STATE.currentContactId);
-        STATE.selectedMessageRef = selectedContact?.history?.[msgIndex] || null;
+        const messageId = target?.dataset?.messageId || '';
+        const messageRef = messageId
+            ? selectedContact?.history?.find(item => String(item?.messageId) === messageId)
+            : target?.messageRef;
+        // ★ 临时提示和已删除的目标没有身份，不能沿用画面上的旧下标打开操作菜单。
+        if (!messageRef || !selectedContact.history.includes(messageRef)) return;
+        STATE.selectedMessageId = messageId;
+        STATE.selectedMessageRef = messageRef;
 
         const menu = document.getElementById('msg-context-menu');
 
@@ -12808,7 +12647,7 @@ const App = {
         // ★★★ 新增：动态修改按钮文字 ★★★
         const currentContact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (currentContact) {
-            const msg = currentContact.history[msgIndex];
+            const msg = messageRef;
             // 找到我们在 HTML 里加的那个按钮 (假设你加了 data-action="toggle-hidden")
             const toggleBtn = menu.querySelector('button[data-action="toggle-hidden"]');
             
@@ -12843,6 +12682,7 @@ const App = {
         const menu = document.getElementById('msg-context-menu');
         if (menu) menu.style.display = 'none';
         STATE.selectedMessageIndex = null;
+        STATE.selectedMessageId = null;
         STATE.selectedMessageRef = null;
     },
 
@@ -14908,7 +14748,7 @@ const App = {
                 // ★★★ 使用 bubble 的位置来弹出菜单，如果 bubble 存在的话 ★★★
                 // 这样即使用户按在分割线上，也能在 group 的位置弹出菜单
                 const rect = bubble ? bubble.getBoundingClientRect() : group.getBoundingClientRect();
-                App.showMessageContextMenu(msgIndex, rect);
+                App.showMessageContextMenu(msgIndex, rect, bubble || group);
 
             }, LONG_PRESS_DURATION);
 
@@ -14953,7 +14793,7 @@ const App = {
                 
                 // ★★★ 使用 bubble 或 group 的位置来弹出菜单 ★★★
                 const rect = bubble ? bubble.getBoundingClientRect() : group.getBoundingClientRect();
-                App.showMessageContextMenu(msgIndex, rect);
+                App.showMessageContextMenu(msgIndex, rect, bubble || group);
             }, LONG_PRESS_DURATION);
         });
 
@@ -17881,7 +17721,7 @@ function transformOutsideFencedCode(text, transform) {
  * 延续原有“引用开头另起气泡”的规则，但代码中的 > 必须保持原样。
  */
 function normalizeChatQuoteBreaks(text) {
-    return transformOutsideFencedCode(text, plainText => plainText.replace(/(^|\n)>\s*/g, '\n\n'));
+    return ChatBubbles.normalizeQuotes(text);
 }
 
 /**
@@ -17889,115 +17729,7 @@ function normalizeChatQuoteBreaks(text) {
  * 同时支持反引号、波浪线和未闭合代码块，保证渲染、复制、删除共用同一套索引。
  */
 function splitMessageIntoBubbleParts(text) {
-    if (!text) return [];
-
-    const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
-    const parts = [];
-    let currentLines = [];
-    let fence = null;
-
-    const pushCurrentPart = () => {
-        const part = currentLines.join('\n').trim();
-        if (part) parts.push(part);
-        currentLines = [];
-    };
-
-    lines.forEach(line => {
-        if (fence) {
-            currentLines.push(line);
-
-            // 结束围栏必须使用相同字符，长度也不能短于开始围栏
-            const closingMatch = line.match(/^ {0,3}(`+|~+)\s*$/);
-            if (closingMatch && closingMatch[1][0] === fence.char && closingMatch[1].length >= fence.length) {
-                fence = null;
-            }
-            return;
-        }
-
-        const openingMatch = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-        if (openingMatch) {
-            fence = {
-                char: openingMatch[1][0],
-                length: openingMatch[1].length
-            };
-            currentLines.push(line);
-            return;
-        }
-
-        if (line.trim() === '') {
-            // 连续空行在代码块外仍沿用原有逻辑：结束当前气泡
-            pushCurrentPart();
-            return;
-        }
-
-        currentLines.push(line);
-    });
-
-    pushCurrentPart();
-    return parts;
-}
-
-/**
- * 编辑整条消息后，按气泡正文重新定位隐藏标记；图片仍占文字气泡之后的一个索引。
- * 相同正文优先一一匹配，只有两个已匹配锚点之间各剩一个气泡时才视为改写。
- */
-function remapHiddenBubbleIndices(message, oldContent, newContent) {
-    const hidden = Array.isArray(message.hiddenIndices) ? message.hiddenIndices : [];
-    if (!hidden.length) return hidden;
-
-    const getParts = content => {
-        let text = String(content || '');
-        if (message.role === 'user') {
-            text = text.replace(/^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/, '');
-        } else {
-            if (message.proactiveSource && typeof ProactiveMessages !== 'undefined') {
-                text = ProactiveMessages.displayContent(message, text);
-            }
-            text = normalizeChatQuoteBreaks(text);
-            text = text.replace(/<(?:think|thinking|thought)>([\s\S]*?)<\/(?:think|thinking|thought)>/gi, '');
-        }
-        return splitMessageIntoBubbleParts(text);
-    };
-
-    const oldParts = getParts(oldContent);
-    const newParts = getParts(newContent);
-    const rows = Array.from({ length: oldParts.length + 1 }, () => Array(newParts.length + 1).fill(0));
-    for (let i = oldParts.length - 1; i >= 0; i--) {
-        for (let j = newParts.length - 1; j >= 0; j--) {
-            rows[i][j] = oldParts[i] === newParts[j]
-                ? rows[i + 1][j + 1] + 1
-                : Math.max(rows[i + 1][j], rows[i][j + 1]);
-        }
-    }
-
-    const matches = [];
-    let i = 0, j = 0;
-    while (i < oldParts.length && j < newParts.length) {
-        if (oldParts[i] === newParts[j]) {
-            matches.push([i++, j++]);
-        } else if (rows[i + 1][j] >= rows[i][j + 1]) {
-            i++;
-        } else {
-            j++;
-        }
-    }
-
-    const indexMap = new Map(matches);
-    const anchors = [[-1, -1], ...matches, [oldParts.length, newParts.length]];
-    for (let k = 1; k < anchors.length; k++) {
-        const [oldStart, newStart] = anchors[k - 1];
-        const [oldEnd, newEnd] = anchors[k];
-        if (oldEnd - oldStart === 2 && newEnd - newStart === 2) {
-            indexMap.set(oldStart + 1, newStart + 1);
-        }
-    }
-
-    const remapped = hidden.map(index => {
-        if (index === 'thought') return index;
-        if (index === oldParts.length) return newParts.length;
-        return indexMap.get(index);
-    }).filter(index => index !== undefined);
-    return [...new Set(remapped)];
+    return ChatBubbles.split(text);
 }
 
 /**

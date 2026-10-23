@@ -25,7 +25,7 @@ const context = vm.createContext({ console, crypto: webcrypto, Date, setInterval
         return elements.get(id);
     }, createElement }
 });
-for (const name of ['js/config.js', 'js/history-visibility.js', 'js/pomodoro.js']) {
+for (const name of ['js/config.js', 'js/chat-bubbles.js', 'js/history-visibility.js', 'js/pomodoro.js']) {
     vm.runInContext(fs.readFileSync(name, 'utf8'), context, { filename: name });
 }
 const p = vm.runInContext('Pomodoro', context);
