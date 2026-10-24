@@ -8209,15 +8209,34 @@ body.dark-mode .world-sense-location-candidate:focus-visible {
 }
 /* ★ 清理入口在卡片里占满整行，保持与弹窗按钮分开的视觉层级。 */
 #storage-space-clean-images-btn {
-    display: block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
     width: 100%;
-    min-height: 46px;
-    font-weight: 600;
-    background: var(--primary-color, #876eff);
-    border-color: transparent;
-    color: #fff;
+    min-height: 44px;
+    padding: 11px 16px;
+    box-sizing: border-box;
+    border: 0.7px solid var(--btn-border-color);
+    border-radius: 10px;
+    background: var(--btn-color);
+    color: #333;
+    font-family: inherit;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
 }
-.storage-space-button-primary { background: var(--primary-color, #876eff); border-color: transparent; color: #fff; }
+
+
+.storage-space-button-primary {
+    border: 0.7px solid var(--primary-btn-text);
+    background: var(--btn-color);
+    color: var(--primary-btn-text);
+
+}
+
+
+
 .storage-space-button:disabled { opacity: .45; cursor: not-allowed; }
 
 /* ★ 弹窗只借朋友圈设置的单层滚动结构；列表、勾选框均使用本页独立类名。 */
@@ -8295,8 +8314,23 @@ body.dark-mode .world-sense-location-candidate:focus-visible {
 .storage-space-modal-actions .storage-space-button { flex: 1; }
 body.dark-mode .storage-space-card { background: rgba(0,0,0,.3); border-color: rgba(245,245,245,.5); }
 body.dark-mode .storage-space-legend-item, body.dark-mode .storage-space-button { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.2); }
-body.dark-mode #storage-space-clean-images-btn { background: var(--primary-color, #876eff); border-color: transparent; color: #fff; }
-body.dark-mode .storage-space-button-primary { background: var(--primary-color, #876eff); color: #fff; }
+
+
+body.dark-mode #storage-space-clean-images-btn {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #f5f5f7; 
+
+}
+
+body.dark-mode .storage-space-button-primary {
+    border: 2px solid var(--primary-btn-text);
+    background: var(--btn-color);
+    color: #ffffff;    
+
+}
+
+
 body.dark-mode .storage-space-modal-body { background: rgba(20,20,20,.92); }
 body.dark-mode .storage-space-modal-overlay { background: rgba(0,0,0,.25); }
 body.dark-mode .storage-space-hint { background: rgba(255,255,255,.1); border-color: rgba(245,245,245,.3); color: #cdcdcdc8; }
@@ -12636,6 +12670,101 @@ body.dark-mode .usage-day.usage-selected {
 body.dark-mode .usage-day.usage-selected small {
     color: inherit;
 }
+
+/* ★ 用量三项共用一张卡片；胶囊独立复刻倒数日的滑块，不碰费用计算器的切换。 */
+.usage-metric-tabs {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+    margin: 0 15px 10px;
+    padding: 4px;
+    border: 1px solid rgba(245,245,245,.75);
+    border-radius: 12px;
+    background: rgba(255,255,255,.15);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    overflow: hidden;
+}
+.usage-metric-tabs::before {
+    content: '';
+    position: absolute;
+    z-index: 0;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc((100% - 16px) / 3);
+    box-sizing: border-box;
+    border: 1px solid #fff;
+    border-radius: 10px;
+    background: rgba(230,230,230,.7);
+    transition: transform .22s ease;
+}
+.usage-metric-tabs.usage-metric-output::before { transform: translateX(calc(100% + 4px)); }
+.usage-metric-tabs.usage-metric-count::before { transform: translateX(calc(200% + 8px)); }
+.usage-metric-tabs button {
+    position: relative;
+    z-index: 1;
+    min-width: 0;
+    min-height: 36px;
+    padding: 4px 2px;
+    border: 0;
+    background: transparent;
+    color: #777;
+    font-size: .82rem;
+    cursor: pointer;
+}
+.usage-metric-tabs button.active { color: #252525; font-weight: 600; }
+.usage-metric-tabs button:focus-visible,
+.usage-donut-legend-item:focus-visible { outline: 2px solid var(--primary-color, #876eff); outline-offset: 2px; }
+body.dark-mode .usage-metric-tabs { background: rgba(118,118,118,.15); border-color: rgba(197,197,197,.75); }
+body.dark-mode .usage-metric-tabs::before { background: rgba(30,30,30,.4); border-color: rgba(245,245,245,.5); }
+body.dark-mode .usage-metric-tabs button { color: #aaa; }
+body.dark-mode .usage-metric-tabs button.active { color: #fff; }
+
+/* ★ 环形图沿用存储管理的安全尺寸；模型较多时图例纵向展开。 */
+.usage-donut {
+    display: grid;
+    place-items: center;
+    width: 200px;
+    max-width: 100%;
+    aspect-ratio: 1;
+    margin: 6px auto 14px;
+    border-radius: 50%;
+}
+.usage-donut svg { display: block; width: 100%; height: auto; overflow: hidden; border-radius: 50%; }
+.usage-donut circle { cursor: pointer; transition: opacity .18s ease, filter .18s ease; }
+.usage-donut circle.usage-donut-selected { filter: brightness(1.14) drop-shadow(0 0 3px rgba(0,0,0,.34)); }
+.usage-donut circle.usage-donut-muted { opacity: .25; }
+.usage-donut-empty { display: grid; place-items: center; width: 100%; height: 100%; border: 1px dashed rgba(0,0,0,.2); border-radius: 50%; color: #777; font-size: .85rem; }
+.usage-donut-legend { display: grid; gap: 7px; }
+.usage-donut-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: rgba(255,255,255,.32);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: opacity .18s ease, border-color .18s ease, background .18s ease;
+}
+.usage-donut-swatch { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 3px; }
+.usage-donut-name { flex: 1; min-width: 0; }
+.usage-donut-name strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .87rem; }
+.usage-card .usage-donut-name small { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.usage-donut-value { flex: 0 0 auto; text-align: right; white-space: nowrap; font-size: .84rem; font-weight: 600; }
+.usage-card .usage-donut-value small { margin-top: 2px; }
+.usage-donut-legend-item.usage-donut-selected { border-color: var(--primary-color, #876eff); background: rgba(135,110,255,.16); }
+.usage-donut-legend-item.usage-donut-muted { opacity: .35; }
+.usage-donut-no-data { text-align: center; opacity: .7; }
+body.dark-mode .usage-donut-legend-item { background: rgba(255,255,255,.08); }
+body.dark-mode .usage-donut-empty { border-color: rgba(255,255,255,.3); color: #aaa; }
 
 /* ★ 费用计算器的“按次 / 按量”切换已确认满意：只整理换行，不改视觉参数。 */
 .usage-tabs {

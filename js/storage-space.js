@@ -121,10 +121,14 @@ const StorageSpace = {
         const svg = document.createElementNS(svgNS, 'svg');
         svg.setAttribute('viewBox', '0 0 220 220');
         svg.setAttribute('aria-hidden', 'true');
+        const visibleSlices = totals.filter(size => size > 0).length;
         let offset = 0;
         totals.forEach((size, index) => {
             if (!size) return;
-            const length = size / total;
+            const length = size / total * 100;
+            // ★ 每段两端各留半份空隙；极小扇区按自身比例缩小空隙，避免整段消失。
+            const gap = visibleSlices > 1 ? Math.min(1.2, length * 0.45) : 0;
+            const drawnLength = length - gap;
             const circle = document.createElementNS(svgNS, 'circle');
             circle.setAttribute('cx', '110');
             circle.setAttribute('cy', '110');
@@ -133,8 +137,8 @@ const StorageSpace = {
             circle.setAttribute('stroke', this.colors[index]);
             // ★ 圆环外缘为 82 + 17 = 99，完整落在 220 的 viewBox 内，桌面端不会溢出卡片。
             circle.setAttribute('stroke-width', '34');
-            circle.setAttribute('stroke-dasharray', `${length * 100} ${100 - length * 100}`);
-            circle.setAttribute('stroke-dashoffset', String(-offset * 100));
+            circle.setAttribute('stroke-dasharray', `${drawnLength} ${100 - drawnLength}`);
+            circle.setAttribute('stroke-dashoffset', String(-(offset + gap / 2)));
             circle.setAttribute('pathLength', '100');
             circle.setAttribute('transform', 'rotate(-90 110 110)');
             circle.dataset.storageSlice = String(index);
@@ -221,6 +225,14 @@ const StorageSpace = {
         if (this.saving) return;
         const ids = new Set([...document.querySelectorAll('#storage-space-contact-list input:checked')].map(input => input.value));
         if (!ids.size) return;
+        // ★ 二次确认放在写库前；取消时保留勾选和弹窗，原图也完全不动。
+        const imageBytes = STATE.contacts
+            .filter(contact => ids.has(String(contact.id)))
+            .reduce((sum, contact) => sum + this.contactImageBytes(contact), 0);
+        const confirmed = window.confirm(
+            `确定清理已选 ${ids.size} 位联系人的聊天图片吗？\n预计清理约 ${this.formatBytes(imageBytes)}。\n\n原图清理后无法在聊天中恢复；消息占位符和已有文字描述会保留。`
+        );
+        if (!confirmed) return;
         this.saving = true;
         this.updateConfirm();
         try {

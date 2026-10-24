@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 
 // ★ 只装入存储管理模块；用假的数据库和页面节点验证旧记录与清理结果。
-function createManager({ contacts, failSave = false } = {}) {
+function createManager({ contacts, failSave = false, confirmResult = true } = {}) {
     const elements = new Map();
     const element = id => {
         if (!elements.has(id)) elements.set(id, {
@@ -16,9 +16,11 @@ function createManager({ contacts, failSave = false } = {}) {
         return elements.get(id);
     };
     let saved = null;
+    let confirmText = '';
     const selected = [{ value: 'a' }];
     const context = {
         Blob,
+        window: { confirm(message) { confirmText = message; return confirmResult; } },
         document: {
             getElementById: element,
             querySelectorAll(selector) { return selector.includes('input:checked') ? selected : []; }
@@ -40,7 +42,7 @@ function createManager({ contacts, failSave = false } = {}) {
         .replace(/StorageSpace\.bind\(\);\s*$/, 'globalThis.manager = StorageSpace;');
     vm.runInNewContext(source, context);
     context.manager.open = async () => {};
-    return { manager: context.manager, context, getSaved: () => saved };
+    return { manager: context.manager, context, getSaved: () => saved, getConfirmText: () => confirmText };
 }
 
 test('旧聊天图片能直接计入大小，远程图片地址不按本地原图计算', () => {
@@ -102,6 +104,17 @@ test('数据库写入失败时，内存中的原图保持不变', async () => {
     const contacts = [{ id: 'a', history: [{ images: [image], image_description: '一只猫' }] }];
     const { manager, context } = createManager({ contacts, failSave: true });
     await manager.cleanSelected();
+    assert.equal(context.STATE.contacts, contacts);
+    assert.equal(contacts[0].history[0].images[0], image);
+});
+
+test('二次确认取消后不写数据库，原图和选择弹窗保持不变', async () => {
+    const image = 'data:image/png;base64,YQ==';
+    const contacts = [{ id: 'a', history: [{ images: [image], image_description: '一只猫' }] }];
+    const { manager, context, getSaved, getConfirmText } = createManager({ contacts, confirmResult: false });
+    await manager.cleanSelected();
+    assert.match(getConfirmText(), /1 位联系人/);
+    assert.equal(getSaved(), null);
     assert.equal(context.STATE.contacts, contacts);
     assert.equal(contacts[0].history[0].images[0], image);
 });
