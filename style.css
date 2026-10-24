@@ -8146,6 +8146,152 @@ body.dark-mode .world-sense-location-candidate:focus-visible {
 
 /* =================世界感知结束====================*/
 
+/* ★★★★★ 存储空间管理 START：独立类名复刻世界感知卡片与朋友圈弹窗质感 ★★★★★ */
+.storage-space-page {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 18px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+.storage-space-card {
+    padding: 20px;
+    border: 1px solid #fff;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.storage-space-card + .storage-space-card { margin-top: 16px; }
+.storage-space-card-title { margin: 0 0 12px; font-size: 1rem; color: inherit; }
+.storage-space-total { margin: 0; font-size: .93rem; font-weight: 600; }
+.storage-space-caption { margin: 6px 0 12px; font-size: .76rem; line-height: 1.45; opacity: .68; }
+.storage-space-chart { width: min(220px, 100%); aspect-ratio: 1; margin: 4px auto 14px; border-radius: 50%; }
+.storage-space-chart svg { display: block; width: 100%; height: 100%; overflow: visible; border-radius: 50%; }
+.storage-space-chart-empty { display: grid; place-items: center; color: #777; font-size: .85rem; border: 1px dashed rgba(0,0,0,.2); }
+.storage-space-slice { cursor: pointer; transition: opacity .18s ease, filter .18s ease; }
+.storage-space-slice.storage-space-selected { filter: brightness(1.14) drop-shadow(0 0 3px rgba(0,0,0,.34)); }
+.storage-space-slice.storage-space-muted { opacity: .25; }
+.storage-space-legend { display: grid; gap: 7px; }
+.storage-space-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 40px;
+    padding: 7px 10px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    background: rgba(255,255,255,.32);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: opacity .18s ease, border-color .18s ease, background .18s ease;
+}
+.storage-space-legend-item strong { margin-left: auto; white-space: nowrap; font-size: .86rem; }
+.storage-space-swatch { width: 11px; height: 11px; flex: 0 0 11px; border-radius: 3px; }
+.storage-space-legend-item.storage-space-selected { border-color: var(--primary-color, #876eff); background: rgba(135,110,255,.16); }
+.storage-space-legend-item.storage-space-muted { opacity: .35; }
+.storage-space-legend-item:focus-visible, .storage-space-button:focus-visible { outline: 2px solid var(--primary-color, #876eff); outline-offset: 2px; }
+.storage-space-button {
+    min-height: 40px;
+    padding: 9px 16px;
+    border: 1px solid rgba(0,0,0,.18);
+    border-radius: 9px;
+    background: rgba(255,255,255,.65);
+    color: inherit;
+    cursor: pointer;
+}
+.storage-space-button-primary { background: var(--primary-color, #876eff); border-color: transparent; color: #fff; }
+.storage-space-button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ★ 弹窗只借朋友圈设置的单层滚动结构；列表、勾选框均使用本页独立类名。 */
+.storage-space-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,.2);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity .2s ease, visibility .2s ease;
+}
+.storage-space-modal-overlay:not(.hidden) { opacity: 1; visibility: visible; }
+.storage-space-modal-panel {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    animation: modalPop .3s ease-out;
+}
+.storage-space-modal-panel > h3 { margin: 0 0 12px; color: #fff; text-align: center; }
+.storage-space-modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 15px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    background: rgba(255,255,255,.92);
+    box-shadow: inset 0 2px 8px rgba(0,0,0,.05);
+}
+.storage-space-hint {
+    margin: 0 0 14px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(0,0,0,.15);
+    background: rgba(0,0,0,.05);
+    color: #555;
+    font-size: .8rem;
+    line-height: 1.5;
+}
+.storage-space-contact-list { display: grid; gap: 10px; }
+.storage-space-contact-row { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 10px 12px; border-radius: 14px; background: rgba(0,0,0,.06); cursor: pointer; }
+.storage-space-contact-avatar { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%; object-fit: cover; display: grid; place-items: center; background: rgba(120,120,150,.12); }
+.storage-space-contact-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .9rem; }
+.storage-space-contact-row input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    flex: 0 0 20px;
+    margin: 0;
+    border: 1px solid #888;
+    border-radius: 5px;
+    background: rgba(0,0,0,.2);
+    cursor: pointer;
+}
+.storage-space-contact-row input[type="checkbox"]:checked { background: var(--primary-color, #876eff); border-color: var(--primary-color, #876eff); }
+.storage-space-contact-row input[type="checkbox"]:checked::after {
+    content: '';
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: center / 70% no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+}
+.storage-space-contact-row input[type="checkbox"]:disabled { opacity: .35; cursor: not-allowed; }
+.storage-space-modal-actions { display: flex; gap: 10px; }
+.storage-space-modal-actions .storage-space-button { flex: 1; }
+body.dark-mode .storage-space-card { background: rgba(0,0,0,.3); border-color: rgba(245,245,245,.5); }
+body.dark-mode .storage-space-legend-item, body.dark-mode .storage-space-button { background: rgba(255,255,255,.08); border-color: rgba(255,255,255,.2); }
+body.dark-mode .storage-space-button-primary { background: var(--primary-color, #876eff); color: #fff; }
+body.dark-mode .storage-space-modal-body { background: rgba(20,20,20,.92); }
+body.dark-mode .storage-space-modal-overlay { background: rgba(0,0,0,.25); }
+body.dark-mode .storage-space-hint { background: rgba(255,255,255,.1); border-color: rgba(245,245,245,.3); color: #cdcdcdc8; }
+body.dark-mode .storage-space-contact-row { background: rgba(255,255,255,.07); }
+/* ★★★★★ 存储空间管理 END ★★★★★ */
+
 
 
 
@@ -12589,18 +12735,3 @@ body.dark-mode .usage-page #usage-cost {
 }
 
 /* ★★★★★ 用量统计 END ★★★★★ */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

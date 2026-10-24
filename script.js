@@ -2760,11 +2760,14 @@ const UI = {
         const viewAsyncReply = document.getElementById('view-async-reply');
         const viewWorldbook = document.getElementById('view-worldbook');
         const viewWorldSense = document.getElementById('view-world-sense');
+        const viewStorageSpace = document.getElementById('view-storage-space');
         const viewMoments = document.getElementById('view-moments');
         const bottomTabBar = document.getElementById('bottom-tab-bar');
 
         const usageView = document.getElementById('view-usage');
         if (usageView && viewName !== 'usage') usageView.style.display = 'none';
+        // ★ 存储管理也是探索子页，切往其它页面时统一收起。
+        if (viewStorageSpace && viewName !== 'storage-space') viewStorageSpace.style.display = 'none';
         // ★ Agent 是后加的探索子页：旧分支里没有逐个隐藏它，这里先统一收口。
         if (viewAgent && viewName !== 'agent') viewAgent.style.display = 'none';
         // ★ 角色记忆也是探索子页，先统一隐藏，再在对应分支打开。
@@ -2783,7 +2786,14 @@ const UI = {
         // 先清除底栏的全部高亮状态
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-        if (viewName === 'usage') {
+        if (viewName === 'storage-space') {
+            App.rememberReturnView('storage-space', STATE.currentMainView || 'explore');
+            appContainer.classList.remove('in-chat-mode');
+            document.querySelectorAll('.page-view').forEach(view => { view.style.display = 'none'; });
+            viewStorageSpace.style.display = 'flex';
+            if (bottomTabBar) bottomTabBar.style.display = 'none';
+            StorageSpace.open().catch(error => console.warn('[存储空间管理] 统计失败:', error));
+        } else if (viewName === 'usage') {
             appContainer.classList.remove('in-chat-mode');
             document.querySelectorAll('.page-view').forEach(view => { view.style.display = 'none'; });
             usageView.style.display = 'flex';
@@ -5480,6 +5490,7 @@ const App = {
             ['async-backend', 'view-async-backend'],
             ['worldbook', 'view-worldbook'],
             ['world-sense', 'view-world-sense'],
+            ['storage-space', 'view-storage-space'],
             ['moments', 'view-moments']
         ];
 
@@ -5494,8 +5505,8 @@ const App = {
         // ★ 边缘滑返回只做页面级操作：输入、按钮、弹窗、横向滚动区先全部让路，避免误触。
         if (!target || target === document) return true;
         if (target.closest('input, textarea, select, button, a, label, [contenteditable="true"], [role="button"]')) return true;
-        if (target.closest('.modal:not(.hidden), .proactive-api-modal:not(.hidden), .menu, .contact-menu, .message-actions-menu')) return true;
-        const hasVisibleModal = Array.from(document.querySelectorAll('.modal:not(.hidden), .proactive-api-modal:not(.hidden), #modal-overlay:not(.hidden)')).some(el => {
+        if (target.closest('.modal:not(.hidden), .proactive-api-modal:not(.hidden), #storage-space-clean-modal:not(.hidden), .menu, .contact-menu, .message-actions-menu')) return true;
+        const hasVisibleModal = Array.from(document.querySelectorAll('.modal:not(.hidden), .proactive-api-modal:not(.hidden), #modal-overlay:not(.hidden), #storage-space-clean-modal:not(.hidden)')).some(el => {
             const style = getComputedStyle(el);
             return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
         });
@@ -5532,6 +5543,7 @@ const App = {
             'async-backend': 'async-backend-back-btn',
             worldbook: 'worldbook-back-btn',
             'world-sense': 'world-sense-back-btn',
+            'storage-space': 'storage-space-back-btn',
             moments: 'moments-back-btn'
         };
         const backBtn = document.getElementById(backButtonMap[activeView]);
