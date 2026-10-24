@@ -58,6 +58,24 @@ const DB = {
         });
     },
 
+    // ★ 用量统计按日期前缀读取轻量请求记录，避免每来一笔都重写整天的对象。
+    async getByPrefix(prefix) {
+        const db = await this.open();
+        return new Promise((resolve, reject) => {
+            const tx = db.transaction(this.storeName, 'readonly');
+            const store = tx.objectStore(this.storeName);
+            const rows = {};
+            const req = store.openCursor(IDBKeyRange.bound(prefix, `${prefix}\uffff`));
+            req.onsuccess = () => {
+                const cursor = req.result;
+                if (!cursor) return resolve(rows);
+                rows[String(cursor.key).slice(prefix.length)] = cursor.value;
+                cursor.continue();
+            };
+            req.onerror = () => reject(req.error);
+        });
+    },
+
     async set(key, value) {
         const db = await this.open();
         return new Promise((resolve, reject) => {

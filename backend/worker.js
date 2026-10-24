@@ -1,6 +1,6 @@
 const DEFAULT_JOB_TTL_HOURS = 6;
 // ★ 前端只用此版本识别已部署的 Worker；发布新版 worker.js 时同步递增。
-const WORKER_VERSION = "2026.10.09.1";
+const WORKER_VERSION = "2026.10.24.2";
 const WORKER_PROTOCOL_VERSION = 1;
 const MIN_JOB_TTL_HOURS = 0.25;
 const MAX_JOB_TTL_HOURS = 24;
@@ -213,6 +213,14 @@ export class ProactiveCharacterObject {
       return Response.json({ log: await this.state.storage.get("proactiveRequestLog") || null });
     }
 
+    if (request.method === "GET" && action === "usage") {
+      // ★ 主动 Alarm 在浏览器关闭时运行；按日提供轻量用量，不传请求正文。
+      const date = url.searchParams.get("date") || "";
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return Response.json({ error: "invalid_date" }, { status: 400 });
+      const stored = await this.state.storage.list({ prefix: `usage:${date}:` });
+      return Response.json({ rows: Object.fromEntries([...stored].map(([key, value]) => [key.slice(`usage:${date}:`.length), value])) });
+    }
+
     if (request.method === "GET" && action === "messages") {
       const outbox = await this.state.storage.get("outbox") || [];
       return Response.json({ messages: outbox.filter((item) => item.acknowledged !== true) });
@@ -408,6 +416,7 @@ export class ProactiveCharacterObject {
       try {
         await this.state.storage.put("proactiveRequestLog", {
           createdAt: Date.now(),
+          heartbeatRunId,
           characterId: capsule.characterId,
           characterName: capsule.characterName,
           source: "Worker",
@@ -428,7 +437,22 @@ export class ProactiveCharacterObject {
       if (!response.ok) {
         throw new Error(`proactive_upstream_${response.status}:${sanitizeLogText(text)}`);
       }
-      const rawContent = extractAssistantContent(JSON.parse(text));
+      const responseData = JSON.parse(text);
+      const rawContent = extractAssistantContent(responseData);
+      // ★ 每次主动判断只存数字；同一轮重试用 heartbeatRunId 覆盖，避免重复计费。
+      const responseUsage = responseData.usage || responseData.usageMetadata;
+      if (responseUsage) {
+        const latestLog = await this.state.storage.get("proactiveRequestLog");
+        if (latestLog?.heartbeatRunId === heartbeatRunId) {
+          latestLog.usage = compactUsage(responseUsage);
+          await this.state.storage.put("proactiveRequestLog", latestLog);
+        }
+        const date = getOffsetDateKey(startedAt, capsule.timezoneOffsetMinutes);
+        await this.state.storage.put(`usage:${date}:${heartbeatRunId}`, {
+          site: sanitizeUrlForLog(upstream.provider.url), model: requestBody.model,
+          usage: compactUsage(responseUsage), status: "done", chat: false, reroll: false
+        });
+      }
       const decision = normalizeProactiveDecision(rawContent);
 
       runtime.lastHeartbeatAt = startedAt;
@@ -606,6 +630,7 @@ export default {
           features: {
             jobs: !!(env.CHAT_JOBS && env.CHAT_JOB_QUEUE && env.CHAT_JOB_OBJECT),
             proactive: !!env.CHAT_JOB_OBJECT,
+            proactiveUsage: true,
             encryptedClientKey: true
           }
         }, 200, request, env);
@@ -659,7 +684,7 @@ export default {
       }
 
       // ★ 新版优先复用 CHAT_JOB_OBJECT；旧 binding 只在读取/确认消息时参与，帮助已部署用户排空旧 outbox。
-      const proactiveMatch = url.pathname.match(/^\/proactive\/([^/]+)\/(sync|activity|status|request-log|messages|run|reroll|ack)$/i);
+      const proactiveMatch = url.pathname.match(/^\/proactive\/([^/]+)\/(sync|activity|status|request-log|usage|messages|run|reroll|ack)$/i);
       if (proactiveMatch && (env.CHAT_JOB_OBJECT || env.PROACTIVE_CHARACTER_OBJECT)) {
         const objectName = decodeURIComponent(proactiveMatch[1]);
         const action = proactiveMatch[2].toLowerCase();
@@ -969,14 +994,19 @@ async function runJob(jobId, body, env) {
     });
 
     let imageDescription = null;
+    let visionUsage = null;
     let agentActions = [];
     let agentPrompt = "";
+    let agentUsages = [];
     let agentStatus = body.agent?.todoManager ? "pending" : "disabled";
     let multimodalFallback = false;
     let messagesForChat = body.messages;
     if (body.vision) {
-      imageDescription = await analyzeVisionImage(body.vision, env, jobId, body.ttlSeconds);
+      const visionResult = await analyzeVisionImage(body.vision, env, jobId, body.ttlSeconds);
+      imageDescription = visionResult.description;
+      visionUsage = visionResult.usage;
       messagesForChat = injectImageDescription(body.messages, imageDescription, body.requestUserMessageIndex);
+      if (visionUsage) await buildJobWithEvent(jobId, env, { vision_usage: visionUsage }, "vision_usage_recorded");
     }
 
     if (body.agent?.todoManager) {
@@ -1001,12 +1031,14 @@ async function runJob(jobId, body, env) {
         );
       }
       agentActions = agentResult.actions || [];
+      agentUsages = agentResult.usages || [];
       agentStatus = agentResult.failed ? "failed" : "done";
 
       await buildJobWithEvent(jobId, env, {
         agent_status: agentStatus,
         agent_actions: agentActions,
         agent_prompt: agentPrompt,
+        agent_usages: agentUsages,
         agent_error: agentResult.failed ? sanitizeLogText(agentResult.error || "") : "",
         agent_finishedAt: Date.now()
       }, agentResult.failed ? "agent_todo_stage_failed" : "agent_todo_stage_done", {
@@ -1145,10 +1177,12 @@ async function runJob(jobId, body, env) {
       status: "done",
       result: content.trim(),
       image_description: imageDescription,
+      vision_usage: visionUsage,
       multimodal_fallback: multimodalFallback,
       agent_status: agentStatus,
       agent_actions: agentActions,
       agent_prompt: agentPrompt,
+      agent_usages: agentUsages,
       usage: data.usage || null,
       finishedAt: Date.now()
     }, "job_run_done", {
@@ -1219,7 +1253,9 @@ async function analyzeVisionImage(vision, env, jobId, ttlSeconds) {
     const data = await response.json();
     const description = String(data?.choices?.[0]?.message?.content || "").trim();
     if (!description) throw new Error("vision_empty_description");
-    return description;
+    // ★ 独立识图也会产生账单；用量跟随 job 回传，前端按视觉模型另记一笔。
+    return { description, usage: { site: sanitizeUrlForLog(upstream.provider.url), model: vision.model,
+      usage: compactUsage(data.usage || data.usageMetadata) } };
   } catch (error) {
     console.warn("vision_analyze_failed", {
       error: error?.message || String(error),
@@ -1233,7 +1269,7 @@ async function analyzeVisionImage(vision, env, jobId, ttlSeconds) {
         authMode: vision.authMode || ""
       }, ttlSeconds);
     }
-    return visionFallbackDescription();
+    return { description: visionFallbackDescription(), usage: null };
   }
 }
 
@@ -1282,6 +1318,7 @@ function visionFallbackDescription() {
 
 // ★★★★★ 后台 Agent：TODO 管理 START ★★★★★
 async function runTodoManagerAgent(agent, env, jobId, ttlSeconds) {
+  const usages = [];
   try {
     const model = sanitizeModel(agent.model || env.DEFAULT_MODEL);
     const upstream = resolveUpstream(agent.apiUrl, agent.apiKey, agent.authMode, env);
@@ -1313,6 +1350,8 @@ async function runTodoManagerAgent(agent, env, jobId, ttlSeconds) {
     if (!routerResponse.ok) throw new Error(`agent_router_upstream_${routerResponse.status}`);
 
     const routerData = await routerResponse.json();
+    // ★ Worker 内的路由与执行各是一次真实模型请求，分别记账，不并入主回复 token。
+    usages.push({ site: sanitizeUrlForLog(upstream.provider.url), model, usage: compactUsage(routerData.usage || routerData.usageMetadata) });
     const rawRouteText = extractAssistantContent(routerData);
     const agentRoute = parseAgentRouterResult(rawRouteText);
     if (agentRoute.intent === "NONE" || agentRoute.intent === "ASK_CONFIRMATION") {
@@ -1320,7 +1359,7 @@ async function runTodoManagerAgent(agent, env, jobId, ttlSeconds) {
         intent: agentRoute.intent,
         actionCount: 0
       }, ttlSeconds);
-      return { prompt: "", actions: [], intent: agentRoute.intent };
+      return { prompt: "", actions: [], intent: agentRoute.intent, usages };
     }
     if (agentRoute.agent !== "todo_manager") throw new Error(`agent_unknown_route:${agentRoute.agent || "empty"}`);
     // ★★★★★ 后台 Agent：总路由先判定 END ★★★★★
@@ -1346,10 +1385,12 @@ async function runTodoManagerAgent(agent, env, jobId, ttlSeconds) {
     if (!response.ok) throw new Error(`agent_todo_upstream_${response.status}`);
 
     const data = await response.json();
+    usages.push({ site: sanitizeUrlForLog(upstream.provider.url), model, usage: compactUsage(data.usage || data.usageMetadata) });
     const rawText = extractAssistantContent(data);
     const routerResult = parseTodoAgentResult(rawText);
     const execution = executeTodoAgentResult(routerResult, agent.todoSnapshot);
     execution.intent = routerResult.intent || "";
+    execution.usages = usages;
     // ★★★★★ 后台 Agent：TODO 专用执行 END ★★★★★
 
     await appendJobEvent(jobId, env, "agent_todo_done", {
@@ -1366,7 +1407,7 @@ async function runTodoManagerAgent(agent, env, jobId, ttlSeconds) {
     await appendJobEvent(jobId, env, "agent_todo_failed", {
       error: sanitizeLogText(errorMessage)
     }, ttlSeconds);
-    return { prompt: "", actions: [], failed: true, error: errorMessage };
+    return { prompt: "", actions: [], failed: true, error: errorMessage, usages };
   }
 }
 
@@ -2494,6 +2535,25 @@ function sanitizeUrlForLog(value) {
   } catch {
     return sanitizeLogText(value);
   }
+}
+
+// ★ 账本只保留上游返回的用量数字；响应中即使附带其它字段也不进入每日记录。
+function compactUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  const fields = ["prompt_tokens", "completion_tokens", "input_tokens", "output_tokens", "promptTokenCount",
+    "candidatesTokenCount", "prompt_cache_hit_tokens", "prompt_cache_miss_tokens",
+    "cache_read_input_tokens", "cache_creation_input_tokens", "cache_read_tokens", "cache_creation_tokens",
+    "cachedContentTokenCount"];
+  const compact = {};
+  for (const field of fields) {
+    const value = Number(usage[field]);
+    if (usage[field] != null && Number.isFinite(value) && value >= 0) compact[field] = value;
+  }
+  const details = usage.prompt_tokens_details || usage.input_tokens_details;
+  if (details?.cached_tokens != null && Number.isFinite(Number(details.cached_tokens)) && Number(details.cached_tokens) >= 0) {
+    compact.prompt_tokens_details = { cached_tokens: Number(details.cached_tokens) };
+  }
+  return Object.keys(compact).length ? compact : null;
 }
 
 // ★ 405/HTML 最需要看最终地址、跳转位置和 Allow；这些字段不会读取或复制响应正文。

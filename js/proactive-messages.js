@@ -956,15 +956,21 @@ const ProactiveMessages = {
     renderContextLog(log, content, meta) {
         content.textContent = log?.content || '暂无主动消息 API 请求记录。';
         meta.textContent = '';
+        const workerUsage = log?.usage && typeof UsageStats !== 'undefined' ? UsageStats.usage(log.usage) : null;
         const lines = log ? [
             `来源：${log.source || '未知'}${log.trigger ? ` · ${log.trigger}` : ''}`,
             `角色：${log.characterName || '未知角色'}`,
             `请求时间：${new Date(log.createdAt).toLocaleString()}`,
             log.source === '浏览器'
                 ? `输入 Token：${log.prompt_tokens ?? 0} · 输出 Token：${log.completion_tokens ?? 0} · 总 Token：${log.total_tokens ?? 0}${log.isEstimated ? '（估算）' : ''}`
-                : 'Token：Worker 未记录'
+                : workerUsage
+                    ? `输入 Token：${workerUsage.input ?? '未返回'} · 输出 Token：${workerUsage.output ?? '未返回'}`
+                    : 'Token：Worker 未返回',
+            workerUsage
+                ? `缓存命中：${workerUsage.cached == null ? '未返回' : `${workerUsage.cached} / ${workerUsage.input ?? 0} tokens`}`
+                : ''
         ] : ['来源：无'];
-        lines.forEach(line => {
+        lines.filter(Boolean).forEach(line => {
             const row = document.createElement('div');
             row.textContent = line;
             meta.appendChild(row);

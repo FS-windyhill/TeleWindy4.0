@@ -12766,6 +12766,15 @@ body.dark-mode .usage-metric-tabs button.active { color: #fff; }
 body.dark-mode .usage-donut-legend-item { background: rgba(255,255,255,.08); }
 body.dark-mode .usage-donut-empty { border-color: rgba(255,255,255,.3); color: #aaa; }
 
+/* ★ 缓存卡片按站点和模型逐行展示，数字列保持对齐，窄屏允许说明自然换行。 */
+.usage-cache-list { display: grid; gap: 7px; margin-top: 10px; }
+.usage-cache-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 10px; border-radius: 9px; background: rgba(255,255,255,.32); font-size: .87rem; }
+.usage-cache-row > span { min-width: 0; }
+.usage-cache-row > span:last-child { text-align: right; }
+.usage-cache-row strong { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.usage-card .usage-cache-row small { margin-top: 2px; }
+body.dark-mode .usage-cache-row { background: rgba(255,255,255,.08); }
+
 /* ★ 费用计算器的“按次 / 按量”切换已确认满意：只整理换行，不改视觉参数。 */
 .usage-tabs {
     position: relative;

@@ -8,6 +8,7 @@ class MemoryStorage {
     constructor() { this.values = new Map(); this.alarm = null; }
     async get(key) { return structuredClone(this.values.get(key)); }
     async put(key, value) { this.values.set(key, structuredClone(value)); }
+    async list({ prefix }) { return new Map([...this.values].filter(([key]) => key.startsWith(prefix))); }
     async delete(key) { this.values.delete(key); }
     async getAlarm() { return this.alarm; }
     async setAlarm(value) { this.alarm = value; }
@@ -39,6 +40,15 @@ const reroll = (mode, revision = 'rev', apiKey) => ({ model: 'model', max_tokens
     proactive_reroll: { objectName: 'install:char', messageId: 'morning', revision,
         capsule: { ...capsule(mode), ...(apiKey !== undefined ? { apiKey } : {}) } } });
 function request(payload) { return new Request('https://worker.local/proactive/install%3Achar/reroll', { method: 'POST', body: JSON.stringify(payload) }); }
+test('Worker 按日期读取主动判断的数字用量，不混入其它日期', async () => {
+    const { env, stores } = environment();
+    const object = env.CHAT_JOB_OBJECT.get('proactive:install:char');
+    const storage = stores.get('proactive:install:char');
+    await storage.put('usage:2026-10-24:one', { model: '模型甲', usage: { prompt_tokens: 100, prompt_cache_hit_tokens: 30 } });
+    await storage.put('usage:2026-10-23:other', { model: '模型乙' });
+    const response = await object.fetch('https://worker.local/proactive/install%3Achar/usage?date=2026-10-24');
+    assert.deepEqual(Object.keys((await response.json()).rows), ['one']);
+});
 for (const mode of ['stored_client_key', 'server_secret']) {
     test(`Worker ${mode} reroll 创建持久化 job，完成后仅替换目标且不改变 Alarm 和计数`, async () => {
         const { env, stores, payloads, queued } = environment();
