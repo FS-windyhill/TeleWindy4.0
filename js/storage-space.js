@@ -131,7 +131,8 @@ const StorageSpace = {
             circle.setAttribute('r', '82');
             circle.setAttribute('fill', 'none');
             circle.setAttribute('stroke', this.colors[index]);
-            circle.setAttribute('stroke-width', '164');
+            // ★ 圆环外缘为 82 + 17 = 99，完整落在 220 的 viewBox 内，桌面端不会溢出卡片。
+            circle.setAttribute('stroke-width', '34');
             circle.setAttribute('stroke-dasharray', `${length * 100} ${100 - length * 100}`);
             circle.setAttribute('stroke-dashoffset', String(-offset * 100));
             circle.setAttribute('pathLength', '100');
