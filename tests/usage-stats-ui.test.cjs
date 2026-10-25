@@ -82,6 +82,25 @@ test('缓存命中按 token 加权，按量费用区分普通与缓存输入，�
     assert.ok(writes.every(name => name.startsWith('TW_USAGE_V2:entry:')));
 });
 
+test('缓存命中率按比例降序排列，未上报缓存用量的模型排在最后', async () => {
+    const rows = {
+        low: { site: 'https://a.example', model: '低命中', input: 100, cached: 10, output: 1 },
+        unknown: { site: 'https://b.example', model: '未上报', input: 100, cached: null, output: 1 },
+        high: { site: 'https://c.example', model: '高命中', input: 100, cached: 80, output: 1 }
+    };
+    const root = { innerHTML: '', querySelector: () => ({}) };
+    const context = {
+        DB: { get: async key => key.endsWith(':prices') ? {} : rows },
+        document: { getElementById: id => id === 'usage-body' ? root : null }, console
+    };
+    vm.runInNewContext(`${fs.readFileSync(path.join(__dirname, '..', 'js', 'usage-stats.js'), 'utf8')}\nglobalThis.stats = UsageStats;`, context);
+    context.stats.selected = '2026-10-24';
+    await context.stats.render();
+    const cacheList = root.innerHTML.match(/<div class="usage-cache-list">([\s\S]*?)<\/div><p class="usage-hint">/)[1];
+    assert.ok(cacheList.indexOf('高命中') < cacheList.indexOf('低命中'));
+    assert.ok(cacheList.indexOf('低命中') < cacheList.indexOf('未上报'));
+});
+
 test('异步 job 把主回复、Agent 和识图用量分别归入对应模型，重复完成不增加记录', async () => {
     const saved = new Map();
     const context = {

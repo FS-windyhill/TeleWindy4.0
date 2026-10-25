@@ -265,8 +265,10 @@ const UsageStats = {
         // ★ 指标切换和对应图表放在同一卡片内，位置与费用计算器的切换保持一致。
         const metricCard = `<section class="usage-card usage-metric-card"><h2>${label}</h2><div class="usage-metric-tabs usage-metric-${this.metric}" role="tablist" aria-label="用量指标">${metricTabs}</div><p>${totalLabel}：<strong>${n(total)}</strong> ${unit}</p>${this.donut(groups, field, 'metric', unit)}</section>`;
         const rerollCard = `<section class="usage-card"><h2>Reroll 比例</h2><p>当日 reroll：${n(rerolls)} / ${n(chats)} 次（${pct(rerolls, chats)}）</p>${this.donut(groups.filter(group => group.chat), 'reroll', 'reroll', '次', true)}<p class="usage-hint">仅计算聊天回答；图例显示该模型 reroll 请求 / 全部聊天请求。</p></section>`;
-        // ★ 命中率按 token 加权；每个模型只拿“缓存字段已上报”的输入参与分母。
-        const cacheRows = groups.map(group => `<div class="usage-cache-row"><span><strong>${e(group.model)}</strong><small>${e(group.site)}</small></span><span>${group.cacheInput ? pct(group.cached, group.cacheInput) : '—'}<small>${n(group.cached)} / ${n(group.cacheInput)} tokens${group.cacheUnknown ? ` · ${n(group.cacheUnknown)} 次未上报` : ''}</small></span></div>`).join('') || '<p>当天暂无用量</p>';
+        // ★ 命中率按 token 加权；每个模型只拿“缓存字段已上报”的输入参与分母，并按命中率降序排列。
+        const cacheGroups = groups.slice().sort((a, b) =>
+            (b.cacheInput ? b.cached / b.cacheInput : -1) - (a.cacheInput ? a.cached / a.cacheInput : -1));
+        const cacheRows = cacheGroups.map(group => `<div class="usage-cache-row"><span><strong>${e(group.model)}</strong><small>${e(group.site)}</small></span><span>${group.cacheInput ? pct(group.cached, group.cacheInput) : '—'}<small>${n(group.cached)} / ${n(group.cacheInput)} tokens${group.cacheUnknown ? ` · ${n(group.cacheUnknown)} 次未上报` : ''}</small></span></div>`).join('') || '<p>当天暂无用量</p>';
         const cacheCard = `<section class="usage-card"><h2>缓存命中率</h2><p>当日命中：<strong>${pct(cached, cacheInput)}</strong> · ${n(cached)} / ${n(cacheInput)} 输入 tokens</p><div class="usage-cache-list">${cacheRows}</div><p class="usage-hint">按实际命中 token 加权统计；${n(cacheUnknown)} 次有输入用量的请求未上报缓存命中，不参与命中率。</p></section>`;
         const priceRows = groups.map((group, index) => {
             const price = data.prices[group.key] || {};
