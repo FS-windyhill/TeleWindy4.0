@@ -12697,6 +12697,7 @@ body.dark-mode .usage-day.usage-selected small {
     position: relative;
     z-index: 1;
     min-width: 0;
+    font-size: 0.83rem;
     width: 33.333%;
     padding: 10px 2px;
     border: 0;
