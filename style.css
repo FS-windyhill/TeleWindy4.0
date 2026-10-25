@@ -12671,56 +12671,42 @@ body.dark-mode .usage-day.usage-selected small {
     color: inherit;
 }
 
-/* ★ 用量三项共用一张卡片；胶囊独立复刻倒数日的滑块，不碰费用计算器的切换。 */
+/* ★ 指标切换放进用量卡片，沿用费用计算器的浅底滑块样式。 */
 .usage-metric-tabs {
     position: relative;
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 4px;
-    margin: 0 15px 10px;
+    display: flex;
     padding: 4px;
-    border: 1px solid rgba(245,245,245,.75);
-    border-radius: 12px;
-    background: rgba(255,255,255,.15);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    overflow: hidden;
+    border-radius: 14px;
+    background: rgba(128, 128, 128, 0.12);
 }
 .usage-metric-tabs::before {
     content: '';
     position: absolute;
-    z-index: 0;
+    left: 4px;
     top: 4px;
     bottom: 4px;
-    left: 4px;
-    width: calc((100% - 16px) / 3);
-    box-sizing: border-box;
-    border: 1px solid #fff;
-    border-radius: 10px;
-    background: rgba(230,230,230,.7);
-    transition: transform .22s ease;
+    width: calc((100% - 8px) / 3);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 2px 8px #0001;
+    transition: transform 0.2s;
 }
-.usage-metric-tabs.usage-metric-output::before { transform: translateX(calc(100% + 4px)); }
-.usage-metric-tabs.usage-metric-count::before { transform: translateX(calc(200% + 8px)); }
+.usage-metric-tabs.usage-metric-output::before { transform: translateX(100%); }
+.usage-metric-tabs.usage-metric-count::before { transform: translateX(200%); }
 .usage-metric-tabs button {
     position: relative;
     z-index: 1;
     min-width: 0;
-    min-height: 36px;
-    padding: 4px 2px;
+    width: 33.333%;
+    padding: 10px 2px;
     border: 0;
-    background: transparent;
-    color: #777;
-    font-size: .82rem;
+    background: none;
+    color: inherit;
     cursor: pointer;
 }
-.usage-metric-tabs button.active { color: #252525; font-weight: 600; }
 .usage-metric-tabs button:focus-visible,
 .usage-donut-legend-item:focus-visible { outline: 2px solid var(--primary-color, #876eff); outline-offset: 2px; }
-body.dark-mode .usage-metric-tabs { background: rgba(118,118,118,.15); border-color: rgba(197,197,197,.75); }
-body.dark-mode .usage-metric-tabs::before { background: rgba(30,30,30,.4); border-color: rgba(245,245,245,.5); }
-body.dark-mode .usage-metric-tabs button { color: #aaa; }
-body.dark-mode .usage-metric-tabs button.active { color: #fff; }
+body.dark-mode .usage-metric-tabs::before { background: #ffffff20; }
 
 /* ★ 环形图沿用存储管理的安全尺寸；模型较多时图例纵向展开。 */
 .usage-donut {
@@ -12878,6 +12864,7 @@ body.dark-mode .usage-page #usage-cost {
 }
 
 @media (prefers-reduced-motion: reduce) {
+    .usage-metric-tabs::before,
     .usage-tabs::before {
         transition: none;
     }

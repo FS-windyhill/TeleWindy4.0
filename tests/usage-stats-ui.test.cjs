@@ -26,9 +26,12 @@ test('用量胶囊只展示一张指标卡片，模型与 reroll 各有环形图
     vm.runInNewContext(`${source}\nglobalThis.stats = UsageStats;`, context);
     const stats = context.stats;
     stats.selected = date;
+    stats.workerNotice = 'Worker 用量暂不可读（连接或跨域限制）；本地统计已正常显示。';
     await stats.render();
+    assert.match(root.innerHTML, /<div class="usage-week">[\s\S]*?<p class="usage-hint">仅统计本功能启用后的调用。[\s\S]*?<p class="usage-hint">Worker 用量暂不可读（连接或跨域限制）；本地统计已正常显示。<\/p><\/section><section class="usage-card usage-metric-card">/);
     assert.equal((root.innerHTML.match(/class="usage-card usage-metric-card"/g) || []).length, 1);
     assert.equal((root.innerHTML.match(/data-metric=/g) || []).length, 3);
+    assert.match(root.innerHTML, /<section class="usage-card usage-metric-card"><h2>输入 token<\/h2><div class="usage-metric-tabs[^\"]*" role="tablist"[^>]*>/);
     assert.equal((root.innerHTML.match(/<svg /g) || []).length, 2);
     assert.ok(!root.innerHTML.includes('<ul>'));
     assert.match(root.innerHTML, /当日 reroll：1 \/ 2 次（50%）/);

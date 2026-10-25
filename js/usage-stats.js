@@ -260,9 +260,10 @@ const UsageStats = {
         const cacheInput = groups.reduce((sum, group) => sum + group.cacheInput, 0);
         const cached = groups.reduce((sum, group) => sum + group.cached, 0);
         const cacheUnknown = groups.reduce((sum, group) => sum + group.cacheUnknown, 0);
-        // ★ 日期和费用计算器保持原统计口径，只替换中间两块的呈现方式。
-        const dateCard = `<section class="usage-card"><div class="usage-date-header"><button data-shift="-7" aria-label="上一周">‹</button><input id="usage-date" type="date" value="${this.selected}" aria-label="统计日期"><button data-shift="7" aria-label="下一周">›</button><button data-today>今天</button></div><div class="usage-week">${week}</div></section>`;
-        const metricCard = `<div class="usage-metric-tabs usage-metric-${this.metric}" role="tablist" aria-label="用量指标">${metricTabs}</div><section class="usage-card usage-metric-card"><h2>${label}</h2><p>${totalLabel}：<strong>${n(total)}</strong> ${unit}</p>${this.donut(groups, field, 'metric', unit)}</section>`;
+        // ★ 统计范围和 Worker 状态都跟随日期选择，统一收在日期卡片内。
+        const dateCard = `<section class="usage-card"><div class="usage-date-header"><button data-shift="-7" aria-label="上一周">‹</button><input id="usage-date" type="date" value="${this.selected}" aria-label="统计日期"><button data-shift="7" aria-label="下一周">›</button><button data-today>今天</button></div><div class="usage-week">${week}</div><p class="usage-hint">仅统计本功能启用后的调用。${unknown} 次用量未知；${failed} 次请求失败。请求数包含实际发送的重试，失败是否收费以站点账单为准。</p>${this.workerNotice ? `<p class="usage-hint">${e(this.workerNotice)}</p>` : ''}</section>`;
+        // ★ 指标切换和对应图表放在同一卡片内，位置与费用计算器的切换保持一致。
+        const metricCard = `<section class="usage-card usage-metric-card"><h2>${label}</h2><div class="usage-metric-tabs usage-metric-${this.metric}" role="tablist" aria-label="用量指标">${metricTabs}</div><p>${totalLabel}：<strong>${n(total)}</strong> ${unit}</p>${this.donut(groups, field, 'metric', unit)}</section>`;
         const rerollCard = `<section class="usage-card"><h2>Reroll 比例</h2><p>当日 reroll：${n(rerolls)} / ${n(chats)} 次（${pct(rerolls, chats)}）</p>${this.donut(groups.filter(group => group.chat), 'reroll', 'reroll', '次', true)}<p class="usage-hint">仅计算聊天回答；图例显示该模型 reroll 请求 / 全部聊天请求。</p></section>`;
         // ★ 命中率按 token 加权；每个模型只拿“缓存字段已上报”的输入参与分母。
         const cacheRows = groups.map(group => `<div class="usage-cache-row"><span><strong>${e(group.model)}</strong><small>${e(group.site)}</small></span><span>${group.cacheInput ? pct(group.cached, group.cacheInput) : '—'}<small>${n(group.cached)} / ${n(group.cacheInput)} tokens${group.cacheUnknown ? ` · ${n(group.cacheUnknown)} 次未上报` : ''}</small></span></div>`).join('') || '<p>当天暂无用量</p>';
@@ -280,7 +281,7 @@ const UsageStats = {
             return `<div class="usage-price-row"><strong>${e(group.model)}</strong><small>${e(group.site)}</small>${inputs}</div>`;
         }).join('') || '<p>当天暂无用量</p>';
         const priceCard = `<section class="usage-card"><h2>费用计算器</h2><div class="usage-tabs ${this.mode === 'tokens' ? 'usage-token-mode' : ''}" role="tablist"><button role="tab" aria-selected="${this.mode === 'count'}" data-mode="count">按次计费</button><button role="tab" aria-selected="${this.mode === 'tokens'}" data-mode="tokens">按量计费</button></div><p class="usage-hint">按所选日期自动带入用量。请使用相同币种；两种计费模式分别估算，不叠加。</p><div id="usage-prices">${priceRows}</div><p id="usage-cost" aria-live="polite"></p><p class="usage-hint">缓存用量未知的输入暂按普通输入价估算；未上报的独立调用无法计入。实际账单以站点为准。</p></section>`;
-        root.innerHTML = `${dateCard}<p class="usage-hint">仅统计本功能启用后的调用。${unknown} 次用量未知；${failed} 次请求失败。请求数包含实际发送的重试，失败是否收费以站点账单为准。</p>${this.workerNotice ? `<p class="usage-hint">${this.esc(this.workerNotice)}</p>` : ''}${metricCard}${rerollCard}${cacheCard}${priceCard}`;
+        root.innerHTML = `${dateCard}${metricCard}${rerollCard}${cacheCard}${priceCard}`;
         root.onclick = event => {
             const slice = event.target.closest('[data-usage-slice]');
             if (slice) {
