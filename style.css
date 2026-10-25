@@ -12762,7 +12762,7 @@ body.dark-mode .usage-donut-empty { border-color: rgba(255,255,255,.3); color: #
 .usage-card .usage-cache-row small { margin-top: 2px; }
 body.dark-mode .usage-cache-row { background: rgba(255,255,255,.08); }
 
-/* ★ 费用计算器的“按次 / 按量”切换已确认满意：只整理换行，不改视觉参数。 */
+/* ★ 费用计算器沿用原滑块样式；按量在左，按次在右。 */
 .usage-tabs {
     position: relative;
     display: flex;
@@ -12784,7 +12784,7 @@ body.dark-mode .usage-cache-row { background: rgba(255,255,255,.08); }
     transition: transform 0.2s;
 }
 
-.usage-tabs.usage-token-mode::before {
+.usage-tabs.usage-count-mode::before {
     transform: translateX(100%);
 }
 

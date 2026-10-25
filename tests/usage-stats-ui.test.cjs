@@ -26,6 +26,7 @@ test('用量胶囊只展示一张指标卡片，模型与 reroll 各有环形图
     vm.runInNewContext(`${source}\nglobalThis.stats = UsageStats;`, context);
     const stats = context.stats;
     stats.selected = date;
+    stats.mode = 'count';
     stats.workerNotice = 'Worker 用量暂不可读（连接或跨域限制）；本地统计已正常显示。';
     await stats.render();
     assert.match(root.innerHTML, /<div class="usage-week">[\s\S]*?<p class="usage-hint">仅统计本功能启用后的调用。[\s\S]*?<p class="usage-hint">Worker 用量暂不可读（连接或跨域限制）；本地统计已正常显示。<\/p><\/section><section class="usage-card usage-metric-card">/);
@@ -65,8 +66,9 @@ test('缓存命中按 token 加权，按量费用区分普通与缓存输入，�
     vm.runInNewContext(`${fs.readFileSync(path.join(__dirname, '..', 'js', 'usage-stats.js'), 'utf8')}\nglobalThis.stats = UsageStats;`, context);
     const stats = context.stats;
     stats.selected = date;
-    stats.mode = 'tokens';
     await stats.render();
+    assert.equal(stats.mode, 'tokens');
+    assert.match(root.innerHTML, /<div class="usage-tabs " role="tablist"><button role="tab" aria-selected="true" data-mode="tokens">按量计费<\/button><button role="tab" aria-selected="false" data-mode="count">按次计费<\/button>/);
     assert.match(root.innerHTML, /当日命中：<strong>10%<\/strong>/);
     assert.match(root.innerHTML, /1 次有输入用量的请求未上报缓存命中/);
     assert.match(cost.textContent, /预估费用：0\.00265/);

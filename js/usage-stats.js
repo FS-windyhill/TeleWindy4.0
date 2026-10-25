@@ -1,6 +1,6 @@
 // ★ 独立 API 用量账本：只存站点、模型和 token 数，不保存请求正文、响应或密钥。
 const UsageStats = {
-    key: 'TW_USAGE_V1', entryKey: 'TW_USAGE_V2:entry:', selected: null, mode: 'count', metric: 'input', queue: Promise.resolve(),
+    key: 'TW_USAGE_V1', entryKey: 'TW_USAGE_V2:entry:', selected: null, mode: 'tokens', metric: 'input', queue: Promise.resolve(),
     workerCache: new Map(), workerPending: new Map(), workerSupport: null, workerNotice: '',
     date(d = new Date()) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; },
     id() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`; },
@@ -282,7 +282,8 @@ const UsageStats = {
             ).join('');
             return `<div class="usage-price-row"><strong>${e(group.model)}</strong><small>${e(group.site)}</small>${inputs}</div>`;
         }).join('') || '<p>当天暂无用量</p>';
-        const priceCard = `<section class="usage-card"><h2>费用计算器</h2><div class="usage-tabs ${this.mode === 'tokens' ? 'usage-token-mode' : ''}" role="tablist"><button role="tab" aria-selected="${this.mode === 'count'}" data-mode="count">按次计费</button><button role="tab" aria-selected="${this.mode === 'tokens'}" data-mode="tokens">按量计费</button></div><p class="usage-hint">按所选日期自动带入用量。请使用相同币种；两种计费模式分别估算，不叠加。</p><div id="usage-prices">${priceRows}</div><p id="usage-cost" aria-live="polite"></p><p class="usage-hint">缓存用量未知的输入暂按普通输入价估算；未上报的独立调用无法计入。实际账单以站点为准。</p></section>`;
+        // ★ 按量计费排在前面并作为默认项；按次计费切到右侧时滑块随之移动。
+        const priceCard = `<section class="usage-card"><h2>费用计算器</h2><div class="usage-tabs ${this.mode === 'count' ? 'usage-count-mode' : ''}" role="tablist"><button role="tab" aria-selected="${this.mode === 'tokens'}" data-mode="tokens">按量计费</button><button role="tab" aria-selected="${this.mode === 'count'}" data-mode="count">按次计费</button></div><p class="usage-hint">按所选日期自动带入用量。请使用相同币种；两种计费模式分别估算，不叠加。</p><div id="usage-prices">${priceRows}</div><p id="usage-cost" aria-live="polite"></p><p class="usage-hint">缓存用量未知的输入暂按普通输入价估算；未上报的独立调用无法计入。实际账单以站点为准。</p></section>`;
         root.innerHTML = `${dateCard}${metricCard}${rerollCard}${cacheCard}${priceCard}`;
         root.onclick = event => {
             const slice = event.target.closest('[data-usage-slice]');

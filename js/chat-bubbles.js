@@ -5,6 +5,8 @@
 const ChatBubbles = {
     timestampRegex: /^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s*/,
     thoughtRegex: /<(?:think|thinking|thought)[^>]*>([\s\S]*?)(?:<\/(?:think|thinking|thought)>|$)/gi,
+    // ★ 未隐藏消息只记住原 content 引用；正文被外部链路替换时，仍能在本次运行中对应旧 key。
+    contentBeforeChange: new WeakMap(),
 
     newKey() {
         if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -96,9 +98,9 @@ const ChatBubbles = {
         const parsed = this.parse(message);
         const parts = parsed.parts;
         let changed = false;
-        if (!Array.isArray(message.bubbleIds) || !Array.isArray(message.bubbleTextSnapshot)) {
+        const previousContent = this.contentBeforeChange.get(message);
+        if (!Array.isArray(message.bubbleIds)) {
             message.bubbleIds = parts.map(() => this.newKey());
-            message.bubbleTextSnapshot = [...parts];
             const hidden = Array.isArray(message.hiddenIndices) ? message.hiddenIndices : [];
             message.hiddenBubbleKeys = hidden.filter(i => Number.isInteger(i) && i >= 0 && i < parts.length)
                 .map(i => message.bubbleIds[i]);
@@ -111,10 +113,21 @@ const ChatBubbles = {
                 if (hidden.includes('thought')) message.hiddenBubbleKeys.push(message.thoughtBubbleKey);
             }
             changed = true;
-        } else if (message.bubbleIds.length !== parts.length || message.bubbleTextSnapshot.length !== parts.length
-            || message.bubbleTextSnapshot.some((part, index) => part !== parts[index])) {
+        } else if (Array.isArray(message.bubbleTextSnapshot)
+            && (message.bubbleIds.length !== parts.length || message.bubbleTextSnapshot.length !== parts.length
+                || message.bubbleTextSnapshot.some((part, index) => part !== parts[index]))) {
             // ★ 外部更新正文也走统一对应逻辑；歧义区域采用保守隐藏。
             this.reconcile(message, parts);
+            changed = true;
+        } else if (previousContent !== undefined && previousContent !== message.content) {
+            // ★ 无持久快照时，使用旧正文引用；不会额外保存第二份完整气泡文字。
+            this.reconcile(message, parts, this.parse(message, previousContent).parts);
+            changed = true;
+        } else if (message.bubbleIds.length !== parts.length) {
+            // ★ 无旧正文可匹配时废弃旧文字 key；异常隐藏数据采取保守隐藏，不能露出旧内容。
+            const hadHiddenText = (message.hiddenBubbleKeys || []).some(key => message.bubbleIds.includes(key));
+            message.bubbleIds = parts.map(() => this.newKey());
+            if (hadHiddenText) message.hiddenBubbleKeys.push(...message.bubbleIds);
             changed = true;
         }
         if (this.hasImage(message) && !message.imageBubbleKey) { message.imageBubbleKey = this.newKey(); changed = true; }
@@ -125,14 +138,24 @@ const ChatBubbles = {
                 : index === parts.length ? message.imageBubbleKey : message.bubbleIds[index]).filter(Boolean);
             changed = true;
         }
+        // ★ 只有存在隐藏气泡时才持久化文字快照；旧备份中的普通消息在加载时自动瘦身。
+        if (message.hiddenBubbleKeys.length) {
+            if (!Array.isArray(message.bubbleTextSnapshot)) {
+                message.bubbleTextSnapshot = [...parts];
+                changed = true;
+            }
+        } else if (Object.hasOwn(message, 'bubbleTextSnapshot')) {
+            delete message.bubbleTextSnapshot;
+            changed = true;
+        }
         if (this.syncIndices(message, parts.length)) changed = true;
+        this.contentBeforeChange.set(message, message.content);
         return changed;
     },
 
     // ★ 唯一正文可跨位置匹配；重复正文按从右到左匹配，前方新增相同正文时保留旧 key。
     // 重复数变化或改写区域无法判定时，候选新气泡全部隐藏，避免旧隐藏内容意外进入上下文。
-    reconcile(message, newParts) {
-        const oldParts = message.bubbleTextSnapshot || [];
+    reconcile(message, newParts, oldParts = message.bubbleTextSnapshot || []) {
         const oldIds = message.bubbleIds || [];
         const hidden = new Set(message.hiddenBubbleKeys || []);
         const next = Array(newParts.length).fill(null);
@@ -165,17 +188,20 @@ const ChatBubbles = {
             newUnmatched.forEach(i => hidden.add(next[i] || (next[i] = this.newKey())));
         }
         message.bubbleIds = next.map(key => key || this.newKey());
-        message.bubbleTextSnapshot = [...newParts];
         // ★ 已删除正文的旧隐藏 key 暂留在数据中；整段编辑的歧义不能静默抹掉历史隐藏信息。
         message.hiddenBubbleKeys = [...hidden];
+        if (hidden.size) message.bubbleTextSnapshot = [...newParts];
+        else delete message.bubbleTextSnapshot;
     },
 
     edit(message, newContent) {
         this.ensure(message);
+        const oldParts = this.parse(message).parts;
         const parts = this.parse(message, newContent).parts;
-        this.reconcile(message, parts);
+        this.reconcile(message, parts, oldParts);
         message.content = newContent;
         this.syncIndices(message, parts.length);
+        this.contentBeforeChange.set(message, message.content);
     },
 
     deleteParts(message, keys) {
@@ -194,9 +220,11 @@ const ChatBubbles = {
         const body = kept.map(part => part.text).join('\n\n');
         message.content = (parsed.prefix + (keepThought && thoughtMatch ? `${thoughtMatch[0]}\n\n` : '') + body).trim();
         message.bubbleIds = kept.map(part => part.id);
-        message.bubbleTextSnapshot = kept.map(part => part.text);
         message.hiddenBubbleKeys = (message.hiddenBubbleKeys || []).filter(key => !selected.has(key));
+        if (message.hiddenBubbleKeys.length) message.bubbleTextSnapshot = kept.map(part => part.text);
+        else delete message.bubbleTextSnapshot;
         this.syncIndices(message, kept.length);
+        this.contentBeforeChange.set(message, message.content);
         return !!(kept.length || this.hasImage(message) || keepThought);
     },
 
@@ -238,6 +266,9 @@ const ChatBubbles = {
         if (hidden) keys.add(key);
         else keys.delete(key);
         message.hiddenBubbleKeys = [...keys];
+        // ★ 第一次隐藏才留快照；最后一个隐藏气泡取消后立即释放。
+        if (keys.size) message.bubbleTextSnapshot = this.parse(message).parts;
+        else delete message.bubbleTextSnapshot;
         this.syncIndices(message);
         return true;
     }

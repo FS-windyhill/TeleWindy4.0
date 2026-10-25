@@ -60,6 +60,48 @@ test('相同正文删除第一个、唯一段落交换顺序和重复正文歧�
     assert.deepEqual(ambiguous.hiddenIndices, [0]);
 });
 
+test('普通消息不持久化文字副本，隐藏期间仍保留稳定身份', () => {
+    const msg = record('A\n\nB');
+    ChatBubbles.ensure(msg);
+    const aKey = key(msg, 0);
+    assert.equal(Object.hasOwn(msg, 'bubbleTextSnapshot'), false);
+
+    // ★ 无隐藏内容时，整段编辑和运行中的外部正文替换仍可沿用明确匹配的 key。
+    ChatBubbles.edit(msg, 'B\n\nA');
+    assert.equal(key(msg, 1), aKey);
+    msg.content = 'B\n\n新增\n\nA';
+    ChatBubbles.ensure(msg);
+    assert.equal(key(msg, 2), aKey);
+    assert.equal(Object.hasOwn(msg, 'bubbleTextSnapshot'), false);
+
+    ChatBubbles.setHidden(msg, aKey, true);
+    assert.deepEqual(msg.bubbleTextSnapshot, ['B', '新增', 'A']);
+    const restored = structuredClone(msg);
+    ChatBubbles.edit(restored, 'A\n\nB\n\n新增');
+    assert.equal(ChatBubbles.isHidden(restored, aKey), true);
+    assert.equal(key(restored, 0), aKey);
+    ChatBubbles.setHidden(restored, aKey, false);
+    assert.equal(Object.hasOwn(restored, 'bubbleTextSnapshot'), false);
+});
+
+test('旧普通消息的文字快照迁移后释放，旧隐藏消息继续保留快照', () => {
+    const ordinary = record('A\n\nB', { bubbleIds: ['a', 'b'],
+        bubbleTextSnapshot: ['A', 'B'], hiddenBubbleKeys: [] });
+    assert.equal(ChatBubbles.ensure(ordinary), true);
+    assert.deepEqual(ordinary.bubbleIds, ['a', 'b']);
+    assert.equal(Object.hasOwn(ordinary, 'bubbleTextSnapshot'), false);
+    assert.equal(ChatBubbles.ensure(ordinary), false);
+
+    const hidden = record('A\n\nB', { bubbleIds: ['a', 'b'],
+        bubbleTextSnapshot: ['A', 'B'], hiddenBubbleKeys: ['b'] });
+    ChatBubbles.ensure(hidden);
+    assert.deepEqual(hidden.bubbleTextSnapshot, ['A', 'B']);
+    const restored = structuredClone(hidden);
+    ChatBubbles.edit(restored, '新增\n\nA\n\nB');
+    assert.equal(ChatBubbles.isHidden(restored, 'b'), true);
+    assert.deepEqual(restored.hiddenIndices, [2]);
+});
+
 test('删除前方文字后图片隐藏继续生效，模型没有描述或占位', () => {
     const msg = record('[2026-10-23 22:00] 第一段\n\n第二段', {
         images: ['image'], image_description: '秘密图片'
@@ -302,7 +344,9 @@ test('旧数据迁移、保存形态重新加载后文字图片思考隐藏不�
 test('Storage.load 迁移旧数据并落库，saveContacts 后重新加载保持气泡 key', async () => {
     const db = new Map();
     db.set('contacts', [{ id: 'sheep', history: [{ role: 'user',
-        content: '[2026-10-23 22:00] A\n\nB', images: ['image'], hiddenIndices: [1, 2] }] }]);
+        content: '[2026-10-23 22:00] A\n\nB', images: ['image'], hiddenIndices: [1, 2] },
+    { role: 'user', content: '普通消息', bubbleIds: ['plain'],
+        bubbleTextSnapshot: ['普通消息'], hiddenBubbleKeys: [] }] }]);
     const storageContext = vm.createContext({ ChatBubbles, console,
         CONFIG: { STORAGE_KEY: 'contacts', SETTINGS_KEY: 'settings', DEFAULT: {
             PROACTIVE_MESSAGES: {}, MOMENTS_SETTINGS: {}
@@ -314,12 +358,16 @@ test('Storage.load 迁移旧数据并落库，saveContacts 后重新加载保持
     const migrated = storageContext.STATE.contacts[0].history[0];
     assert.deepEqual(Array.from(migrated.hiddenIndices), [1, 2]);
     const keys = [...migrated.hiddenBubbleKeys];
+    // ★ 迁移落库时仅移除普通消息的重复正文，已隐藏消息仍保留快照。
+    assert.equal(Object.hasOwn(db.get('contacts')[0].history[1], 'bubbleTextSnapshot'), false);
+    assert.deepEqual(Array.from(db.get('contacts')[0].history[0].bubbleTextSnapshot), ['A', 'B']);
     await storageContext.Storage.saveContacts();
     storageContext.STATE.contacts = [];
     await storageContext.Storage.load();
     const restored = storageContext.STATE.contacts[0].history[0];
     assert.deepEqual(Array.from(restored.hiddenBubbleKeys), keys);
     assert.deepEqual(Array.from(restored.hiddenIndices), [1, 2]);
+    assert.equal(Object.hasOwn(storageContext.STATE.contacts[0].history[1], 'bubbleTextSnapshot'), false);
 });
 
 test('主动时间前缀、引用和代码围栏空行保持同一气泡边界', () => {
