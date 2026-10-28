@@ -2878,9 +2878,9 @@ body.dark-mode {
     /* 将你的 night- 变量映射回标准变量名，这样原来的气泡样式就能自动变色 */
     --text-color: #ffffff; 
     --message-bg-user: hsl(var(--theme-color-h) clamp(0%, calc(var(--theme-color-s) * 0.92), 100%) var(--theme-color-l) / 0.6);
-    --message-bg-ai: #2929299e;
+    --message-bg-ai: #3232329e;
     --message-border-user: hsl(var(--theme-color-h) clamp(0%, calc(var(--theme-color-s) * 0.88), 100%) clamp(0%, calc(var(--theme-color-l) * 1.15), 100%) / 0.5);
-    --message-border-ai: rgba(170, 170, 170, 0.25);
+    --message-border-ai: rgba(125, 125, 125, 0.25);
     
     --btn-color: #3a3a3a80;          /* 按钮深色背景 */
     --btn-border-color: #555555;   /* 按钮深色边框 */
