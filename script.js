@@ -2799,14 +2799,15 @@ const UI = {
             usageView.style.display = 'flex';
             if (bottomTabBar) bottomTabBar.style.display = 'none';
         } else if (viewName === 'pomodoro') {
+            // ★ 必须在改 display 之前取显隐：同一页面上点完成通知重复进入时不能消费完成态。
+            const pomodoroWasVisible = !!viewPomodoro && getComputedStyle(viewPomodoro).display !== 'none';
             App.rememberReturnView('pomodoro', STATE.currentMainView || 'explore');
             appContainer.classList.remove('in-chat-mode');
             document.querySelectorAll('.page-view').forEach(view => { view.style.display = 'none'; });
             viewPomodoro.style.display = 'flex';
             if (bottomTabBar) bottomTabBar.style.display = 'none';
-            Pomodoro.render();
-            // ★ 无论从探索入口还是顶部通知进入，真正打开番茄钟页才清除完成红点。
-            Pomodoro.markRead().catch(error => Pomodoro.report(error));
+            // ★ 完成态在进入时统一消费：看过就重置时钟，没看过（红点进来）先展示一次 00:00。
+            Pomodoro.enterView({ reenter: pomodoroWasVisible }).catch(error => Pomodoro.report(error));
         } else if (viewName === 'desktop') {
             // ===========================
             // 0. 进入桌面：首页小组件集中刷新

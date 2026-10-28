@@ -24,11 +24,7 @@ const Pomodoro = {
             minutes: Number.isInteger(minutes) && minutes >= 1 && minutes <= 180 ? minutes : 25,
             task: typeof source.task === 'string' ? source.task : '',
             // ★ 旧备份没有新字段时补默认值；损坏的运行状态不能误结算成完成记录。
-            session: session && session.id && session.contactId
-                && Number.isFinite(session.durationMs) && session.durationMs > 0
-                && ['running', 'paused', 'completed'].includes(session.status)
-                && Number.isFinite(session.remainingMs) && session.remainingMs >= 0
-                && (session.status !== 'running' || Number.isFinite(session.endAt)) ? session : null,
+            session: this.normalizeSession(session),
             records: Array.isArray(source.records) ? source.records.filter(r => r && r.id && r.contactId).map(r => ({
                 ...r, remainingTurns: Math.max(0, Math.floor(Number(r.remainingTurns) || 0)),
                 consumedTurns: Array.isArray(r.consumedTurns) ? r.consumedTurns : []
@@ -42,6 +38,19 @@ const Pomodoro = {
                 createdAt: Number(item.createdAt) || 0
             })) : []
         };
+    },
+    normalizeSession(session) {
+        // ★ 旧备份没有新字段时补默认值；损坏的运行状态不能误结算成完成记录。
+        const valid = session && session.id && session.contactId
+            && Number.isFinite(session.durationMs) && session.durationMs > 0
+            && ['running', 'paused', 'completed'].includes(session.status)
+            && Number.isFinite(session.remainingMs) && session.remainingMs >= 0
+            && (session.status !== 'running' || Number.isFinite(session.endAt));
+        if (!valid) return null;
+        // ★ “完成态有没有看过”只由 hasUnreadCompletion 记录；旧版本多存的 viewed 直接丢掉，避免两份状态打架。
+        const rest = { ...session };
+        delete rest.viewed;
+        return rest;
     },
     async init() {
         this.data = this.normalize(await DB.get(CONFIG.POMODORO_KEY));
@@ -57,6 +66,10 @@ const Pomodoro = {
             if (!document.hidden) this.tick().then(() => {
                 if (this.isViewing()) return this.markRead();
             }).catch(e => this.report(e));
+        });
+        // ★ 从 bfcache / 系统冻结恢复时可能只触发 pageshow：补一次“看过”判定，不可见时自动跳过。
+        window.addEventListener('pageshow', () => {
+            if (this.isViewing()) this.markRead().catch(e => this.report(e));
         });
     },
     save() {
@@ -77,10 +90,36 @@ const Pomodoro = {
             && !this.$('app-container')?.classList.contains('in-chat-mode');
     },
     async markRead() {
-        if (!this.data.hasUnreadCompletion) return;
+        // ★ 只有用户真的停留在番茄钟页时才算“看过”：后台或其它页面不能消费完成态。
+        if (!this.data || !this.isViewing() || !this.data.hasUnreadCompletion) return;
         this.data.hasUnreadCompletion = false;
         this.render();
         await this.save();
+    },
+    // ★ 进入番茄钟页时消费“已完成”状态，这是 00:00 唯一的出口：
+    //   没看过的（探索红点进来）第一次进入仍然展示 00:00；看过的才在这里重置为设置的时长。
+    async enterView(options = {}) {
+        if (!this.data) return;
+        const session = this.data.session;
+        if (session?.status === 'completed') {
+            // ★ 已经停在番茄钟页时再次进入（例如点击完成通知）不消费完成态，红点照常清掉。
+            if (options.reenter) {
+                await this.markRead();
+                return;
+            }
+            // ★ 只重置计时状态：完成记录、陪伴发言、任务内容、时长和陪伴人都保持原样。
+            const firstDisplay = this.data.hasUnreadCompletion;
+            if (!firstDisplay) this.data.session = null;
+            // ★ 同步渲染，避免先闪一帧 00:00 再跳到初始时长。
+            this.render();
+            if (firstDisplay) await this.markRead();
+            else await this.save();
+            return;
+        }
+        this.render();
+        // ★ 先结算可能已经到期的计时（写入完成记录），再刷新页面状态。
+        await this.tick();
+        await this.markRead();
     },
     contact() {
         const id = this.data.session?.contactId || this.data.contactId;
@@ -109,6 +148,8 @@ const Pomodoro = {
                 }
                 s.status = 'completed';
                 s.remainingMs = 0;
+                // ★ 结算瞬间不在番茄钟页就算“还没看过”：探索留红点，第一次进入仍展示 00:00；
+                // ★ 回到前台真正看见这一页时由 markRead 清掉未读，之后第一次进入才重置。
                 this.data.hasUnreadCompletion = !this.isViewing();
                 stateChanged = true;
                 await this.save();
@@ -208,6 +249,9 @@ const Pomodoro = {
         await Promise.all([this.save(), this.speak(action)]);
     },
     openSettings() {
+        const modal = this.$('modal-pomodoro-settings');
+        // ★ 弹窗已经打开时（例如从陪伴人列表返回）只是刷新，不能用已保存值冲掉还没保存的输入。
+        const reenter = !modal.classList.contains('hidden');
         const select = this.$('pomodoro-api-preset');
         const selected = select.value;
         select.replaceChildren();
@@ -222,14 +266,15 @@ const Pomodoro = {
             addOption(String(index), `${preset.name} (${preset.model || '未知模型'})`);
         });
         // ★ 从陪伴人选择框返回时保留尚未保存的模型选择。
-        const current = this.$('modal-pomodoro-settings').classList.contains('hidden') ? this.data.apiPresetIndex : Number(selected);
+        const current = reenter ? Number(selected) : this.data.apiPresetIndex;
         select.value = STATE.settings.API_PRESETS?.[current] ? String(current) : '-1';
-        this.$('pomodoro-minutes').value = this.data.minutes;
+        // ★ 时长同理：只有真正打开弹窗时才用已保存的时长回填，返回时保留用户输入的草稿。
+        if (!reenter) this.$('pomodoro-minutes').value = this.data.minutes;
         this.$('pomodoro-minutes').disabled = this.active();
         this.$('pomodoro-pick').disabled = this.active();
         this.$('pomodoro-selected').textContent = STATE.contacts.find(c => c.id === this.data.contactId)?.name || '未选择';
         this.$('pomodoro-settings-hint').textContent = this.active() ? '本轮进行中，结束后可以更换陪伴人和时长。' : '选择一位角色，陪你完成这一轮专注。';
-        this.$('modal-pomodoro-settings').classList.remove('hidden');
+        modal.classList.remove('hidden');
     },
     openPicker() {
         const list = this.$('pomodoro-people');

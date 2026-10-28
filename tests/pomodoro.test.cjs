@@ -9,11 +9,30 @@ const requests = [];
 const notices = [];
 let viewing = false;
 // ★ 提供历史记录渲染所需的最小 DOM，避免测试依赖真实浏览器。
-const createElement = tagName => ({ tagName, value: '', textContent: '', className: '', style: {}, children: [],
-    classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
-    addEventListener() {},
-    append(...children) { this.children.push(...children); },
-    replaceChildren(...children) { this.children = [...children]; } });
+// ★ classList 与事件监听要真的生效：设置弹窗“已打开/未打开”的判断和按钮点击都依赖它们。
+const createElement = tagName => {
+    const classes = new Set();
+    const listeners = {};
+    return {
+        tagName, value: '', textContent: '', className: '', innerHTML: '', src: '', hidden: false, disabled: false,
+        style: {}, children: [],
+        classList: {
+            add(...names) { names.forEach(name => classes.add(name)); },
+            remove(...names) { names.forEach(name => classes.delete(name)); },
+            toggle(name, force) {
+                const next = force === undefined ? !classes.has(name) : !!force;
+                if (next) classes.add(name); else classes.delete(name);
+                return next;
+            },
+            contains(name) { return classes.has(name); }
+        },
+        addEventListener(type, handler) { (listeners[type] = listeners[type] || []).push(handler); },
+        // ★ 直接触发监听器，返回 Promise 以便 await 异步处理。
+        fire(type, event = {}) { return Promise.all((listeners[type] || []).map(handler => handler(event))); },
+        append(...children) { this.children.push(...children); },
+        replaceChildren(...children) { this.children = [...children]; }
+    };
+};
 const context = vm.createContext({ console, crypto: webcrypto, Date, setInterval: () => {},
     getComputedStyle: () => ({ display: viewing ? 'flex' : 'none' }),
     App: { showTopNotice: (message, options) => notices.push({ message, options }) },
@@ -88,8 +107,14 @@ const p = vm.runInContext('Pomodoro', context);
     await p.tick();
     assert.equal(p.data.hasUnreadCompletion, true);
     assert.equal(notices.length, 1);
+    // ★ 只有真的停留在番茄钟页时才清未读；页面不可见时 markRead 不能消费完成态。
+    viewing = false;
+    await p.markRead();
+    assert.equal(p.data.hasUnreadCompletion, true);
+    viewing = true;
     await p.markRead();
     assert.equal(saved.hasUnreadCompletion, false);
+    viewing = false;
     assert.equal(p.context('b', 'b1').ids.length, 0);
     // 实时状态放在完成记录前；只属于当前陪伴人，暂停不误报进行中。
     const completedSession = p.data.session;
@@ -208,7 +233,141 @@ const p = vm.runInContext('Pomodoro', context);
     assert.equal(p.data.speeches.length, speechCountBeforeRace + 1); // 迟到且未展示的回复不会保存。
     assert.equal(p.data.speeches.at(-1).text, '暂停回复');
     assert.equal(p.speaking, false);
+
+    // ★★★★★ 完成态消费 START：00:00 只在“看过之后的再次进入”时重置 ★★★★★
+    // ★ 完成通知的陪伴请求挂起，避免异步发言干扰下面“记录/发言不变”的断言。
+    context.API.chat = () => new Promise(() => {});
+    const resetTask = p.data.task;
+    const resetSpeeches = p.data.speeches.length;
+
+    // 场景 1：在番茄钟页完成 → 留在页面仍是 00:00；退出再进重置为设置时长，任务/记录/发言保持。
+    viewing = true;
+    p.data.session = { id: 'in-page-finish', contactId: 'a', contactName: '甲', task: resetTask,
+        durationMs: 29 * 60000, remainingMs: 0, endAt: Date.now() - 1, status: 'running' };
+    await p.tick();
+    assert.equal(p.data.hasUnreadCompletion, false);       // 完成瞬间就在页面 = 已经看过
+    assert.equal(p.$('pomodoro-time').textContent, '00:00');
+    const resetRecords = p.data.records.length;
+    assert.ok(saved.records.some(r => r.id === 'in-page-finish')); // 完成记录先落库
+    await p.enterView();
+    assert.equal(p.data.session, null);
+    assert.equal(saved.session, null);
+    assert.equal(p.$('pomodoro-time').textContent, '29:00'); // 回到设置时长，从头开始
+    assert.equal(p.$('pomodoro-toggle').textContent, '开始专注');
+    assert.equal(p.$('pomodoro-status').textContent, '准备开始');
+    assert.equal(p.data.task, resetTask);
+    assert.equal(p.$('pomodoro-task').value, resetTask);   // 专注内容保持原样
+    assert.equal(p.data.records.length, resetRecords);
+    assert.equal(saved.records.length, resetRecords);
+    assert.equal(saved.records.some(r => r.id === 'in-page-finish'), true); // 重置不删除完成记录
+    assert.equal(p.data.speeches.length, resetSpeeches);
+    assert.equal(saved.speeches.length, resetSpeeches);
+    assert.equal(saved.minutes, 29);
+    assert.equal(saved.contactId, 'a');
+    assert.equal(saved.apiPresetIndex, 0);
+    assert.equal(saved.hasUnreadCompletion, false);
+
+    // 场景 2：不在页面上完成（探索红点）→ 第一次进入仍展示 00:00，退出再进才重置。
+    viewing = false;
+    p.data.session = { id: 'unread-finish', contactId: 'a', contactName: '甲', task: '洗澡',
+        durationMs: 10 * 60000, remainingMs: 0, endAt: Date.now() - 1, status: 'running' };
+    await p.tick();
+    assert.equal(p.data.hasUnreadCompletion, true);         // 完成时不在页面
+    viewing = true;                                        // 用户真正打开番茄钟页
+    await p.enterView();                                   // 第一次进入：消费未读，但仍显示完成态
+    assert.equal(p.data.session.status, 'completed');
+    assert.equal(saved.session.status, 'completed');
+    assert.equal(saved.hasUnreadCompletion, false);         // 未读标记要持久化，刷新后才知道已经看过
+    assert.equal(saved.session.viewed, undefined);          // 不再有第二份“看过”状态
+    assert.equal(p.$('pomodoro-time').textContent, '00:00');
+    assert.equal(p.$('pomodoro-toggle').textContent, '开始下一轮');
+    await p.enterView();                                   // 退出再进：重置
+    assert.equal(p.data.session, null);
+    assert.equal(p.$('pomodoro-time').textContent, '29:00');
+    assert.equal(p.$('pomodoro-task').value, resetTask);
+    assert.equal(saved.records.some(r => r.id === 'unread-finish'), true);
+
+    // ★ 场景 2b：完成时在后台（锁屏/切屏），切回前台看见这一页后，第一次退出再进就要重置。
+    viewing = false;
+    p.data.session = { id: 'background-finish', contactId: 'a', contactName: '甲', task: resetTask,
+        durationMs: 29 * 60000, remainingMs: 0, endAt: Date.now() - 1, status: 'running' };
+    await p.tick();
+    assert.equal(p.data.hasUnreadCompletion, true);         // 后台结算，用户还没看到
+    viewing = true;                                        // 切回前台：visibilitychange → tick + markRead
+    await p.tick();
+    await p.markRead();
+    assert.equal(p.data.hasUnreadCompletion, false);        // 看见这一页就算看过
+    assert.equal(saved.hasUnreadCompletion, false);
+    assert.equal(p.data.session.status, 'completed');       // 页面此刻仍显示 00:00
+    assert.equal(p.$('pomodoro-time').textContent, '00:00');
+    await p.enterView();                                   // ★ 第一次退出再进就必须重置
+    assert.equal(p.data.session, null);
+    assert.equal(p.$('pomodoro-time').textContent, '29:00');
+    assert.equal(saved.records.some(r => r.id === 'background-finish'), true);
+
+    // 场景 3：已经停在番茄钟页时重复进入（点完成通知）不消费完成态，退出再进才重置。
+    viewing = true;
+    p.data.session = { id: 'reenter-finish', contactId: 'a', contactName: '甲', task: resetTask,
+        durationMs: 29 * 60000, remainingMs: 0, endAt: Date.now() - 1, status: 'running' };
+    await p.tick();
+    await p.enterView({ reenter: true });
+    assert.equal(p.data.session.status, 'completed');
+    assert.equal(p.$('pomodoro-time').textContent, '00:00');
+    viewing = true;                                        // 真正退出再进时页面是可见的
+    await p.enterView();
+    assert.equal(p.data.session, null);
+    assert.equal(p.$('pomodoro-time').textContent, '29:00');
+
+    // 场景 4：进行中的计时进入页面不得被重置。
+    p.data.session = { id: 'entry-running', contactId: 'a', task: resetTask,
+        durationMs: 60000, remainingMs: 60000, endAt: Date.now() + 60000, status: 'running' };
+    await p.enterView();
+    assert.equal(p.data.session.status, 'running');
+    assert.notEqual(p.$('pomodoro-time').textContent, '00:00');
+    assert.equal(p.$('pomodoro-end').hidden, false);
+
+    // 场景 5：旧备份多存的 viewed 字段被丢弃；是否看过只看未读标记，完成记录不受影响。
+    const legacySession = { id: 'legacy', contactId: 'a', durationMs: 30 * 60000,
+        remainingMs: 0, endAt: 1, status: 'completed', viewed: false };
+    const legacyNormalized = p.normalize({ hasUnreadCompletion: true, session: legacySession });
+    assert.equal(legacyNormalized.session.viewed, undefined);
+    assert.equal(legacyNormalized.session.id, 'legacy');
+    assert.equal(legacyNormalized.hasUnreadCompletion, true);
+    assert.equal(p.normalize({ hasUnreadCompletion: false, session: legacySession }).session.viewed, undefined);
+    assert.equal(p.normalize({ session: { id: 'run', contactId: 'a', durationMs: 60000,
+        remainingMs: 0, endAt: Date.now() + 1000, status: 'running' } }).session.viewed, undefined);
+
+    // ★ 场景 6：先改时长、再去选陪伴人，返回设置时不能把还没保存的时长冲掉。
+    p.data.session = null;
+    p.data.minutes = 29;
+    p.data.apiPresetIndex = -1;
+    p.$('modal-pomodoro-settings').classList.add('hidden');
+    p.bind();                                                   // 走真实的按钮绑定
+    p.openSettings();
+    assert.equal(Number(p.$('pomodoro-minutes').value), 29);    // 首次打开用已保存时长回填
+    p.$('pomodoro-minutes').value = '1';                        // 用户先改时长（草稿）
+    p.$('pomodoro-api-preset').value = '0';                     // 同时改模型（草稿）
+    p.openPicker();
+    await p.$('pomodoro-people').children[0].fire('click');     // 选择第一个陪伴人
+    assert.equal(p.$('pomodoro-minutes').value, '1');           // ★ 草稿保留，不被重置成 29
+    assert.equal(p.$('pomodoro-api-preset').value, '0');         // 模型草稿同样保留
+    assert.equal(p.data.minutes, 29);                            // 选陪伴人不会提交时长
+    assert.equal(p.data.contactId, 'a');
+    assert.equal(p.$('modal-pomodoro-settings').classList.contains('hidden'), false);
+    await p.$('pomodoro-settings-save').fire('click');           // 保存才提交
+    assert.equal(p.data.minutes, 1);
+    assert.equal(saved.minutes, 1);
+    assert.equal(p.data.apiPresetIndex, 0);
+    assert.equal(p.$('pomodoro-time').textContent, '01:00');
+    assert.equal(p.$('modal-pomodoro-settings').classList.contains('hidden'), true);
+    // ★ 重新打开弹窗时回填的是刚保存的 1 分钟，而不是默认 25。
+    p.openSettings();
+    assert.equal(Number(p.$('pomodoro-minutes').value), 1);
+    p.$('modal-pomodoro-settings').classList.add('hidden');
+
     console.log('PASS: 完成/中途结束旧版提示词、完成通知跳转目标、未读持久化/清除、重复结算去重');
     console.log('PASS: 开始/暂停/继续请求、模型预设选择及回退、番茄钟不携带聊天记录、乱序回复保护');
     console.log('PASS: 默认兼容、暂停恢复、刷新结算去重、角色隔离、3轮注入、Reroll/后台恢复去重、请求快照、最近6条消息');
+    console.log('PASS: 完成态消费（页内完成重进重置/红点首次仍显示00:00/后台完成切回前台后首次重进即重置/重复进入不消费/进行中不重置/旧数据只保留单份状态）');
+    console.log('PASS: 设置弹窗草稿（先改时长再选陪伴人，返回后时长/模型不被已保存值冲掉，保存才生效）');
 })().catch(error => { console.error(error); process.exitCode = 1; });
