@@ -18,7 +18,7 @@
     --primary-btn-text: hsl(var(--theme-color-h), var(--theme-color-s), var(--theme-color-l));
     --btn-color: rgba(245, 245, 245, 0.75);
     --btn-border-color: #a9a9a9;
-    --app-font-size: 16px;
+    --app-font-size: 17px;
 
 }
 
@@ -348,7 +348,7 @@ body.dark-mode .chat-header-avatar {
     display: flex;
     align-items: flex-start;
     gap: 3px; /* 稍微加大一点间距更好看 */
-    margin-bottom: 11px;
+    margin-bottom: 12px;
     max-width: 96%;
     
     /* ★★★ 关键修改：默认必须是可见的！去掉 opacity: 0 ★★★ */
@@ -405,11 +405,11 @@ body.dark-mode .chat-header-avatar {
 
 /* ========= 3. 气泡收紧（文字更密集好看） ========= */
 .message-bubble {
-    border-radius: 12px;
+    border-radius: 15px;
     max-width: 100%;
 
     
-    font-size: 1.0625rem;
+    font-size: 1rem;
     line-height: 1.3;
     margin-top: 1px;
     /* user-select: none; */ /* 后面去说 */
@@ -423,7 +423,7 @@ body.dark-mode .chat-header-avatar {
 .message-wrapper.user .message-bubble {
     background: var(--message-bg-user);
     border: 1.2px solid var(--message-border-user);
-    padding: 7px 10px 7px 10px;        /* 原来12-18 → 9-14 */
+    padding: 8px 11px 8px 11px;        /* 原来12-18 → 9-14 */
     /* border-top-right-radius: 3px; */
     /* margin-right: 3px; */
     color: #fff;
@@ -435,7 +435,7 @@ body.dark-mode .chat-header-avatar {
     background: var(--message-bg-ai);
     border: 1.2px solid var(--message-border-ai);
     color: #222;
-    padding: 7px 10px 7px 10px;        /* 原来12-18 → 9-14 */
+    padding: 8px 11px 8px 11px;         /* 原来12-18 → 9-14 */
     /* border-top-left-radius: 3px; */
     /* margin-left: 3px; */
     backdrop-filter: blur(5px);
