@@ -347,7 +347,7 @@ body.dark-mode .chat-header-avatar {
 .message-wrapper {
     display: flex;
     align-items: flex-start;
-    gap: 3px; /* 稍微加大一点间距更好看 */
+    gap: 5px; /* 稍微加大一点间距更好看 */
     margin-bottom: 12px;
     max-width: 96%;
     
