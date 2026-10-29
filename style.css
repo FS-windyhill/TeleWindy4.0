@@ -423,7 +423,7 @@ body.dark-mode .chat-header-avatar {
 .message-wrapper.user .message-bubble {
     background: var(--message-bg-user);
     border: 1.2px solid var(--message-border-user);
-    padding: 8px 11px 8px 11px;        /* 原来12-18 → 9-14 */
+    padding: 7px 10px 7px 10px;        /* 原来12-18 → 9-14 */
     /* border-top-right-radius: 3px; */
     /* margin-right: 3px; */
     color: #fff;
@@ -435,7 +435,7 @@ body.dark-mode .chat-header-avatar {
     background: var(--message-bg-ai);
     border: 1.2px solid var(--message-border-ai);
     color: #222;
-    padding: 8px 11px 8px 11px;         /* 原来12-18 → 9-14 */
+    padding: 7px 10px 7px 10px;         /* 原来12-18 → 9-14 */
     /* border-top-left-radius: 3px; */
     /* margin-left: 3px; */
     backdrop-filter: blur(5px);
