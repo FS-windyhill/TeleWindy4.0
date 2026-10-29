@@ -1040,6 +1040,8 @@ const ProactiveMessages = {
             }
             const contacts = (STATE.contacts || []).filter(contact => settings.characterIds.map(String).includes(String(contact.id)));
             for (const contact of contacts) {
+                // ★ 线下见面中（offline 模式）不打扰：跳过主动消息的 Worker 拉取与本地追赶。
+                if (contact.chatMode === 'offline') continue;
                 if (this.workerModeAvailable()) {
                     await this.pullWorkerMessages(contact);
                     await this.syncWorker(contact);

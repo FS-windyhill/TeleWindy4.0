@@ -405,7 +405,7 @@ body.dark-mode .chat-header-avatar {
 
 /* ========= 3. 气泡收紧（文字更密集好看） ========= */
 .message-bubble {
-    border-radius: 15px;
+    border-radius: 13px;
     max-width: 100%;
 
     
@@ -12860,3 +12860,438 @@ body.dark-mode .usage-page #usage-cost {
 }
 
 /* ★★★★★ 用量统计 END ★★★★★ */
+
+/* ★★★★★ 线下见面模式 START ★★★★★ */
+
+/* ============================================================
+   1. 聊天选项菜单里的「线上聊天 / 线下见面」模式切换
+   结构仿 usage-tabs，但类名完全独立，方便单独调整。
+   ============================================================ */
+.chat-mode-tabs {
+    position: relative;
+    display: flex;
+    padding: 4px;
+    border-radius: 14px;
+    background: rgba(128, 128, 128, 0.12);
+}
+.chat-mode-tabs::before {
+    content: '';
+    position: absolute;
+    left: 4px; top: 4px; bottom: 4px;
+    width: calc(50% - 4px);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 2px 8px #0001;
+    transition: transform 0.2s;
+}
+/* 选中「线下见面」时滑块移到右侧 */
+.chat-mode-tabs.offline-mode::before {
+    transform: translateX(100%);
+}
+.chat-mode-tabs button {
+    z-index: 1;
+    width: 50%;
+    padding: 10px;
+    border: 0;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+}
+body.dark-mode .chat-mode-tabs::before {
+    background: #ffffff20;
+}
+
+/* ============================================================
+   2. 线下见面页面骨架：与线上聊天页同一套 header/footer 布局
+   ============================================================ */
+#view-offline-chat {
+    /* ★ 默认必须隐藏：ID 选择器优先级高于 .page-view 的 display:none，
+       这里不写 none 的话一进应用就会直接盖着线下页面（z-index 30）。 */
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+    /* 与 #view-chat 一样自己铺底，不透出下面的页面 */
+    background: var(--app-wallpaper-image, url('assets/images/wallpaper.jpg')) center/cover no-repeat fixed, var(--background-color);
+    /* 盖在处于 in-chat-mode 的线上聊天页（z-index: 20）之上 */
+    z-index: 30;
+}
+
+#offline-chat-window {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 15px 11px;
+    display: flex;
+    flex-direction: column;
+}
+
+#offline-chat-messages {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 100%;
+}
+
+/* ============================================================
+   3. 线下见面消息卡片：悬浮卡片皮肤参考 usage-card
+   ============================================================ */
+.offline-msg-card {
+    max-width: 720px;
+    width: 100%;
+    margin: 0 auto;
+    padding: 18px 18px 8px 18px;
+    box-sizing: border-box;
+    border: 1px solid #ffffff;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.6);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    animation: offline-card-enter 0.25s ease-out;
+}
+body.dark-mode .offline-msg-card {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(245, 245, 245, 0.3);
+}
+
+@keyframes offline-card-enter {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 卡片内部偏上：发送人信息栏 */
+.offline-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+/* 左：头像 + 名字/时间 */
+.offline-card-sender {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.offline-card-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    background: rgba(128, 128, 128, 0.15);
+    overflow: hidden;
+}
+.offline-card-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 50%;
+}
+.offline-card-id {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.3;
+    min-width: 0;
+}
+.offline-card-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-color, #333);
+    white-space: nowrap;
+    overflow: hidden;
+    margin-bottom: 1px;
+    text-overflow: ellipsis;
+}
+.offline-card-time {
+    font-size: 0.78rem;
+    color: #888;
+}
+
+/* 右：楼层数（上）+ 日期（下） */
+.offline-card-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    line-height: 1.3;
+    flex-shrink: 0;
+}
+.offline-card-floor {
+    font-size: 0.85rem;
+    font-weight: 600;
+    /* ★ 不能用 --primary-btn-color：那是 10% 透明度的背景色，文字会几乎不可见 */
+    color: #6490ff;
+}
+.offline-card-date {
+    font-size: 0.75rem;
+    color: #888;
+}
+
+/* 分割线：卡片内部偏上，位于信息栏与正文之间 */
+.offline-card-divider {
+    border: none;
+    border-top: 1px solid rgba(128, 128, 128, 0.25);
+    margin: 10px 0 12px;
+}
+body.dark-mode .offline-card-divider {
+    border-top-color: rgba(255, 255, 255, 0.2);
+}
+
+/* 正文：与线上气泡同一套 markdown 渲染（marked breaks 已产出 <br>，不再加 pre-wrap） */
+.offline-card-content {
+    line-height: 1.3;
+    font-size: 1rem;
+    color: var(--text-color, #333);
+    word-break: break-word;
+}
+
+/* 整条隐藏的卡片：置灰但仍可见（与线上隐藏消息同口径：AI 不可见） */
+.offline-msg-card.is-hidden {
+    opacity: 0.45;
+}
+.offline-msg-card.is-hidden .offline-card-content {
+    text-decoration: line-through;
+    text-decoration-color: rgba(128, 128, 128, 0.6);
+}
+
+/* 临时失败占位卡片 */
+.offline-msg-card.is-transient {
+    opacity: 0.7;
+    border-style: dashed;
+}
+
+/* ============================================================
+   4. 线下卡片多选模式
+   ============================================================ */
+#offline-chat-messages.select-mode .offline-msg-card {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+}
+#offline-chat-messages.select-mode .offline-msg-card.selected {
+    box-shadow: 0 0 0 2px #3770ff;
+}
+
+/* reduced motion：关掉卡片入场动画 */
+@media (prefers-reduced-motion: reduce) {
+    .offline-msg-card {
+        animation: none;
+    }
+    .chat-mode-tabs::before {
+        transition: none;
+    }
+}
+
+/* ★★★★★ 线下见面模式 END ★★★★★ */
+
+/* ★★★★★ 线下见面模式：header/footer 美化 + 暗色适配 START ★★★★★ */
+
+/* ============================================================
+   header 联系人模式：数值仿线上 .chat-header* 系列，类名独立
+   ============================================================ */
+.offline-chat-header {
+    text-align: left;
+}
+
+.offline-header-profile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    height: 40px;
+    margin-left: 42px;
+    margin-right: 42px;
+}
+
+.offline-header-avatar {
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: rgba(255, 255, 255, 0.72);
+    border: 2px solid rgb(218, 218, 218);
+}
+body.dark-mode .offline-header-avatar {
+    border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.offline-header-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+}
+
+.offline-chat-header #offline-chat-title {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    line-height: 1.15;
+}
+
+.offline-chat-header #offline-typing-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    max-width: 100%;
+    overflow: visible;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.15;
+    margin: 2px 0 0;
+    font-size: 0.8rem;
+    color: #666;
+}
+body.dark-mode .offline-chat-header #offline-typing-status {
+    color: rgba(255, 255, 255, 0.6);
+}
+
+/* 见面中的绿点（仿 .presence-dot，类名独立；输入中复用线上 presencePulse 关键帧） */
+.offline-presence-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #34c759;
+    box-shadow: 0 0 0 2px rgba(52, 199, 89, 0.16);
+}
+.offline-presence-dot.is-typing {
+    animation: presencePulse 1.4s ease-in-out infinite;
+}
+.offline-presence-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ============================================================
+   footer：输入框 / 发送 / 重新生成，数值仿线上 #task-input /
+   #send-button / #reroll-footer-btn，ID 独立
+   ============================================================ */
+.offline-app-footer {
+    flex-shrink: 0;
+    position: relative;
+    padding: 8px 15px 15px 15px;
+    border-top: 1px solid rgba(255, 255, 255, 0.9);
+    display: flex;
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(10px) saturate(180%);
+    border-radius: 0;
+}
+
+#offline-task-input {
+    flex-grow: 1;
+    padding: 6px 16px;
+    border: 1px solid #ccc;
+    background: rgba(255, 255, 255, 0.6) !important;
+    resize: none;
+    font-family: inherit;
+    font-size: 1rem;
+    line-height: 1.5;
+    height: 38px;
+    overflow-y: hidden;
+    box-sizing: border-box;
+    border-radius: 8px;
+
+}
+#offline-task-input:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    background: rgba(255, 255, 255, 0.88) !important;
+}
+
+#offline-send-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 10px;
+    border: 1px solid rgba(179, 179, 179, 0.816);
+    background: rgba(251, 251, 251, 0.5);
+    color: rgb(131, 131, 131);
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-left: 7px;
+}
+
+#offline-reroll-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 10px;
+    border: 1px solid rgba(179, 179, 179, 0.816);
+    cursor: pointer;
+    border-radius: 8px;
+    font-size: 1em;
+    flex-shrink: 0;
+    transition: background-color 0.2s;
+    background: rgba(251, 251, 251, 0.5);
+    color: rgb(131, 131, 131);
+    margin-right: 7px;
+}
+
+#offline-send-btn svg {
+    width: 1em;
+    height: 1em;
+    display: block;
+}
+#offline-reroll-btn svg {
+    width: 0.9em;
+    height: 0.9em;
+    display: block;
+}
+
+/* ============================================================
+   暗色模式：footer 输入框/按钮 + 卡片文字与楼层
+   ============================================================ */
+body.dark-mode .offline-app-footer {
+    background: rgba(60, 60, 60, 0.8);
+    border-top: 1px solid rgba(126, 126, 126, 0.7);
+}
+body.dark-mode #offline-task-input {
+    border: 1px solid #9d9d9dcc;
+    color: #ffffff;
+    background: rgba(60, 60, 60, 0.25) !important;
+}
+body.dark-mode #offline-task-input:focus {
+    border: 2px solid #9d9d9d;
+    background: rgba(0, 0, 0, 0.25) !important;
+}
+body.dark-mode #offline-task-input::placeholder {
+    color: #bdbdbd;
+}
+body.dark-mode #offline-send-btn,
+body.dark-mode #offline-reroll-btn {
+    border: 1px solid rgba(182, 182, 182, 0.3);
+    background: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* 卡片文字与楼层：浅色模式下未定义 CSS 变量时的兜底色在暗色下不可读，这里逐项适配 */
+body.dark-mode .offline-card-content {
+    color: rgba(255, 255, 255, 0.92);
+}
+body.dark-mode .offline-card-name {
+    color: rgba(255, 255, 255, 0.92);
+}
+body.dark-mode .offline-card-time,
+body.dark-mode .offline-card-date {
+    color: rgba(255, 255, 255, 0.55);
+}
+body.dark-mode .offline-card-floor {
+    color: #888;
+}
+body.dark-mode .offline-card-avatar {
+    background: rgba(255, 255, 255, 0.12);
+}
+
+/* ★★★★★ 线下见面模式：header/footer 美化 + 暗色适配 END ★★★★★ */

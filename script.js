@@ -683,6 +683,13 @@ const STATE = {
     selectedBubbles: new Set(),  // 存储选中的气泡DOM元素
     pendingImage: null, // ★★★ 新增：暂存用户选择的图片 (Base64)
 
+    // ★★★ 线下见面模式 START ★★★
+    offlineVisibleMsgCount: 15,        // 线下页面当前显示的卡片数（向上加载更多）
+    offlineSelectMode: false,          // 线下多选模式开关（整条卡片级）
+    offlineSelectedIds: new Set(),     // 线下多选选中的 messageId 集合
+    offlineSelectedMessageId: null,    // 线下长按菜单当前指向的消息
+    // ★★★ 线下见面模式 END ★★★
+
     // 朋友圈
     // ★★★ 这里必须初始化为空数组和默认对象 ★★★
     moments: [], 
@@ -2447,6 +2454,17 @@ const UI = {
         input: document.getElementById('task-input'),
         sendBtn: document.getElementById('send-button'),
         rerollBtn: document.getElementById('reroll-footer-btn'),
+
+        // ★★★ 线下见面模式 DOM ★★★
+        viewOfflineChat: document.getElementById('view-offline-chat'),
+        offlineMsgs: document.getElementById('offline-chat-messages'),
+        offlineInput: document.getElementById('offline-task-input'),
+        offlineSendBtn: document.getElementById('offline-send-btn'),
+        offlineRerollBtn: document.getElementById('offline-reroll-btn'),
+        offlineTitle: document.getElementById('offline-chat-title'),
+        offlineAvatar: document.getElementById('offline-header-avatar'),
+        offlineStatus: document.getElementById('offline-typing-status'),
+
         modalOverlay: document.getElementById('modal-overlay'),
         mainModal: document.getElementById('main-modal'), 
         
@@ -4068,6 +4086,176 @@ const UI = {
         this.updateRerollState(contact);
     },
 
+    // ★★★★★ 线下见面模式：卡片渲染 START ★★★★★
+    // 每条消息是一整张居中悬浮卡片；楼层号按当前数组位置取，删除后自动补位。
+    renderOfflineChatHistory(contact, isLoadMore = false, keepScrollPosition = false) {
+        const container = this.els.offlineMsgs;
+        if (!container) return;
+        const scrollContainer = container.parentElement;
+
+        if (!isLoadMore && !keepScrollPosition) container.style.opacity = '0';
+
+        let previousScrollHeight = 0;
+        let previousScrollTop = 0;
+        if (isLoadMore) {
+            previousScrollHeight = scrollContainer.scrollHeight;
+            previousScrollTop = scrollContainer.scrollTop;
+        }
+
+        container.innerHTML = '';
+        this.updateOfflineHeader(contact);
+
+        const totalMsgs = (contact.offlineHistory || []).length;
+        STATE.offlineVisibleMsgCount = Math.max(CONFIG.CHAT_PAGE_SIZE || 15, STATE.offlineVisibleMsgCount || 0);
+        const startIndex = Math.max(0, totalMsgs - STATE.offlineVisibleMsgCount);
+        const endIndex = totalMsgs;
+
+        if (startIndex > 0) {
+            const loadPrevBtn = document.createElement('div');
+            loadPrevBtn.className = 'load-more-btn';
+            loadPrevBtn.innerText = '点击加载更早消息';
+            loadPrevBtn.onclick = () => {
+                STATE.offlineVisibleMsgCount += CONFIG.CHAT_PAGE_SIZE;
+                this.renderOfflineChatHistory(contact, true);
+            };
+            container.appendChild(loadPrevBtn);
+        }
+
+        for (let i = startIndex; i < endIndex; i++) {
+            container.appendChild(this.buildOfflineCard(contact, contact.offlineHistory[i], i));
+        }
+
+        if (isLoadMore) {
+            // 加载上方更早历史：保持视口当前看到的元素位置不变
+            const newScrollHeight = scrollContainer.scrollHeight;
+            scrollContainer.scrollTop = newScrollHeight - previousScrollHeight + previousScrollTop;
+        } else if (keepScrollPosition) {
+            // 保持不动
+        } else {
+            void scrollContainer.offsetHeight;
+            this.scrollToOfflineBottom();
+            requestAnimationFrame(() => {
+                this.scrollToOfflineBottom();
+                container.style.opacity = '1';
+            });
+        }
+        this.updateOfflineRerollState(contact);
+    },
+
+    buildOfflineCard(contact, msg, index) {
+        if (!msg) return document.createDocumentFragment();
+        const sender = msg.role === 'assistant' ? 'ai' : 'user';
+        const card = document.createElement('div');
+        card.className = 'offline-msg-card';
+        if (sender === 'ai') card.classList.add('from-ai'); else card.classList.add('from-user');
+        if (msg.isHidden) card.classList.add('is-hidden');
+        if (msg.isTransientError === true) card.classList.add('is-transient');
+        card.dataset.messageId = String(msg.messageId || '');
+        card.messageRef = msg;
+
+        // —— 信息栏：左（头像+名字/时间）右（楼层/日期） ——
+        const header = document.createElement('div');
+        header.className = 'offline-card-header';
+
+        const senderBox = document.createElement('div');
+        senderBox.className = 'offline-card-sender';
+        const avatarBox = document.createElement('div');
+        avatarBox.className = 'offline-card-avatar';
+        const avatarSrc = sender === 'user'
+            ? (STATE.settings.USER_AVATAR || CONFIG.DEFAULT.USER_AVATAR)
+            : String(contact.avatar || '🌸');
+        if (/^(data:image\/|https?:\/\/|blob:|\.\/|assets\/)/i.test(avatarSrc)) {
+            const img = document.createElement('img');
+            img.src = avatarSrc;
+            img.onerror = () => { img.remove(); avatarBox.innerText = sender === 'user' ? '🙂' : '🌸'; };
+            avatarBox.appendChild(img);
+        } else {
+            avatarBox.innerText = avatarSrc;
+        }
+        const idBox = document.createElement('div');
+        idBox.className = 'offline-card-id';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'offline-card-name';
+        nameEl.innerText = sender === 'user' ? '我' : (contact.name || '角色名');
+        const timeEl = document.createElement('span');
+        timeEl.className = 'offline-card-time';
+        timeEl.innerText = OfflineChat.buildTimeLabel(msg.timestamp);
+        idBox.append(nameEl, timeEl);
+        senderBox.append(avatarBox, idBox);
+
+        const metaBox = document.createElement('div');
+        metaBox.className = 'offline-card-meta';
+        const floorEl = document.createElement('span');
+        floorEl.className = 'offline-card-floor';
+        floorEl.innerText = OfflineChat.buildFloorLabel(index);
+        const dateEl = document.createElement('span');
+        dateEl.className = 'offline-card-date';
+        dateEl.innerText = OfflineChat.buildDateLabel(msg.timestamp);
+        metaBox.append(floorEl, dateEl);
+
+        header.append(senderBox, metaBox);
+
+        const divider = document.createElement('hr');
+        divider.className = 'offline-card-divider';
+
+        const content = document.createElement('div');
+        content.className = 'offline-card-content';
+        // 正文与线上气泡共用同一套 markdown 渲染；用户消息剥掉系统时间戳，AI 消息不展示思考链。
+        let text = String(msg.content || '');
+        if (sender === 'user') {
+            const timePrefix = ChatBubbles.parse(msg).prefix;
+            if (timePrefix) text = text.slice(timePrefix.length);
+        } else {
+            text = text.replace(ChatBubbles.thoughtRegex, '').trim();
+            text = normalizeChatQuoteBreaks(text);
+        }
+        content.innerHTML = parseCustomMarkdown(text.trim());
+
+        card.append(header, divider, content);
+        return card;
+    },
+
+    updateOfflineHeader(contact) {
+        if (!contact || !this.els.viewOfflineChat) return;
+        if (this.els.offlineTitle) this.els.offlineTitle.innerText = contact.name || '角色名';
+        if (this.els.offlineAvatar) {
+            const avatarSrc = this.getChatHeaderAvatarSrc(contact);
+            if (this.els.offlineAvatar.getAttribute('src') !== avatarSrc) {
+                this.els.offlineAvatar.src = avatarSrc;
+            }
+        }
+    },
+
+    setOfflineTyping(isTyping) {
+        if (!this.els.offlineStatus) return;
+        const dotEl = this.els.offlineStatus.querySelector('.offline-presence-dot');
+        const textEl = this.els.offlineStatus.querySelector('.offline-presence-text');
+        dotEl?.classList.toggle('is-typing', !!isTyping);
+        if (textEl) textEl.innerText = isTyping ? '正在输入…' : '线下见面中';
+    },
+
+    scrollToOfflineBottom() {
+        const container = this.els.offlineMsgs?.parentElement;
+        if (!container) return;
+        container.scrollTop = container.scrollHeight;
+    },
+
+    updateOfflineRerollState(contact) {
+        if (!this.els.offlineRerollBtn) return;
+        const hasHistory = (contact?.offlineHistory || []).some(m => {
+            return m.role === 'assistant' && m.isTransientError !== true;
+        });
+        this.els.offlineRerollBtn.style.opacity = hasHistory ? '1' : '0.5';
+        this.els.offlineRerollBtn.disabled = !hasHistory;
+    },
+
+    // 线下记录里的临时失败占位在重新打开时清掉，与线上 clearTransientChatErrors 同口径。
+    clearTransientOfflineErrors(contact) {
+        if (!contact || !Array.isArray(contact.offlineHistory)) return;
+        contact.offlineHistory = contact.offlineHistory.filter(m => m?.isTransientError !== true);
+    },
+    // ★★★★★ 线下见面模式：卡片渲染 END ★★★★★
+
 
 /* 1212 - Fixed */
     appendMessageBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex = null) {
@@ -4697,13 +4885,20 @@ const App = {
                             API.notifyMultimodalFallback(pending.jobId);
                         }
 
+                        // ★ 线下见面的请求挂起后由恢复链路落库：userMessageId 在 offlineHistory 里，
+                        // 说明这一轮是线下请求，回复要写回线下记录而不是线上 history。
+                        const offlineHistoryArr = Array.isArray(contact.offlineHistory) ? contact.offlineHistory : [];
+                        const offlineTargeted = !!(pending.userMessageId
+                            && offlineHistoryArr.some(item => item?.messageId === pending.userMessageId));
+                        const targetHistory = offlineTargeted ? offlineHistoryArr : contact.history;
+
                         // ★ 后台识图回填：
                         // Worker 完成识图后只返回文字描述，不保存原图。
                         // 这里把描述补回当初那条用户图片消息，保持现有 image_description 字段不变。
                         if (job.image_description && (pending.userMessageId || Number.isInteger(pending.userMessageIndex))) {
                             const imageMsg = pending.userMessageId
-                                ? contact.history.find(item => item?.messageId === pending.userMessageId)
-                                : contact.history[pending.userMessageIndex];
+                                ? targetHistory.find(item => item?.messageId === pending.userMessageId)
+                                : targetHistory[pending.userMessageIndex];
                             if (imageMsg && imageMsg.role === 'user' && imageMsg.images && !imageMsg.image_description) {
                                 imageMsg.image_description = job.image_description;
                             }
@@ -4713,7 +4908,7 @@ const App = {
                             await this.applyAsyncAgentActions(job.agent_actions, contact);
                         }
 
-                        const alreadySaved = contact.history.some(msg => msg.asyncJobId === pending.jobId);
+                        const alreadySaved = targetHistory.some(msg => msg.asyncJobId === pending.jobId);
                         let assistantMessage = null;
                         if (!alreadySaved) {
                             assistantMessage = {
@@ -4726,15 +4921,15 @@ const App = {
                                 replyToMessageId: pending.userMessageId || '',
                                 asyncJobId: pending.jobId
                             };
-                            contact.history.push(assistantMessage);
+                            targetHistory.push(assistantMessage);
                         } else {
-                            assistantMessage = contact.history.find(msg => msg.asyncJobId === pending.jobId) || null;
+                            assistantMessage = targetHistory.find(msg => msg.asyncJobId === pending.jobId) || null;
                         }
 
                         // ★ 番茄钟后台恢复沿用请求时保存的快照，不消费后来才完成的新番茄。
                         const pomodoroSource = pending.userMessageId
-                            ? contact.history.find(item => item?.messageId === pending.userMessageId)
-                            : contact.history[pending.userMessageIndex];
+                            ? targetHistory.find(item => item?.messageId === pending.userMessageId)
+                            : targetHistory[pending.userMessageIndex];
                         await Pomodoro.consume(pending.pomodoroInjection || (pomodoroSource?.role === 'user' ? pomodoroSource.pomodoroInjection : null));
 
                         // ★★★★★ Post Agent：后台恢复后补跑 START ★★★★★
@@ -4753,7 +4948,13 @@ const App = {
                         // ★★★ Presence：后台补回来的回复也刷新最后互动时间 ★★★
                         UI.touchContactPresence(contact);
 
-                        if (this.isViewingContactChat(contact.id)) {
+                        if (offlineTargeted) {
+                            // 线下回复：还停在线下页面就重绘卡片；否则静默落库，下次打开见面页可见。
+                            if (this.isOfflineChatOpen(contact.id)) {
+                                UI.renderOfflineChatHistory(contact);
+                                UI.setLoading(false, contact.id);
+                            }
+                        } else if (this.isViewingContactChat(contact.id)) {
                             UI.renderChatHistory(contact);
                             UI.setLoading(false, contact.id);
                         } else {
@@ -4796,6 +4997,7 @@ const App = {
                             : null;
                         const alreadySaved = contact
                             ? contact.history.some(msg => msg.asyncJobId === pending.jobId)
+                                || (Array.isArray(contact.offlineHistory) && contact.offlineHistory.some(msg => msg.asyncJobId === pending.jobId))
                             : false;
 
                         if (contact && this.isViewingContactChat(contact.id)) {
@@ -5470,6 +5672,8 @@ const App = {
     },
     getActiveSwipeBackView() {
         const appContainer = document.getElementById('app-container');
+        // ★ 线下见面页盖在聊天页上且 in-chat-mode 保持展开，必须先于聊天判定
+        if (appContainer?.classList.contains('in-offline-mode')) return 'offline-chat';
         if (appContainer?.classList.contains('in-chat-mode')) return 'chat';
 
         const viewMap = [
@@ -5527,6 +5731,7 @@ const App = {
         const activeView = this.getActiveSwipeBackView();
         const backButtonMap = {
             chat: 'back-btn',
+            'offline-chat': 'offline-back-btn',
             explore: 'explore-back-btn',
             pomodoro: 'pomodoro-back-btn',
             'todo-plan': 'todo-plan-back-btn',
@@ -10069,7 +10274,21 @@ const App = {
         const contact = STATE.contacts.find(c => c.id === id);
         if (!contact) return;
         this.clearTransientChatErrors(contact);
-        
+
+        // ★ 用户的模式选择是持久的：线下角色点进来直接进入见面页，线上角色照旧。
+        //   只有用户在聊天选项里手动切换才会改模式，这里绝不强制归位成线上。
+        if (typeof OfflineChat !== 'undefined' && contact.chatMode === 'offline') {
+            OfflineChat.ensureFields(contact);
+            STATE.currentContactId = id;
+            if (contact.hasNewMsg) {
+                contact.hasNewMsg = false;
+                Storage.saveContacts();
+            }
+            UI.renderContacts();
+            this.openOfflineChat(contact);
+            return;
+        }
+
         STATE.currentContactId = id;
      
 
@@ -10185,15 +10404,19 @@ const App = {
     // ★★★★★ 本轮背景兼容提示 END ★★★★★
 
     // ★★★★★ 缓存友好历史窗口 START ★★★★★
-    ensureHistoryCacheMetadata(contact) {
-        if (!contact || !Array.isArray(contact.history)) return false;
+    // ★ historyKey 默认 'history'（线上）；线下见面传 'offlineHistory'，缓存序号落在 offlineHistoryCacheNextSeq。
+    ensureHistoryCacheMetadata(contact, historyKey = 'history') {
+        if (!contact) return false;
+        const history = Array.isArray(contact[historyKey]) ? contact[historyKey] : null;
+        if (!history) return false;
+        const seqField = `${historyKey}CacheNextSeq`;
 
         let changed = false;
-        let nextSeq = Number.isInteger(contact.historyCacheNextSeq)
-            ? contact.historyCacheNextSeq
+        let nextSeq = Number.isInteger(contact[seqField])
+            ? contact[seqField]
             : 0;
 
-        contact.history.forEach(msg => {
+        history.forEach(msg => {
             if (!msg || typeof msg !== 'object') return;
 
             if (!msg.cacheId) {
@@ -10210,16 +10433,16 @@ const App = {
             }
         });
 
-        if (contact.historyCacheNextSeq !== nextSeq) {
-            contact.historyCacheNextSeq = nextSeq;
+        if (contact[seqField] !== nextSeq) {
+            contact[seqField] = nextSeq;
             changed = true;
         }
 
         return changed;
     },
 
-    selectHistoryWindowRecords(contact, requestSettings) {
-        const history = Array.isArray(contact?.history) ? contact.history : [];
+    selectHistoryWindowRecords(contact, requestSettings, historyKey = 'history') {
+        const history = Array.isArray(contact?.[historyKey]) ? contact[historyKey] : [];
         const minLimit = Math.max(1, parseInt(requestSettings.CONTEXT_LIMIT, 10) || 5);
         const maxLimit = Math.max(minLimit, parseInt(requestSettings.HISTORY_WINDOW_MAX_CONTEXT, 10) || 25);
         const strategy = requestSettings.HISTORY_WINDOW_STRATEGY === 'strict_recent'
@@ -10277,8 +10500,9 @@ const App = {
 
         let changed = false;
         const minStartRecord = visibleRecords.slice(-minLimit)[0] || visibleRecords[0];
-        let startSeq = Number.isInteger(contact?.historyWindowStartSeq)
-            ? contact.historyWindowStartSeq
+        const startSeqField = `${historyKey}WindowStartSeq`;
+        let startSeq = Number.isInteger(contact?.[startSeqField])
+            ? contact[startSeqField]
             : -1;
 
         // ★ 缓存友好窗口：先固定最近“最短上下文”的起点，再只往尾部追加。
@@ -10297,8 +10521,8 @@ const App = {
             });
         }
 
-        if (contact && contact.historyWindowStartSeq !== startSeq) {
-            contact.historyWindowStartSeq = startSeq;
+        if (contact && contact[startSeqField] !== startSeq) {
+            contact[startSeqField] = startSeq;
             changed = true;
         }
 
@@ -10393,43 +10617,11 @@ const App = {
     
 
     // APP CONTROLLER.handleSend
-    async handleSend(isReroll = false) {
-        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
-        if (!contact) return;
-        // ★ 主动消息沿用自己的前端/Worker 请求方式，但删除旧气泡和 waterfall 与普通聊天保持一致。
-        if (isReroll && contact.history?.at(-1)?.proactiveSource) {
-            if (STATE.typingContactId === contact.id || !confirm('重新生成这条主动消息？')) return;
-            if (STATE.chatMode === 'jump') {
-                STATE.chatMode = 'normal';
-                STATE.visibleMsgCount = Math.max(CONFIG.CHAT_PAGE_SIZE, STATE.visibleMsgCount || 15);
-                UI.renderChatHistory(contact);
-            }
-            if (typeof UI.touchContactPresence === 'function') UI.touchContactPresence(contact);
-            try {
-                await ProactiveMessages.reroll(contact);
-            } catch (error) {
-                console.warn('[主动消息] 重生成失败:', error);
-                const isViewingChat = typeof this.isViewingContactChat === 'function'
-                    ? this.isViewingContactChat(contact.id)
-                    : STATE.currentContactId === contact.id;
-                if (isViewingChat) {
-                    const errorIndex = contact.history.length > 0 ? contact.history.length - 1 : 0;
-                    UI.appendMessageBubble(`(发送失败: ${error.message || '主动消息重生成失败'})`, 'ai', contact.avatar, null, errorIndex);
-                }
-            } finally {
-                const isViewingChat = typeof this.isViewingContactChat === 'function'
-                    ? this.isViewingContactChat(contact.id)
-                    : STATE.currentContactId === contact.id;
-                if (isViewingChat && typeof UI.updateRerollState === 'function') UI.updateRerollState(contact);
-            }
-            return;
-        }
-        // ============================================================
-        // 1. 准备 API 配置
-        // ============================================================
-
+    // ★★★ 线上聊天与线下见面共用的请求配置组装 START ★★★
+    // 全局默认 + 角色绑定预设覆盖 + 数值兜底 + 缺失检查；配置缺失时弹窗并返回 null。
+    buildChatRequestSettings(contact) {
         // 1.1 先载入全局默认设置
-        let requestSettings = {
+        const requestSettings = {
             API_URL: STATE.settings.API_URL,
             API_KEY: STATE.settings.API_KEY,
             MODEL: STATE.settings.MODEL,
@@ -10458,10 +10650,10 @@ const App = {
         if (contact.linkedPresetName) {
             const presets = STATE.settings.API_PRESETS || [];
             const targetPreset = presets.find(p => p.name === contact.linkedPresetName);
-            
+
             if (targetPreset) {
                 console.log(`[System] 使用角色专属预设: ${targetPreset.name}`);
-                
+
                 requestSettings.API_URL = targetPreset.url;
                 requestSettings.API_KEY = targetPreset.key;
                 requestSettings.MODEL = targetPreset.model;
@@ -10532,8 +10724,51 @@ const App = {
         const asyncNeedsClientKey = usingAsyncBackend && requestSettings.ASYNC_BACKEND_KEY_MODE !== 'server_secret';
         if (((!usingAsyncBackend || asyncNeedsClientKey) && (!requestSettings.API_URL || !requestSettings.API_KEY)) || !requestSettings.MODEL) {
             alert('API配置缺失！请检查设置。');
+            return null;
+        }
+
+        return requestSettings;
+    },
+    // ★★★ 线上聊天与线下见面共用的请求配置组装 END ★★★
+
+    async handleSend(isReroll = false) {
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        if (!contact) return;
+        // ★ 主动消息沿用自己的前端/Worker 请求方式，但删除旧气泡和 waterfall 与普通聊天保持一致。
+        if (isReroll && contact.history?.at(-1)?.proactiveSource) {
+            if (STATE.typingContactId === contact.id || !confirm('重新生成这条主动消息？')) return;
+            if (STATE.chatMode === 'jump') {
+                STATE.chatMode = 'normal';
+                STATE.visibleMsgCount = Math.max(CONFIG.CHAT_PAGE_SIZE, STATE.visibleMsgCount || 15);
+                UI.renderChatHistory(contact);
+            }
+            if (typeof UI.touchContactPresence === 'function') UI.touchContactPresence(contact);
+            try {
+                await ProactiveMessages.reroll(contact);
+            } catch (error) {
+                console.warn('[主动消息] 重生成失败:', error);
+                const isViewingChat = typeof this.isViewingContactChat === 'function'
+                    ? this.isViewingContactChat(contact.id)
+                    : STATE.currentContactId === contact.id;
+                if (isViewingChat) {
+                    const errorIndex = contact.history.length > 0 ? contact.history.length - 1 : 0;
+                    UI.appendMessageBubble(`(发送失败: ${error.message || '主动消息重生成失败'})`, 'ai', contact.avatar, null, errorIndex);
+                }
+            } finally {
+                const isViewingChat = typeof this.isViewingContactChat === 'function'
+                    ? this.isViewingContactChat(contact.id)
+                    : STATE.currentContactId === contact.id;
+                if (isViewingChat && typeof UI.updateRerollState === 'function') UI.updateRerollState(contact);
+            }
             return;
         }
+        // ============================================================
+        // 1. 准备 API 配置（组装逻辑抽到 buildChatRequestSettings，与线下见面模式共用）
+        // ============================================================
+        const requestSettings = this.buildChatRequestSettings(contact);
+        if (!requestSettings) return;
+
+        const usingAsyncBackend = API.shouldUseAsyncBackend(requestSettings);
 
         // 调试日志：看看最终发出去的参数对不对
         console.log("最终发送参数:", { 
@@ -10960,6 +11195,17 @@ const App = {
             console.warn("朋友圈注入失败:", e);
         }
 
+        // ★★★ 线下见面回顾：切回线上的前几轮请求附带线下最后一条消息 START ★★★
+        // 与朋友圈一样属于本轮易变背景：auto/user 模式并入当前 user，system 模式并入本轮即时系统信息。
+        if (typeof OfflineChat !== 'undefined' && OfflineChat.shouldInjectRecap(contact)) {
+            const offlineRecapPrompt = OfflineChat.buildRecapPrompt(contact);
+            if (offlineRecapPrompt) {
+                console.log('[Chat] 注入线下见面回顾');
+                volatileDynamicContextPrompts.push(offlineRecapPrompt);
+            }
+        }
+        // ★★★ 线下见面回顾 END ★★★
+
         let dynamicContextContent = '';
         const allDynamicContextPrompts = [
             ...routineDynamicContextPrompts,
@@ -11226,6 +11472,11 @@ const App = {
                 }
             }
 
+            // ★ 线下回顾只有正式回复成功才扣轮次；Reroll 复用同一条用户消息的 messageId，不会重复扣。
+            if (typeof OfflineChat !== 'undefined') {
+                OfflineChat.consumeRecapRound(contact, agentUserMessage?.messageId || '');
+            }
+
 
 
 
@@ -11288,6 +11539,572 @@ const App = {
             if (window.innerWidth >= 800 && UI.els.input) UI.els.input.focus();
         }
     },
+
+    // ============================================================
+    // ★★★★★ 线下见面模式：页面导航 START ★★★★★
+    // ============================================================
+
+    // 打开线下见面页面。contact.chatMode 已是（或即将是）'offline'；
+    // 每次进入见面页 = 一场新的见面会话，重新开始 2 轮的线上桥接注入。
+    openOfflineChat(contact) {
+        if (!contact) return;
+        OfflineChat.ensureFields(contact);
+        contact.chatMode = 'offline';
+        OfflineChat.armBridge(contact);
+
+        UI.clearTransientOfflineErrors(contact);
+        STATE.offlineVisibleMsgCount = CONFIG.CHAT_PAGE_SIZE || 15;
+        this.exitOfflineSelectMode();
+
+        // 线下页面盖在当前页面（联系人列表或线上聊天页）之上；
+        // 边缘滑返回的判定优先看 in-offline-mode，所以这里单独加标记。
+        document.getElementById('app-container')?.classList.add('in-offline-mode');
+        // ★ 从联系人列表直进时底栏还开着，会压在 footer 上面，这里统一收起；
+        //   退出时由 switchView 按目标页恢复。
+        const offlineTabBar = document.getElementById('bottom-tab-bar');
+        if (offlineTabBar) offlineTabBar.style.display = 'none';
+        if (UI.els.viewOfflineChat) UI.els.viewOfflineChat.style.display = 'flex';
+        UI.renderOfflineChatHistory(contact);
+        Storage.saveContacts();
+    },
+
+    // 收起线下页面：只改视图显隐，绝不动用户的模式选择。
+    hideOfflineChat() {
+        this.exitOfflineSelectMode();
+        document.getElementById('app-container')?.classList.remove('in-offline-mode');
+        if (UI.els.viewOfflineChat) UI.els.viewOfflineChat.style.display = 'none';
+    },
+
+    // 线下页退出（左上退出 / 左右边缘滑动）：直接回上级页面，不改模式。
+    // ★ safeSwitchView 是 bindEvents 内部的局部函数，这里够不到，直接走 UI.switchView。
+    exitOfflineToParent() {
+        this.hideOfflineChat();
+        UI.switchView(this.getReturnView('chat', 'contact-list'));
+    },
+
+    isOfflineChatOpen(contactId = STATE.currentContactId) {
+        const view = UI.els.viewOfflineChat;
+        if (!view || view.style.display === 'none') return false;
+        if (getComputedStyle(view).display === 'none') return false;
+        return STATE.currentContactId === contactId
+            && !!document.getElementById('app-container')?.classList.contains('in-offline-mode');
+    },
+
+    // 应用模式切换：只在「保存」时调用；目标模式与当前相同则什么都不做。
+    // ★ 切到线下 → 记住并进入见面页；切回线上 → 记住、武装线下回顾（2 轮），
+    //   并完整走一次 enterChat 进入线上聊天页——
+    //   即使你是从联系人列表直进线下页的，也会落回聊天界面而不是退回列表。
+    applyChatModeChange(contact, mode) {
+        if (!contact) return;
+        OfflineChat.ensureFields(contact);
+        const currentMode = OfflineChat.isOffline(contact) ? 'offline' : 'online';
+        if (mode === currentMode) return;
+
+        if (mode === 'offline') {
+            contact.chatMode = 'offline';
+            Storage.saveContacts();
+            this.openOfflineChat(contact);
+        } else {
+            OfflineChat.armRecap(contact);
+            contact.chatMode = 'online';
+            Storage.saveContacts();
+            this.hideOfflineChat();
+            this.enterChat(contact.id);
+        }
+    },
+
+    // ============================================================
+    // ★★★★★ 线下见面模式：发送管线 START ★★★★★
+    // prompt 结构：
+    //   ① system 恒为「你们正在线下见面。」（无视用户预设）
+    //   ② system 人设（空则整条不发）
+    //   ③ system 今日背景信息（空则整条不发）
+    //   ④ system 世界书（空则整条不发）
+    //   ⑤ 桥接：切到线下的前 2 轮请求固定附带线上最后 6 条
+    //   ⑥ 线下历史窗口（沿用用户的缓存命中优化/窗口设置）
+    //   ⑦ 当前 user（隐式时间戳前缀，动态内容按 DYNAMIC_CONTEXT_INSERT_MODE 分流）
+    // ============================================================
+    async handleOfflineSend(isReroll = false) {
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        if (!contact || !OfflineChat.isOffline(contact)) return;
+        OfflineChat.ensureFields(contact);
+        if (STATE.typingContactId === contact.id) return;
+
+        // 1. 准备 API 配置（与线上共用）
+        const requestSettings = this.buildChatRequestSettings(contact);
+        if (!requestSettings) return;
+        const usingAsyncBackend = API.shouldUseAsyncBackend(requestSettings);
+
+        // 线下没有图片/Agent 路径，明确关闭
+        requestSettings.IMAGE_API_MODE = 'separate';
+        requestSettings.MULTIMODAL_IMAGE = '';
+        requestSettings.MULTIMODAL_MESSAGE_INDEX = -1;
+        requestSettings.ASYNC_BACKEND_VISION = null;
+        requestSettings.ASYNC_BACKEND_AGENT = null;
+        requestSettings.ASYNC_BACKEND_ON_JOB_UPDATE = null;
+
+        const inputEl = UI.els.offlineInput;
+        let userText = (inputEl?.value || '').trim();
+        if (!isReroll && !userText) return;
+
+        // 2. Reroll：确认后移除末尾所有 assistant 卡片（含临时失败占位）
+        if (isReroll) {
+            if (!confirm('重新生成这条回复？')) return;
+            const lastUserMsg = [...contact.offlineHistory].reverse().find(m => m.role === 'user');
+            if (!lastUserMsg) return;
+            userText = lastUserMsg.content;
+            while (contact.offlineHistory.length > 0 && contact.offlineHistory[contact.offlineHistory.length - 1].role === 'assistant') {
+                contact.offlineHistory.pop();
+            }
+            UI.renderOfflineChatHistory(contact, false, true);
+        }
+
+        // 3. 新消息入库并上屏
+        const timestamp = formatTimestamp();
+        let agentUserMessage = null;
+        if (!isReroll) {
+            const newUserMsg = {
+                role: 'user',
+                content: `[${timestamp}] ${userText}`, // ★ 时间戳隐式拼在最前，与线上一致
+                timestamp,
+                messageId: ProactiveMessages.makeId('user'),
+                eventAt: Date.now(),
+                recordedAt: Date.now()
+            };
+            contact.offlineHistory.push(newUserMsg);
+            agentUserMessage = newUserMsg;
+            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = newUserMsg.messageId;
+
+            UI.renderOfflineChatHistory(contact);
+            if (inputEl) {
+                inputEl.value = '';
+                inputEl.style.height = '38px';
+            }
+            if (window.innerWidth < 800 && inputEl) inputEl.blur();
+        } else {
+            agentUserMessage = [...contact.offlineHistory].reverse().find(m => m.role === 'user') || null;
+            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = agentUserMessage?.messageId || null;
+        }
+        // 轮次 id：reroll 复用同一条用户消息的 messageId，桥接轮次不会重复扣。
+        const roundId = agentUserMessage?.messageId || '';
+
+        await Storage.saveContacts();
+        STATE.typingContactId = contact.id;
+        UI.setOfflineTyping(true);
+        if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.disabled = true;
+
+        // ============================================================
+        // 4. 构建线下见面 prompt
+        // ============================================================
+        const messagesToSend = [];
+        const routineDynamicContextPrompts = [];
+        let triggeredWorldInfoPrompt = '';
+
+        // ① 恒定的线下场景提示
+        messagesToSend.push({ role: 'system', content: OfflineChat.SYSTEM_PROMPT });
+
+        // ② 人设：为空则整条不发
+        const personaBlock = (contact.prompt || '').trim();
+        if (personaBlock) {
+            messagesToSend.push({ role: 'system', content: `=== User Prompt ===\n${personaBlock}` });
+        }
+
+        // 线下历史窗口：与线上同一套缓存友好/严格最近策略，序号落在 offlineHistory 自己的字段里
+        const historyMetadataChanged = this.ensureHistoryCacheMetadata(contact, 'offlineHistory');
+        if (historyMetadataChanged) await Storage.saveContacts();
+        const historyWindow = this.selectHistoryWindowRecords(contact, requestSettings, 'offlineHistory');
+        if (historyWindow.changed) await Storage.saveContacts();
+        const offlineVisible = historyWindow.records
+            .map(record => record.msg)
+            .map(msg => HistoryVisibility.buildVisibleMessage(msg, { preserveTimestamp: true, includeImageDescription: true }))
+            .filter(m => m !== null);
+        requestSettings.HISTORY_WINDOW_LOG = historyWindow.log;
+
+        // ★ 把当前 user 从历史尾部拆出来压轴，与线上组装保持同构。
+        const historyForPayload = [...offlineVisible];
+        let currentUserMessage = null;
+        if (historyForPayload.length && historyForPayload[historyForPayload.length - 1].role === 'user') {
+            currentUserMessage = historyForPayload.pop();
+        }
+
+        // ③ 今日背景信息：世界感知/TODO/角色记忆/心笺/角色日程整套照搬（线下无朋友圈/番茄钟/Agent）
+        await this.ensureWorldSenseWeatherReady();
+        const worldSensePrompt = WorldSense.buildPromptFromSettings(STATE.settings, new Date());
+        if (worldSensePrompt) routineDynamicContextPrompts.push(worldSensePrompt);
+
+        const todoContextPrompt = TodoContext.buildPrompt(new Date());
+        if (todoContextPrompt) routineDynamicContextPrompts.push(todoContextPrompt);
+
+        await this.ensureCharacterMemoryReady(contact.id, { priority: true, silent: true });
+        const characterMemoryPrompt = CharacterMemory.buildChatPrompt(contact.id, new Date());
+        if (characterMemoryPrompt) routineDynamicContextPrompts.push(characterMemoryPrompt);
+
+        const heartNotePrompt = typeof AgentHeartNoteManager !== 'undefined'
+            ? AgentHeartNoteManager.buildChatPrompt(contact.id, new Date())
+            : '';
+        if (heartNotePrompt) routineDynamicContextPrompts.push(heartNotePrompt);
+
+        await this.ensureCharacterScheduleReady(contact.id, { priority: true, silent: true });
+        const characterSchedulePrompt = CharacterSchedule.buildChatPrompt(contact.id, new Date());
+        if (characterSchedulePrompt) routineDynamicContextPrompts.push(characterSchedulePrompt);
+
+        // ④ 世界书：常驻 + 关键词触发（扫描历史与线上同口径：去掉图片描述尾巴）
+        const worldInfoScanHistory = historyForPayload.map(m => ({
+            role: m.role,
+            content: (m.content || '').replace(/\n\n\[System Info: 对方发送了一张图片，图片内容描述:[\s\S]*$/g, '')
+        }));
+        const worldInfoByType = (typeof WorldInfoEngine.scanByType === 'function')
+            ? WorldInfoEngine.scanByType(userText, worldInfoScanHistory, contact.id, contact.name)
+            : { constant: null, triggered: WorldInfoEngine.scan(userText, worldInfoScanHistory, contact.id, contact.name) };
+        if (worldInfoByType.triggered) {
+            triggeredWorldInfoPrompt = `=== 背景信息补充 ===\n${worldInfoByType.triggered}`;
+        }
+
+        // ⑤ 今日背景信息 system：为空则整条不发
+        const systemDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
+            ? []
+            : routineDynamicContextPrompts;
+        if (systemDynamicContextPrompts.length) {
+            messagesToSend.push({
+                role: 'system',
+                content: ['=== 今日背景信息 ===', '', ...systemDynamicContextPrompts].join('\n\n')
+            });
+        }
+
+        // ⑥ 世界书 system：为空则整条不发
+        const worldInfoSystemBlocks = [];
+        if (worldInfoByType.constant) {
+            worldInfoSystemBlocks.push(`=== 常驻世界知识/环境信息 ===\n${worldInfoByType.constant}`);
+        }
+        if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && triggeredWorldInfoPrompt) {
+            worldInfoSystemBlocks.push(triggeredWorldInfoPrompt);
+        }
+        if (worldInfoSystemBlocks.length) {
+            messagesToSend.push({ role: 'system', content: worldInfoSystemBlocks.join('\n\n') });
+        }
+
+        // ⑦ 桥接：切到线下的前 2 轮请求，固定附带线上最后 6 条（3 轮）聊天记录
+        if (OfflineChat.shouldInjectBridge(contact)) {
+            const bridgeMessages = OfflineChat.buildBridgeMessages(contact.history);
+            bridgeMessages.forEach(m => messagesToSend.push(m));
+        }
+
+        // ⑧ 线下历史
+        historyForPayload.forEach(h => messagesToSend.push(h));
+
+        // 动态内容按用户选的缓存命中优化方式分流（与线上同构；线下没有其它易变项）
+        const allDynamicContextPrompts = [...routineDynamicContextPrompts, triggeredWorldInfoPrompt].filter(Boolean);
+        const userDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
+            ? allDynamicContextPrompts
+            : requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'auto'
+                ? [triggeredWorldInfoPrompt].filter(Boolean)
+                : [];
+
+        if (userDynamicContextPrompts.length && currentUserMessage) {
+            currentUserMessage = {
+                ...currentUserMessage,
+                content: [
+                    '【系统信息补充】',
+                    userDynamicContextPrompts.join('\n\n'),
+                    '',
+                    '【系统信息补充END】',
+                    '',
+                    '【用户当前消息】',
+                    currentUserMessage.content
+                ].join('\n\n')
+            };
+        } else if (userDynamicContextPrompts.length) {
+            // 极少数没有当前 user 的调用兜底：不能合并时仍保留动态背景。
+            const firstNonSystemIndex = messagesToSend.findIndex(message => message?.role !== 'system');
+            const insertIndex = firstNonSystemIndex >= 0 ? firstNonSystemIndex : messagesToSend.length;
+            messagesToSend.splice(insertIndex, 0, {
+                role: 'system',
+                content: ['=== 本轮背景资料 ===', '', ...userDynamicContextPrompts].join('\n\n')
+            });
+        }
+
+        const stableMessageCount = messagesToSend.length;
+        if (currentUserMessage) {
+            messagesToSend.push(currentUserMessage);
+        }
+        requestSettings.ASYNC_BACKEND_REQUEST_USER_MESSAGE_INDEX = currentUserMessage
+            ? messagesToSend.length - 1
+            : -1;
+
+        requestSettings.REQUEST_CACHE_DEBUG_LOG = this.buildRequestCacheDebugLog({
+            messages: messagesToSend,
+            stableMessageCount,
+            dynamicContextText: allDynamicContextPrompts.join('\n\n'),
+            originalUserText: userText,
+            insertMode: requestSettings.DYNAMIC_CONTEXT_INSERT_MODE,
+            historyWindowLog: requestSettings.HISTORY_WINDOW_LOG,
+            triggeredWorldInfoEntries: worldInfoByType.triggeredEntries || [],
+            constantWorldInfoEntries: worldInfoByType.constantEntries || [],
+            extraBodyJson: requestSettings.CUSTOM_REQUEST_BODY_JSON || '',
+            model: requestSettings.MODEL
+        });
+
+        // ============================================================
+        // 5. 发送请求
+        // ============================================================
+        try {
+            requestSettings.USAGE_CHAT = true;
+            requestSettings.USAGE_REROLL = isReroll;
+            const aiText = await API.chat(messagesToSend, requestSettings);
+
+            const asyncJobId = usingAsyncBackend ? API.lastAsyncBackendResult?.jobId : null;
+            const alreadySavedByResume = asyncJobId
+                ? contact.offlineHistory.some(msg => msg.asyncJobId === asyncJobId)
+                : false;
+
+            if (!alreadySavedByResume) {
+                const aiMessage = {
+                    role: 'assistant',
+                    content: aiText,
+                    timestamp: formatTimestamp(),
+                    messageId: ProactiveMessages.makeId('assistant'),
+                    eventAt: Date.now(),
+                    recordedAt: Date.now(),
+                    replyToMessageId: agentUserMessage?.messageId || ''
+                };
+                if (asyncJobId) aiMessage.asyncJobId = asyncJobId;
+                contact.offlineHistory.push(aiMessage);
+            }
+
+            // ★ 桥接轮次只有正式回复成功才扣；reroll 复用同一轮 messageId，不会重复扣。
+            OfflineChat.consumeBridgeRound(contact, roundId);
+
+            await Storage.saveContacts();
+            UI.renderOfflineChatHistory(contact);
+        } catch (error) {
+            console.error(error);
+            if (error.isAsyncBackendPending) {
+                // 手机切屏保护：请求已在 Worker 排队，保留 pending 等回前台取结果。
+                this.scheduleAsyncBackendResumeCheck(1200);
+                return;
+            }
+            await this.maybePromptDynamicContextCompatMode(error, requestSettings, contact);
+            // 失败占位卡片：只进线下记录，不进入 AI 上下文（可见性清洗会过滤 isTransientError）。
+            contact.offlineHistory.push({
+                role: 'assistant',
+                content: `(发送失败: ${error.message})`,
+                timestamp: formatTimestamp(),
+                messageId: ProactiveMessages.makeId('assistant_error'),
+                eventAt: Date.now(),
+                recordedAt: Date.now(),
+                isTransientError: true
+            });
+            await Storage.saveContacts();
+            UI.renderOfflineChatHistory(contact);
+        } finally {
+            STATE.typingContactId = null;
+            UI.setOfflineTyping(false);
+            if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.disabled = false;
+            if (window.innerWidth >= 800 && UI.els.offlineInput) UI.els.offlineInput.focus();
+        }
+    },
+
+    // ============================================================
+    // ★★★★★ 线下见面模式：长按菜单 / 编辑 / 多选 START ★★★★★
+    // 与线上共用 #msg-context-menu 和 #multi-select-bar，
+    // 通过 STATE.offlineSelectedMessageId / STATE.offlineSelectMode 分流到整条卡片级操作。
+    // ============================================================
+
+    showOfflineMessageContextMenu(cardEl) {
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        const messageId = String(cardEl?.dataset?.messageId || '');
+        const message = messageId
+            ? contact?.offlineHistory?.find(item => String(item?.messageId) === messageId)
+            : null;
+        if (!message || !contact?.offlineHistory?.includes(message)) return;
+
+        STATE.offlineSelectedMessageId = messageId;
+
+        const menu = document.getElementById('msg-context-menu');
+        if (!menu) return;
+        if (!menu.dataset.offlineInitialized) {
+            menu.dataset.offlineInitialized = 'true';
+            menu.addEventListener('click', e => {
+                const btn = e.target.closest('button');
+                if (!btn || menu.classList.contains('locked')) return;
+                const action = btn.dataset.action;
+                // 菜单是从线下卡片打开的才由这里处理
+                if (!STATE.offlineSelectedMessageId) return;
+                if (action === 'cancel') {
+                    this.hideMessageContextMenu();
+                    return;
+                }
+                this.handleOfflineMessageAction(action);
+                this.hideMessageContextMenu();
+            });
+        }
+        const toggleBtn = menu.querySelector('button[data-action="toggle-hidden"]');
+        if (toggleBtn) toggleBtn.textContent = message.isHidden ? '取消隐藏' : '向Ta隐藏';
+
+        // 防误触锁与线上菜单保持一致
+        menu.classList.add('locked');
+        menu.style.pointerEvents = 'none';
+        menu.style.display = 'flex';
+        setTimeout(() => {
+            menu.classList.remove('locked');
+            menu.style.pointerEvents = 'auto';
+        }, 300);
+    },
+
+    handleOfflineMessageAction(action) {
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        if (!contact || !Array.isArray(contact.offlineHistory)) return;
+        const msgData = contact.offlineHistory.find(item => String(item?.messageId) === STATE.offlineSelectedMessageId);
+        if (!msgData) return;
+
+        const timestampRegex = /^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/;
+
+        if (action === 'edit') {
+            let timestampPart = '';
+            let cleanContent = msgData.content || '';
+            // 只有用户消息的时间戳是系统加的；AI 输出的开头时间戳允许编辑删除（与线上同口径）。
+            if (msgData.role === 'user') {
+                const match = cleanContent.match(timestampRegex);
+                if (match) {
+                    timestampPart = match[0];
+                    cleanContent = cleanContent.replace(timestampRegex, '');
+                }
+            }
+            UI.showEditModal(cleanContent, (newText) => {
+                if (newText && newText !== cleanContent && contact.offlineHistory.includes(msgData)) {
+                    msgData.content = timestampPart + newText;
+                    Storage.saveContacts();
+                    UI.renderOfflineChatHistory(contact, false, true);
+                }
+            });
+        } else if (action === 'delete') {
+            if (confirm('确定要删除这张卡片吗？')) {
+                const liveIndex = contact.offlineHistory.indexOf(msgData);
+                if (liveIndex < 0) return;
+                contact.offlineHistory.splice(liveIndex, 1);
+                Storage.saveContacts();
+                UI.renderOfflineChatHistory(contact, false, true);
+            }
+        } else if (action === 'toggle-hidden') {
+            msgData.isHidden = !msgData.isHidden;
+            Storage.saveContacts();
+            UI.renderOfflineChatHistory(contact, false, true);
+        } else if (action === 'multi-select') {
+            this.enterOfflineSelectMode();
+        } else if (action === 'copy') {
+            let contentToCopy = msgData.content || '';
+            if (timestampRegex.test(contentToCopy)) {
+                contentToCopy = contentToCopy.replace(timestampRegex, '');
+            }
+            contentToCopy = cleanMarkdownForCopy(contentToCopy);
+            navigator.clipboard.writeText(contentToCopy)
+                .then(() => Toast.show('已复制'))
+                .catch(err => {
+                    console.error('复制失败:', err);
+                    alert('复制失败，请检查浏览器权限');
+                });
+        }
+    },
+
+    enterOfflineSelectMode() {
+        STATE.offlineSelectMode = true;
+        STATE.offlineSelectedIds = new Set();
+        UI.els.offlineMsgs?.classList.add('select-mode');
+        document.getElementById('multi-select-bar')?.classList.remove('hidden');
+        this.updateOfflineSelectCount();
+
+        if (!this._boundOfflineSelectClick) {
+            this._offlineSelectClickHandler = (e) => {
+                if (!STATE.offlineSelectMode) return;
+                const card = e.target.closest('.offline-msg-card');
+                if (card) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.toggleOfflineCardSelection(card);
+                }
+            };
+            UI.els.offlineMsgs?.addEventListener('click', this._offlineSelectClickHandler, true);
+            this._boundOfflineSelectClick = true;
+        }
+        this.bindSelectBarEvents();
+    },
+
+    exitOfflineSelectMode() {
+        if (!STATE.offlineSelectMode) return;
+        STATE.offlineSelectMode = false;
+        STATE.offlineSelectedIds = new Set();
+        UI.els.offlineMsgs?.classList.remove('select-mode');
+        document.getElementById('multi-select-bar')?.classList.add('hidden');
+        document.querySelectorAll('#offline-chat-messages .offline-msg-card.selected')
+            .forEach(el => el.classList.remove('selected'));
+        this.updateOfflineSelectCount();
+    },
+
+    toggleOfflineCardSelection(cardEl) {
+        const id = cardEl.dataset.messageId;
+        if (!id) return;
+        if (cardEl.classList.contains('selected')) {
+            cardEl.classList.remove('selected');
+            STATE.offlineSelectedIds.delete(id);
+        } else {
+            cardEl.classList.add('selected');
+            STATE.offlineSelectedIds.add(id);
+        }
+        this.updateOfflineSelectCount();
+    },
+
+    updateOfflineSelectCount() {
+        const countEl = document.getElementById('select-count-num');
+        if (countEl) countEl.innerText = STATE.offlineSelectedIds ? STATE.offlineSelectedIds.size : 0;
+    },
+
+    handleOfflineBatchCopy() {
+        if (!STATE.offlineSelectedIds?.size) return;
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        if (!contact) return;
+        const timestampRegex = /^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/;
+        const targets = contact.offlineHistory.filter(m => STATE.offlineSelectedIds.has(String(m?.messageId || '')));
+        const fullText = targets.map(m => {
+            let text = m.content || '';
+            if (timestampRegex.test(text)) text = text.replace(timestampRegex, '');
+            text = text.replace(ChatBubbles.thoughtRegex, '').trim();
+            return cleanMarkdownForCopy(text);
+        }).filter(Boolean).join('\n\n');
+        navigator.clipboard.writeText(fullText)
+            .then(() => Toast.show('已复制'))
+            .catch(err => {
+                console.error('无法复制文本: ', err);
+                alert('复制失败，请检查浏览器权限');
+            })
+            .finally(() => this.exitOfflineSelectMode());
+    },
+
+    handleOfflineBatchToggleHidden() {
+        if (!STATE.offlineSelectedIds?.size) return;
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        if (!contact) return;
+        const targets = contact.offlineHistory.filter(m => STATE.offlineSelectedIds.has(String(m?.messageId || '')));
+        if (!targets.length) { this.exitOfflineSelectMode(); return; }
+        // 与线上多选同规则：只要有一张未隐藏就统一隐藏，否则统一取消隐藏。
+        const shouldHide = targets.some(m => !m.isHidden);
+        targets.forEach(m => { m.isHidden = shouldHide; });
+        Storage.saveContacts();
+        this.exitOfflineSelectMode();
+        UI.renderOfflineChatHistory(contact, false, true);
+    },
+
+    handleOfflineBatchDelete() {
+        if (!STATE.offlineSelectedIds?.size) return;
+        if (!confirm(`确定要删除选中的 ${STATE.offlineSelectedIds.size} 张卡片吗？`)) return;
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        if (!contact) return;
+        const idSet = STATE.offlineSelectedIds;
+        contact.offlineHistory = contact.offlineHistory.filter(m => !idSet.has(String(m?.messageId || '')));
+        Storage.saveContacts();
+        this.exitOfflineSelectMode();
+        UI.renderOfflineChatHistory(contact, false, true);
+    },
+    // ★★★★★ 线下见面模式 END ★★★★★
 
     syncHistoryWindowStrategyUI() {
         const strategySelect = document.getElementById('history-window-strategy');
@@ -12405,16 +13222,28 @@ const App = {
         return partIndex === null ? null : { message, key, partIndex, msgIndex: contact.history.indexOf(message) };
     },
 
-    // 6. 绑定底部按钮事件 (只绑定一次)
+    // 6. 绑定底部按钮事件 (只绑定一次；线上气泡多选与线下卡片多选共用同一根栏，按模式分流)
     bindSelectBarEvents() {
         if (this._selectBarEventsBound) return;
         
-        document.getElementById('btn-exit-select').addEventListener('click', () => this.exitSelectMode());
-        document.getElementById('btn-batch-copy').addEventListener('click', () => this.handleBatchCopy());
-        document.getElementById('btn-batch-delete').addEventListener('click', () => this.handleBatchDelete());
+        document.getElementById('btn-exit-select').addEventListener('click', () => {
+            if (STATE.offlineSelectMode) this.exitOfflineSelectMode();
+            else this.exitSelectMode();
+        });
+        document.getElementById('btn-batch-copy').addEventListener('click', () => {
+            if (STATE.offlineSelectMode) this.handleOfflineBatchCopy();
+            else this.handleBatchCopy();
+        });
+        document.getElementById('btn-batch-delete').addEventListener('click', () => {
+            if (STATE.offlineSelectMode) this.handleOfflineBatchDelete();
+            else this.handleBatchDelete();
+        });
        
         // ★★★ 新增：绑定隐藏按钮 ★★★
-        document.getElementById('btn-batch-hide').addEventListener('click', () => this.handleBatchToggleHidden());
+        document.getElementById('btn-batch-hide').addEventListener('click', () => {
+            if (STATE.offlineSelectMode) this.handleOfflineBatchToggleHidden();
+            else this.handleBatchToggleHidden();
+        });
         
         this._selectBarEventsBound = true;
     },
@@ -12640,6 +13469,8 @@ const App = {
                 const btn = e.target.closest('button');
                 if (!btn) return;
                 const action = btn.dataset.action;
+                // ★ 菜单从线下见面卡片打开时由线下分支处理，线上这里直接让路
+                if (STATE.offlineSelectedMessageId) return;
                 // 如果处于防误触锁定状态，直接无视点击
                 if (menu.classList.contains('locked')) return; 
 
@@ -12697,6 +13528,7 @@ const App = {
         STATE.selectedMessageIndex = null;
         STATE.selectedMessageId = null;
         STATE.selectedMessageRef = null;
+        STATE.offlineSelectedMessageId = null;
     },
 
 
@@ -14439,6 +15271,107 @@ const App = {
             });
         };
 
+        // ============================================================
+        // ★★★★★ 线下见面模式：页面事件绑定 START ★★★★★
+        // ============================================================
+        const offlineBackBtn = document.getElementById('offline-back-btn');
+        if (offlineBackBtn) offlineBackBtn.onclick = () => this.exitOfflineToParent();
+
+        const offlineSettingsBtn = document.getElementById('offline-settings-btn');
+        if (offlineSettingsBtn) offlineSettingsBtn.onclick = () => this.openEditModal(STATE.currentContactId);
+
+        if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.onclick = () => this.handleOfflineSend(false);
+        if (UI.els.offlineRerollBtn) UI.els.offlineRerollBtn.onclick = () => this.handleOfflineSend(true);
+
+        if (UI.els.offlineInput) {
+            // 输入框自适应高度 + PC 端 Enter 发送（与线上输入框同款）
+            UI.els.offlineInput.addEventListener('input', function() {
+                this.style.height = 'auto'; 
+                this.style.height = (this.scrollHeight) + 'px';
+                if (this.value === '') this.style.height = '38px';
+            });
+            UI.els.offlineInput.addEventListener('keydown', (e) => {
+                const isMobile = window.innerWidth < 800;
+                if (e.key === 'Enter' && !e.shiftKey && !isMobile) {
+                    e.preventDefault();
+                    this.handleOfflineSend(false);
+                }
+            });
+        }
+
+        // 线下卡片长按菜单（touch + 鼠标，与线上气泡同款；多选模式下不触发）
+        if (UI.els.offlineMsgs) {
+            let offlineLongPressTimer = null;
+            let offlineStartX = 0;
+            let offlineStartY = 0;
+
+            const clearOfflineLongPress = () => {
+                if (offlineLongPressTimer) {
+                    clearTimeout(offlineLongPressTimer);
+                    offlineLongPressTimer = null;
+                }
+            };
+            const locateOfflineCard = (e) => {
+                const card = e.target.closest('.offline-msg-card');
+                if (!card || window.getSelection().toString().length > 0) return null;
+                return card;
+            };
+            const openOfflineMenu = (card) => {
+                if (STATE.offlineSelectMode) return;
+                this.showOfflineMessageContextMenu(card);
+            };
+
+            UI.els.offlineMsgs.addEventListener('contextmenu', (event) => event.preventDefault());
+
+            UI.els.offlineMsgs.addEventListener('touchstart', e => {
+                if (e.target.closest('.code-copy-btn')) return;
+                const card = locateOfflineCard(e);
+                if (!card) return;
+                offlineStartX = e.touches[0].clientX;
+                offlineStartY = e.touches[0].clientY;
+                offlineLongPressTimer = setTimeout(() => {
+                    e.preventDefault();
+                    if (window.getSelection().toString().length > 0) return;
+                    openOfflineMenu(card);
+                }, 380);
+            }, { passive: false });
+
+            UI.els.offlineMsgs.addEventListener('touchmove', e => {
+                if (!offlineLongPressTimer) return;
+                if (Math.abs(e.touches[0].clientX - offlineStartX) > 10 || Math.abs(e.touches[0].clientY - offlineStartY) > 10) {
+                    clearOfflineLongPress();
+                }
+            }, { passive: true });
+
+            UI.els.offlineMsgs.addEventListener('touchend', clearOfflineLongPress, { passive: true });
+
+            UI.els.offlineMsgs.addEventListener('mousedown', e => {
+                if (e.button !== 0) return;
+                if (e.target.closest('.code-copy-btn')) return;
+                const card = locateOfflineCard(e);
+                if (!card) return;
+                offlineLongPressTimer = setTimeout(() => {
+                    if (window.getSelection().toString().length > 0) return;
+                    openOfflineMenu(card);
+                }, 380);
+            });
+            UI.els.offlineMsgs.addEventListener('mouseup', clearOfflineLongPress);
+            UI.els.offlineMsgs.addEventListener('mouseleave', clearOfflineLongPress);
+        }
+
+        // 聊天选项弹窗顶部的线上/线下 tab：点击只切换选中态，按「保存」才真正生效
+        const chatModeTabs = document.getElementById('chat-mode-tabs');
+        if (chatModeTabs) {
+            chatModeTabs.addEventListener('click', (e) => {
+                const btn = e.target.closest('button[data-mode]');
+                if (!btn) return;
+                this.syncChatModeTabs(btn.dataset.mode);
+            });
+        }
+        // ============================================================
+        // ★★★★★ 线下见面模式：页面事件绑定 END ★★★★★
+        // ============================================================
+
         // --- 主设置弹窗 ---
         const mainSetBtn = document.getElementById('main-settings-btn');
         if(mainSetBtn) mainSetBtn.onclick = () => this.openSettings();
@@ -14591,6 +15524,8 @@ const App = {
                     // 3. 判断逻辑
                     // 如果删除的是当前正在聊的人，就模拟点击“返回”按钮回到列表
                     if (STATE.currentContactId === this.editingId) {
+                        // ★ 若正在线下见面页，先直接收起（角色已删除，不再走回顾武装）
+                        if (this.isOfflineChatOpen()) this.hideOfflineChat();
                         const backBtn = document.getElementById('back-btn');
                         if (backBtn) {
                             backBtn.click(); // 这会自动触发你之前绑定的 safeSwitchView('contact-list')
@@ -17060,7 +17995,9 @@ const App = {
         modal.classList.remove('hidden');
 
         // === 获取元素 ===
-        const title = document.getElementById('modal-title');
+        // ★ 页面里存在多个 id="modal-title"（朋友圈设置/发布朋友圈），
+        //   getElementById 会命中第一个导致标题改错元素；这里限定在编辑弹窗内部取。
+        const title = modal.querySelector('#modal-title');
         const iName = document.getElementById('edit-name');
         const iPrompt = document.getElementById('edit-prompt');
         const preview = document.getElementById('edit-avatar-preview');
@@ -17106,7 +18043,7 @@ const App = {
             // ===========================
             const c = STATE.contacts.find(x => x.id === id);
             
-            title.innerText = '聊天菜单'; 
+            title.innerText = '聊天选项'; 
             iName.value = c.name;
             iPrompt.value = c.prompt || "";
             
@@ -17130,6 +18067,13 @@ const App = {
             const searchSection = document.getElementById('search-history-section');
             if (searchSection) {
                 searchSection.style.display = STATE.currentContactId ? 'block' : 'none';
+            }
+
+            // ★ 线上/线下模式切换：只有编辑模式（从聊天页进入）才显示
+            const chatModeSection = document.getElementById('chat-mode-section');
+            if (chatModeSection) {
+                chatModeSection.style.display = 'block';
+                this.syncChatModeTabs(OfflineChat.isOffline(c) ? 'offline' : 'online');
             }
 
         } else {
@@ -17159,7 +18103,22 @@ const App = {
             // 【新增】：新建模式不显示搜索
             const searchSection = document.getElementById('search-history-section');
             if (searchSection) searchSection.style.display = 'none';
+
+            // ★ 新建角色没有聊天，也不显示线上/线下切换
+            const chatModeSection = document.getElementById('chat-mode-section');
+            if (chatModeSection) chatModeSection.style.display = 'none';
         }
+    },
+
+    // ★ 把弹窗里的模式 tab 同步到指定模式（滑块位置 + aria-selected）。
+    //   点击 tab 只改这里的选中态；要按「保存」才真正切换模式。
+    syncChatModeTabs(mode) {
+        const tabs = document.getElementById('chat-mode-tabs');
+        if (!tabs) return;
+        tabs.classList.toggle('offline-mode', mode === 'offline');
+        tabs.querySelectorAll('button[data-mode]').forEach(btn => {
+            btn.setAttribute('aria-selected', btn.dataset.mode === mode ? 'true' : 'false');
+        });
     },
 
     async saveContactFromModal() {
@@ -17209,6 +18168,15 @@ const App = {
             const c = STATE.contacts.find(x => x.id === this.editingId);
             UI.updateChatHeader(c);
             UI.renderChatHistory(c);
+        }
+
+        // ★ 线上/线下模式：tab 里的选择要按「保存」才生效，取消不生效
+        const chatModeSection = document.getElementById('chat-mode-section');
+        if (this.editingId && chatModeSection && chatModeSection.style.display !== 'none') {
+            const modeTabs = document.getElementById('chat-mode-tabs');
+            const pendingMode = modeTabs?.classList.contains('offline-mode') ? 'offline' : 'online';
+            const contact = STATE.contacts.find(x => x.id === this.editingId);
+            this.applyChatModeChange(contact, pendingMode);
         }
 
         // 关闭弹窗

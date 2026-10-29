@@ -228,6 +228,15 @@ const Storage = {
             STATE.contacts = [];
         }
 
+        // ★ 线下见面字段兜底：旧备份/旧数据缺 chatMode/offlineHistory 时补默认值并落库。
+        let offlineFieldsChanged = false;
+        if (typeof OfflineChat !== 'undefined') {
+            STATE.contacts.forEach(contact => {
+                if (OfflineChat.ensureFields(contact)) offlineFieldsChanged = true;
+            });
+        }
+        if (offlineFieldsChanged) await DB.set(CONFIG.STORAGE_KEY, STATE.contacts);
+
         // ★ 旧聊天只存 hiddenIndices；加载时一次迁移到气泡 key，立即落库以免刷新后重新分配身份。
         let bubbleMigrationChanged = false;
         STATE.contacts.forEach(contact => (contact.history || []).forEach(message => {

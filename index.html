@@ -1902,6 +1902,62 @@
 
         </div>
 
+        <!-- ========================================== -->
+        <!-- 线下见面模式页面                             -->
+        <!-- 顶栏：左退出/右设置；底栏：reroll+输入+发送   -->
+        <!-- ========================================== -->
+        <div id="view-offline-chat" class="page-view">
+            <header class="app-header offline-chat-header">
+                <!-- 左上角退出按钮：直接回上级页面（不改变用户选的聊天模式） -->
+                <button id="offline-back-btn" class="header-icon-btn left" title="退出线下见面">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <div class="offline-header-profile">
+                    <img id="offline-header-avatar" class="offline-header-avatar" src="./assets/images/char.jpg" alt="角色头像">
+                    <div class="offline-header-meta">
+                        <h1 id="offline-chat-title">角色名</h1>
+                        <p id="offline-typing-status" class="offline-presence-status">
+                            <span class="offline-presence-dot" aria-hidden="true"></span>
+                            <span class="offline-presence-text">线下见面中</span>
+                        </p>
+                    </div>
+                </div>
+                <!-- 右上角设置按钮：打开同一个聊天选项菜单 -->
+                <button id="offline-settings-btn" class="header-icon-btn right" title="聊天选项">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </button>
+            </header>
+
+            <div id="offline-chat-window">
+                <div id="offline-chat-messages">
+                    <!-- 线下见面卡片由 JS 动态插入 -->
+                </div>
+            </div>
+
+            <footer class="app-footer offline-app-footer">
+                <!-- 重新生成 -->
+                <button id="offline-reroll-btn" title="重新生成">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2L14.8 8.4L22 12L14.8 15.6L12 22L9.2 15.6L2 12L9.2 8.4L12 2Z"/>
+                    </svg>
+                </button>
+
+                <textarea type="text" id="offline-task-input" rows="1" placeholder="说点什么..."></textarea>
+
+                <!-- 发送 -->
+                <button id="offline-send-btn" title="发送">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                    </svg>
+                </button>
+            </footer>
+        </div>
+
     </div>
 
     <!-- ========================================== -->
@@ -1936,7 +1992,7 @@
         <div class="modal extra-layout" style="background: transparent; box-shadow: none; border: none;">
             
             <!-- ==================== 顶部：固定标题 ==================== -->
-            <h2 id="modal-title">编辑角色</h2>
+            <h2 id="modal-title">聊天选项</h2>
             
             <!-- ==================== 中间：可滚动的内容区域 ==================== -->
             <!-- 新增一个容器包裹所有输入框 -->
@@ -1944,6 +2000,16 @@
             <!-- 这样只有中间这部分会有白底和毛玻璃效果 -->
             <div class="modal-scroll-container glass-panel">
                 
+                <!-- 线上/线下聊天模式切换（仅编辑模式显示，新建角色时隐藏） -->
+                <div id="chat-mode-section" class="input-group" style="display:none;">
+                    <label>聊天模式</label>
+                    <div id="chat-mode-tabs" class="chat-mode-tabs" role="tablist">
+                        <button type="button" data-mode="online" aria-selected="true">线上聊天</button>
+                        <button type="button" data-mode="offline" aria-selected="false">线下见面</button>
+                    </div>
+                    <p class="input-hint">线下见面：像写小说一样描述见面的场景，与线上聊天分开记录。切换在按「保存」后生效。</p>
+                </div>
+
                 <div class="input-group">
                     <label>名字</label>
                     <input type="text" id="edit-name" placeholder="例如：AI助手">
@@ -3033,6 +3099,7 @@
     <script src="./js/world-info.js"></script>
     <script src="./js/cloud-sync.js"></script>
     <script src="./js/history-visibility.js?v=20261023-bubble-id-1"></script>
+    <script src="./js/offline-chat.js?v=20261029-offline-1"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->
     <script src="./js/world-sense.js?v=20260829"></script>
     <script src="./js/todo-countdown-context.js"></script>
