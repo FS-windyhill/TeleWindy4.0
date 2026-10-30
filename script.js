@@ -4215,6 +4215,55 @@ const UI = {
         return card;
     },
 
+    // ★ 线下追加卡片：只在末尾创建一张新卡片，旧卡片不重建、也不重播动画。
+    //   后台恢复与前台轮询可能拿到同一条回复，用 messageId 去重，避免重复上屏。
+    appendOfflineCard(contact, msg, options = {}) {
+        const container = this.els.offlineMsgs;
+        if (!container || !msg) return null;
+
+        const messageId = String(msg.messageId || '');
+        if (messageId) {
+            const existing = Array.from(container.children)
+                .find(el => String(el?.dataset?.messageId || '') === messageId);
+            if (existing) {
+                if (options.scroll !== false) this.scrollToOfflineBottom();
+                return existing;
+            }
+        }
+
+        const history = Array.isArray(contact?.offlineHistory) ? contact.offlineHistory : [];
+        let index = history.indexOf(msg);
+        if (index < 0) index = Math.max(0, history.length - 1);
+
+        const card = this.buildOfflineCard(contact, msg, index);
+        if (!card) return null;
+        if (options.animate !== false) card.classList.add('card-enter');
+
+        container.appendChild(card);
+        if (options.scroll !== false) this.scrollToOfflineBottom();
+        this.updateOfflineRerollState(contact);
+        return card;
+    },
+
+    // ★ 重生成前只摘掉末尾对应的卡片；旧数据缺 messageId 时返回 false，由调用方整页重绘兜底。
+    removeOfflineCards(contact, messages) {
+        const container = this.els.offlineMsgs;
+        if (!container) return false;
+
+        const ids = new Set();
+        for (const msg of (Array.isArray(messages) ? messages : [])) {
+            const id = String(msg?.messageId || '');
+            if (!id) return false;
+            ids.add(id);
+        }
+
+        Array.from(container.children).forEach(el => {
+            if (ids.has(String(el?.dataset?.messageId || ''))) el.remove();
+        });
+        this.updateOfflineRerollState(contact);
+        return true;
+    },
+
     updateOfflineHeader(contact) {
         if (!contact || !this.els.viewOfflineChat) return;
         if (this.els.offlineTitle) this.els.offlineTitle.innerText = contact.name || '角色名';
@@ -4949,9 +4998,11 @@ const App = {
                         UI.touchContactPresence(contact);
 
                         if (offlineTargeted) {
-                            // 线下回复：还停在线下页面就重绘卡片；否则静默落库，下次打开见面页可见。
+                            // 线下回复：还停在线下页面就只追加这张卡片；否则静默落库，下次打开见面页可见。
                             if (this.isOfflineChatOpen(contact.id)) {
-                                UI.renderOfflineChatHistory(contact);
+                                if (!assistantMessage || !UI.appendOfflineCard(contact, assistantMessage)) {
+                                    UI.renderOfflineChatHistory(contact);
+                                }
                                 UI.setLoading(false, contact.id);
                             }
                         } else if (this.isViewingContactChat(contact.id)) {
@@ -11653,10 +11704,14 @@ const App = {
             const lastUserMsg = [...contact.offlineHistory].reverse().find(m => m.role === 'user');
             if (!lastUserMsg) return;
             userText = lastUserMsg.content;
+            const removedAssistantMessages = [];
             while (contact.offlineHistory.length > 0 && contact.offlineHistory[contact.offlineHistory.length - 1].role === 'assistant') {
-                contact.offlineHistory.pop();
+                removedAssistantMessages.push(contact.offlineHistory.pop());
             }
-            UI.renderOfflineChatHistory(contact, false, true);
+            // ★ 只摘掉被重生成的旧卡片，其他卡片保持原样、不重播动画。
+            if (!UI.removeOfflineCards(contact, removedAssistantMessages)) {
+                UI.renderOfflineChatHistory(contact, false, true);
+            }
         }
 
         // 3. 新消息入库并上屏
@@ -11675,7 +11730,8 @@ const App = {
             agentUserMessage = newUserMsg;
             requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = newUserMsg.messageId;
 
-            UI.renderOfflineChatHistory(contact);
+            // ★ 只追加新卡片，不重建整列；旧卡片不会重播入场动画。
+            UI.appendOfflineCard(contact, newUserMsg);
             if (inputEl) {
                 inputEl.value = '';
                 inputEl.style.height = '38px';
@@ -11857,8 +11913,9 @@ const App = {
                 ? contact.offlineHistory.some(msg => msg.asyncJobId === asyncJobId)
                 : false;
 
+            let aiMessage = null;
             if (!alreadySavedByResume) {
-                const aiMessage = {
+                aiMessage = {
                     role: 'assistant',
                     content: aiText,
                     timestamp: formatTimestamp(),
@@ -11869,13 +11926,20 @@ const App = {
                 };
                 if (asyncJobId) aiMessage.asyncJobId = asyncJobId;
                 contact.offlineHistory.push(aiMessage);
+            } else if (asyncJobId) {
+                // 后台恢复链路已经落库；取出同一条消息用于追加，避免整页重绘。
+                aiMessage = contact.offlineHistory.find(msg => msg.asyncJobId === asyncJobId) || null;
             }
 
             // ★ 桥接轮次只有正式回复成功才扣；reroll 复用同一轮 messageId，不会重复扣。
             OfflineChat.consumeBridgeRound(contact, roundId);
 
             await Storage.saveContacts();
-            UI.renderOfflineChatHistory(contact);
+            // ★ 只追加这张回复卡片，旧卡片保持原样。
+            if (!aiMessage || !UI.appendOfflineCard(contact, aiMessage)) {
+                // 极少数异常/旧数据路径找不到可追加的卡片时，退回整页渲染。
+                UI.renderOfflineChatHistory(contact);
+            }
         } catch (error) {
             console.error(error);
             if (error.isAsyncBackendPending) {
@@ -11885,7 +11949,7 @@ const App = {
             }
             await this.maybePromptDynamicContextCompatMode(error, requestSettings, contact);
             // 失败占位卡片：只进线下记录，不进入 AI 上下文（可见性清洗会过滤 isTransientError）。
-            contact.offlineHistory.push({
+            const errorMessage = {
                 role: 'assistant',
                 content: `(发送失败: ${error.message})`,
                 timestamp: formatTimestamp(),
@@ -11893,9 +11957,11 @@ const App = {
                 eventAt: Date.now(),
                 recordedAt: Date.now(),
                 isTransientError: true
-            });
+            };
+            contact.offlineHistory.push(errorMessage);
             await Storage.saveContacts();
-            UI.renderOfflineChatHistory(contact);
+            // ★ 失败占位也只追加一张卡片。
+            UI.appendOfflineCard(contact, errorMessage);
         } finally {
             STATE.typingContactId = null;
             UI.setOfflineTyping(false);

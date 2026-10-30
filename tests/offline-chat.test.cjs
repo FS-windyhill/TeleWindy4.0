@@ -170,7 +170,9 @@ test('常量 sanity：桥接 6 条 / 桥接 2 轮 / 回顾 2 轮（独立常量�
     assert.equal(OfflineChat.BRIDGE_MESSAGE_COUNT, 6);
     assert.equal(OfflineChat.BRIDGE_ROUNDS, 2);
     assert.equal(OfflineChat.RECAP_ROUNDS, 2);
-    assert.equal(OfflineChat.SYSTEM_PROMPT, '你们正在线下见面。');
+    // 场景提示允许后续润色；只要保持恒定的线下见面开头和小说化输出要求即可。
+    assert.ok(OfflineChat.SYSTEM_PROMPT.startsWith('你们正在线下见面。'));
+    assert.ok(OfflineChat.SYSTEM_PROMPT.includes('小说文本'));
     assert.equal(OfflineChat.isOffline({ chatMode: 'offline' }), true);
     assert.equal(OfflineChat.isOffline({ chatMode: 'online' }), false);
     assert.equal(OfflineChat.isOffline({}), false);

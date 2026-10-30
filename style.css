@@ -12946,7 +12946,7 @@ body.dark-mode .usage-page #usage-cost {
     background: none;
     color: inherit;
     cursor: pointer;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
 }
 body.dark-mode .chat-mode-tabs::before {
     background: #ffffff20;
@@ -12998,6 +12998,10 @@ body.dark-mode .chat-mode-tabs::before {
     background: rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+}
+
+/* ★ 只有追加的新卡片才播放入场动画；整页重绘/历史卡片不重播。 */
+.offline-msg-card.card-enter {
     animation: offline-card-enter 0.25s ease-out;
 }
 body.dark-mode .offline-msg-card {
