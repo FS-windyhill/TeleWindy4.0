@@ -16267,8 +16267,9 @@ const App = {
         });
         // ★★★★★ 桌面 END：互动日志热力图点击浮窗 ★★★★★
 
+        // ★ 桌面“后台消息”卡片直接进入“切屏回复接收”页；连接配置仍在“后台运行服务”。
         document.querySelector('.desktop-async-card')?.addEventListener('click', () => {
-            safeSwitchView('async-backend');
+            safeSwitchView('async-reply');
         });
 
         document.getElementById('desktop-switch-world-sense')?.addEventListener('change', (event) => {
