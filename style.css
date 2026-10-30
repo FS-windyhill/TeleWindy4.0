@@ -1033,7 +1033,7 @@ body.dark-mode #modal-overlay {
     padding: 9px 50px;
     gap: 20px;
     border-radius: 8px;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     cursor: pointer;
 }
 
@@ -12896,6 +12896,7 @@ body.dark-mode .usage-page #usage-cost {
     background: none;
     color: inherit;
     cursor: pointer;
+    font-size: 0.9rem;
 }
 body.dark-mode .chat-mode-tabs::before {
     background: #ffffff20;
