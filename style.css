@@ -1792,6 +1792,28 @@ body.dark-mode .request-body-fold-card {
    聊天选项（编辑角色）时复用请求体附加参数的折叠卡片样式（.fold-mode）。
    两个模式共用同一个 #edit-prompt，折叠只影响显示，不影响取值和保存。 */
 
+/* 编辑模式：只给这一张折叠卡加描边，颜色与 usage-card 一致（白天 #fff） */
+#user-prompt-group.fold-mode #user-prompt-fold {
+    border: 1px solid #ffffff;
+    margin: 20px 0px 10px 0px;
+    min-height: 45px;
+}
+
+/* 编辑模式：夜间描边同样跟随 usage-card 的半透明白 */
+body.dark-mode #user-prompt-group.fold-mode #user-prompt-fold {
+    border: 1px solid rgba(245, 245, 245, 0.3);
+}
+
+/* 编辑模式：折叠头字号单独设为 0.8rem，不影响设置中心的“请求体附加参数” */
+#user-prompt-group.fold-mode #user-prompt-fold .request-body-fold-header {
+    font-size: 0.85rem;
+}
+
+/* 箭头跟随标题同比缩小，避免比文字还大 */
+#user-prompt-group.fold-mode #user-prompt-fold .request-body-fold-arrow {
+    font-size: 0.7rem;
+}
+
 /* 编辑模式：折叠头的文字就是标题，隐藏重复的 label */
 #user-prompt-group.fold-mode > #user-prompt-label {
     display: none;
