@@ -123,7 +123,7 @@ const CONFIG = {
         THEME_COLOR_H: 250,
         THEME_COLOR_S: 100,
         THEME_COLOR_L: 72,
-        FONT_SIZE: 16,
+        FONT_SIZE: 17,
         HIDE_THOUGHT_PROCESS: false,
         API_PRESETS: [],
         VISION_PRESETS: [],
