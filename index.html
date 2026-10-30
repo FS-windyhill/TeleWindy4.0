@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 后台服务与切屏回复拆页后更新样式版本，避免 PWA 沿用旧卡片排版。 -->
-    <link rel="stylesheet" href="./style.css?v=20261024-usage-donut-1">
+    <link rel="stylesheet" href="./style.css?v=20261030-user-prompt-fold-1">
 </head>
 <body>
 
@@ -2041,9 +2041,18 @@
                     </div>
                 </div>
 
-                <div class="input-group">
-                    <label>User Prompt</label>
-                    <textarea id="edit-prompt" rows="5" placeholder="你是一个..."></textarea>
+                <div class="input-group" id="user-prompt-group">
+                    <label id="user-prompt-label" for="edit-prompt">User Prompt</label>
+                    <!-- 新建角色：平铺显示；聊天选项（编辑角色）：折叠显示（JS 按模式切换） -->
+                    <details id="user-prompt-fold" class="request-body-fold-card" open>
+                        <summary class="request-body-fold-header">
+                            <span class="request-body-fold-arrow">▼</span>
+                            <span>角色设定</span>
+                        </summary>
+                        <div class="request-body-fold-controls">
+                            <textarea id="edit-prompt" rows="5" placeholder="你是一个..." aria-label="角色设定"></textarea>
+                        </div>
+                    </details>
                 </div>
 
                 <!-- 角色专属模型选择 -->
@@ -3113,7 +3122,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261019-usage-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261024-storage-space-1"></script>
+    <script src="./script.js?v=20261030-user-prompt-fold-1"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

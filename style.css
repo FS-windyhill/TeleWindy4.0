@@ -1787,6 +1787,34 @@ body.dark-mode .request-body-fold-card {
 }
 /* ★★★★★ 请求体附加参数折叠卡片 END ★★★★★ */
 
+/* ★★★★★ 聊天选项：User Prompt 折叠 START ★★★★★ */
+/* 新建角色时保持原来的 "label + textarea" 平铺外观（.is-plain）；
+   聊天选项（编辑角色）时复用请求体附加参数的折叠卡片样式（.fold-mode）。
+   两个模式共用同一个 #edit-prompt，折叠只影响显示，不影响取值和保存。 */
+
+/* 编辑模式：折叠头的文字就是标题，隐藏重复的 label */
+#user-prompt-group.fold-mode > #user-prompt-label {
+    display: none;
+}
+
+/* 新建模式：去掉卡片底色/圆角，让 details 看起来和普通 .input-group 一样 */
+#user-prompt-fold.is-plain {
+    background: transparent;
+    border-radius: 0;
+    overflow: visible;
+}
+
+/* 新建模式：隐藏折叠头，内容始终展开 */
+#user-prompt-fold.is-plain > summary {
+    display: none;
+}
+
+/* 新建模式：去掉折叠卡片的左右内边距，textarea 与其他输入框对齐 */
+#user-prompt-fold.is-plain .request-body-fold-controls {
+    padding: 0;
+}
+/* ★★★★★ 聊天选项：User Prompt 折叠 END ★★★★★ */
+
 
 /* =========================================
    消息列表布局优化
@@ -12891,7 +12919,7 @@ body.dark-mode .usage-page #usage-cost {
 .chat-mode-tabs button {
     z-index: 1;
     width: 50%;
-    padding: 10px;
+    padding: 7px 10px;
     border: 0;
     background: none;
     color: inherit;

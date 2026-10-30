@@ -18038,6 +18038,9 @@ const App = {
             });
         }
 
+        // ★ User Prompt：新建角色保持平铺；聊天选项（编辑角色）默认收起，每次打开都重置。
+        this.applyUserPromptFoldMode(!!id);
+
         if (id) {
             // ===========================
             //  编辑模式 (修改现有角色)
@@ -18109,6 +18112,19 @@ const App = {
             const chatModeSection = document.getElementById('chat-mode-section');
             if (chatModeSection) chatModeSection.style.display = 'none';
         }
+    },
+
+    // ★ User Prompt 折叠：新建模式平铺展开；编辑模式（聊天选项）默认收起。
+    //   两个模式共用一个 textarea，折叠只是视觉，不影响取值和保存。
+    applyUserPromptFoldMode(isEdit) {
+        const fold = document.getElementById('user-prompt-fold');
+        const group = document.getElementById('user-prompt-group');
+        if (!fold || !group) return;
+
+        fold.classList.toggle('is-plain', !isEdit);
+        group.classList.toggle('fold-mode', isEdit);
+        // 不记忆上次状态：新建始终展开，编辑每次打开都收起。
+        fold.open = !isEdit;
     },
 
     // ★ 把弹窗里的模式 tab 同步到指定模式（滑块位置 + aria-selected）。
