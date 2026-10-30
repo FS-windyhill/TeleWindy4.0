@@ -13022,7 +13022,7 @@ body.dark-mode .offline-msg-card {
     flex-shrink: 0;
 }
 .offline-card-floor {
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     font-weight: 600;
     /* ★ 不能用 --primary-btn-color：那是 10% 透明度的背景色，文字会几乎不可见 */
     color: #6490ff;
