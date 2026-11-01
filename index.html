@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 后台服务与切屏回复拆页后更新样式版本，避免 PWA 沿用旧卡片排版。 -->
-    <link rel="stylesheet" href="./style.css?v=20261030-user-prompt-fold-2">
+    <link rel="stylesheet" href="./style.css?v=20261101-css-ai-1">
 </head>
 <body>
 
@@ -2222,8 +2222,19 @@
                                 <button id="del-css-btn" class="icon-btn danger">删除预设</button>
                             </div>
 
-                            <!-- 第3行：CSS 编辑区域 -->
-                            <textarea id="custom-css-input" class="setting-input code-editor" placeholder="/* 在这里输入 CSS 代码 */&#10;.message-wrapper.user .message-bubble {&#10;    background: #95ec69;&#10;    color: black;&#10;}&#10;.msg-time（时间戳） {}等等"></textarea>
+                            <!-- 第3行：恢复最初那份仿微信主题；只回填编辑框，不影响已保存预设 -->
+                            <div class="panel-row btn-group">
+                                <button id="restore-initial-css-btn" type="button" class="icon-btn">恢复初始自定义主题</button>
+                            </div>
+
+                            <!-- 第4行：AI 修改提示 -->
+                            <div class="css-ai-hint">
+                                <span>这段 CSS 里已经写了常用类名；想改别的样子，点「复制当前 CSS」发给 AI，描述想要的效果，改完粘回来就行。</span>
+                                <button id="copy-css-for-ai-btn" type="button" class="css-copy-btn">复制当前 CSS</button>
+                            </div>
+
+                            <!-- 第5行：CSS 编辑区域 -->
+                            <textarea id="custom-css-input" class="setting-input code-editor" placeholder="/* 空着也行：进入自定义模式会自动套上「仿微信（VX）」初始主题 */&#10;/* 这段 CSS 里已经写了常用类名，想改别的样子就复制给 AI */"></textarea>
                         </div>
 
                     </div> 
@@ -3099,6 +3110,8 @@
 
     <!-- 项目脚本：先加载独立服务，再加载主业务入口 -->
     <script src="./js/config.js?v=20261030-font-default-1"></script>
+    <script src="./js/css-presets.js?v=20261101-vx-initial-1"></script>
+    <script src="./js/custom-css.js?v=20261101-prefix-parser-1"></script>
     <!-- ★ 气泡身份要先于存储迁移、历史过滤和聊天页加载。 -->
     <script src="./js/chat-bubbles.js?v=20261025-bubble-snapshot-1"></script>
     <script src="./js/storage.js?v=20261023-bubble-id-1"></script>
@@ -3122,7 +3135,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261019-usage-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261030-user-prompt-fold-1"></script>
+    <script src="./script.js?v=20261101-css-ai-1"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

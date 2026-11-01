@@ -243,28 +243,33 @@ body.dark-mode .chat-header-avatar {
 #task-input {
     flex-grow: 1;
     /* 调整内边距，使其文字垂直居中看起来像 input */
-    padding: 6px 16px; 
+    padding: 6px 16px;
     border: 1px solid #ccc;
 
     background: rgba(255, 255, 255, 0.6) !important;
 
     /* --- 解决问题 1: 去掉右下角下拉标 --- */
-    resize: none; 
+    resize: none;
 
     /* --- 解决问题 2: 字体变小 --- */
     /* textarea 默认不继承父元素字体，需强制继承 */
-    font-family: inherit; 
-    font-size: 1rem; 
-    line-height: 1.5; /* 设置行高，让文字不拥挤 */
+    font-family: inherit;
+    font-size: 1rem;
+    /* 与消息气泡 (.message-bubble) 保持一致；改这里时 min-height 也要同步改 */
+    line-height: 1.3;
 
     /* --- 解决问题 3: 默认高度太高 --- */
-    /* 设置一个初始高度，通常 40px-43px 比较像单行输入框 */
-    height: 38px; 
-    /* 隐藏超出的滚动条，配合 JS 实现自动增高 */
-    overflow-y: hidden; 
-    
+    /* 1 行高度 = line-height(1.3em) + 上下 padding 12px + 上下边框 2px */
+    min-height: calc(1.3em + 14px);
+    /* 最多 8 行，超过后输入框内部滚动；小屏再用 35vh 兜底 */
+    max-height: min(calc(8 * 1.3 * 1em + 14px), 35vh);
+    /* 未超出上限时不会出现滚动条，超出后才出现 */
+    overflow-y: auto;
+    /* 滚到顶/底后不要把滚动链传给聊天区 */
+    overscroll-behavior: contain;
+
     /* 确保宽度计算包含 padding */
-    box-sizing: border-box; 
+    box-sizing: border-box;
 
     border-top-left-radius: 8px;
     border-bottom-left-radius: 8px;
@@ -2995,7 +3000,10 @@ body.dark-mode #task-input {
     background: rgba(60, 60, 60, 0.25) !important /* 深色半透明背景 */
 }
 body.dark-mode #task-input:focus {
-    border: 2px solid #9d9d9d;
+    /* 用 inset 阴影模拟第二层描边：保持 2px 的视觉效果，但边框宽度恒为 1px，
+       避免聚焦时内容区变矮 2px，导致自动增高的输入框闪烁或出现多余滚动条 */
+    border-color: #9d9d9d;
+    box-shadow: inset 0 0 0 1px #9d9d9d;
     background: rgba(0, 0, 0, 0.25) !important;
 }
 body.dark-mode #task-input::placeholder {
@@ -4978,6 +4986,57 @@ textarea.setting-input.code-editor {
     font-size: 0.9rem;
     line-height: 1.5;
     resize: vertical; /* 允许垂直拖动调整大小 */
+}
+
+/* AI 修改提示：一行说明 + 复制按钮 */
+.css-ai-hint {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    color: #666;
+    font-size: 0.82rem;
+    line-height: 1.45;
+}
+
+.css-ai-hint span {
+    flex: 1;
+    min-width: 0;
+}
+
+.css-copy-btn {
+    flex-shrink: 0;
+    padding: 7px 12px;
+    border: 0.7px solid #ddd;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #333;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.css-copy-btn:hover {
+    background: #f0f0f0;
+}
+
+.css-copy-btn:active {
+    transform: scale(0.98);
+}
+
+body.dark-mode .css-ai-hint {
+    color: #b8b8b8;
+}
+
+body.dark-mode .css-copy-btn {
+    background: var(--btn-color);
+    color: #ffffff;
+    border-color: #a9a9a9;
+}
+
+body.dark-mode .css-copy-btn:hover {
+    background: rgba(255, 255, 255, 0.12);
 }
 
 
@@ -13250,9 +13309,16 @@ body.dark-mode .offline-chat-header #offline-typing-status {
     resize: none;
     font-family: inherit;
     font-size: 1rem;
-    line-height: 1.5;
-    height: 38px;
-    overflow-y: hidden;
+    /* 与消息气泡 (.message-bubble) 保持一致；改这里时 min-height 也要同步改 */
+    line-height: 1.3;
+    /* 1 行高度 = line-height(1.3em) + 上下 padding 12px + 上下边框 2px */
+    min-height: calc(1.3em + 14px);
+    /* 最多 8 行，超过后输入框内部滚动；小屏再用 35vh 兜底 */
+    max-height: min(calc(8 * 1.3 * 1em + 14px), 35vh);
+    /* 未超出上限时不会出现滚动条，超出后才出现 */
+    overflow-y: auto;
+    /* 滚到顶/底后不要把滚动链传给聊天区 */
+    overscroll-behavior: contain;
     box-sizing: border-box;
     border-radius: 8px;
 
@@ -13318,7 +13384,9 @@ body.dark-mode #offline-task-input {
     background: rgba(60, 60, 60, 0.25) !important;
 }
 body.dark-mode #offline-task-input:focus {
-    border: 2px solid #9d9d9d;
+    /* 同 #task-input：用 inset 阴影代替加宽边框，保证输入框几何尺寸不变 */
+    border-color: #9d9d9d;
+    box-shadow: inset 0 0 0 1px #9d9d9d;
     background: rgba(0, 0, 0, 0.25) !important;
 }
 body.dark-mode #offline-task-input::placeholder {

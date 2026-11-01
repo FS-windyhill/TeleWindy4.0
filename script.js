@@ -195,6 +195,7 @@
 //     - SYSTEM_PROMPT_PRESETS: System Prompt 预设列表，供全局和角色专属选择使用
 //     - CUSTOM_CSS: 用户自定义 CSS
 //     - CSS_PRESETS: CSS 预设列表
+//     - CSS_PRESETS_SEEDED: 初始仿微信主题是否已一次性注入 CSS 预设列表
 //     - VISION_URL: 默认视觉 API 地址
 //     - VISION_KEY: 默认视觉 API Key
 //     - VISION_MODEL: 默认视觉模型名称
@@ -426,6 +427,7 @@
 //   - syncThemeColorControls(color): 同步外观页主题色滑条、数值文字和预览色块
 //   - applyAppearance(): 应用壁纸、主题、字体大小、主题色和自定义 CSS，并同步主题控件状态
 //   - renderCssPresetMenu(): 渲染 CSS 样式预设下拉菜单
+//   - syncCssPresetSelection(): 空 CSS 走初始仿微信主题时，同步选中对应的预设
 //   - toggleTheme(newTheme): 切换主题并保存设置
 //   - switchView(viewName): 在桌面、联系人列表、聊天页、探索页、朋友圈页等视图之间切换，并记录二级页返回来源
 //   - renderVisionPresetMenu(): 渲染视觉模型预设下拉菜单
@@ -633,6 +635,8 @@
 //     - handleSaveCssPreset(): 保存用户自定义CSS为一个命名预设
 //     - handleLoadCssPreset(index): 根据索引加载指定的CSS预设内容到编辑框并应用
 //     - handleDeleteCssPreset(): 删除选中的CSS预设
+//     - handleRestoreInitialCss(): 把最初那份仿微信主题填回编辑框并立即生效
+//     - handleCopyCssForAi(): 复制当前 CSS 和一段 AI 修改说明
 //     - prefixUserCss(rawCss): 为用户自定义的CSS规则自动添加'body.custom-mode '前缀以提高样式权重
 
 
@@ -2567,6 +2571,9 @@ const UI = {
                 if(label) label.textContent = newSize + 'px';
                 // 核心：直接修改 CSS 变量，让页面立刻变大变小
                 document.documentElement.style.setProperty('--app-font-size', newSize + 'px');
+                // 字号变了，已输入文字的输入框高度也要重新适配（空框由 CSS min-height 自动跟随）
+                this.autoGrowComposer(this.els.input);
+                this.autoGrowComposer(this.els.offlineInput);
             });
         }
 
@@ -2654,7 +2661,8 @@ const UI = {
         const WALLPAPER = settings.WALLPAPER || CONFIG.DEFAULT.WALLPAPER;
         const THEME = settings.THEME || CONFIG.DEFAULT.THEME; 
         const FONT_SIZE = settings.FONT_SIZE || CONFIG.DEFAULT.FONT_SIZE;
-        const CUSTOM_CSS = settings.CUSTOM_CSS || CONFIG.DEFAULT.CUSTOM_CSS; // 新增
+        // ★ 用户没写过 CSS 时，自定义模式直接套上初始仿微信主题；写过则完全不动。
+        const CUSTOM_CSS = settings.CUSTOM_CSS || CONFIG.INITIAL_CUSTOM_CSS || CONFIG.DEFAULT.CUSTOM_CSS;
         const CUSTOM_BASE_THEME = settings.CUSTOM_BASE_THEME || CONFIG.DEFAULT.CUSTOM_BASE_THEME || 'dark';
         const THEME_COLOR = this.getThemeColorSettings(settings);
 
@@ -2707,6 +2715,7 @@ const UI = {
             if (cssInput && cssInput.value !== CUSTOM_CSS) {
                 cssInput.value = CUSTOM_CSS;
             }
+            this.syncCssPresetSelection();
 
         } else {
             // 非自定义模式
@@ -2735,17 +2744,37 @@ const UI = {
     renderCssPresetMenu() {
         const select = document.getElementById('css-preset-select');
         if (!select) return;
-        
+
         // 清空现有选项，保留第一项提示
         select.innerHTML = '<option value="">-- 选择样式预设 --</option>';
-        
+
         const presets = STATE.settings.CSS_PRESETS || [];
         presets.forEach((preset, index) => {
             const option = document.createElement('option');
-            option.value = index; 
+            option.value = index;
             option.textContent = preset.name;
             select.appendChild(option);
         });
+    },
+
+    // 2.1 空 CSS 或正好是初始主题时，下拉框同步选中它，避免看起来像没套预设。
+    syncCssPresetSelection() {
+        const select = document.getElementById('css-preset-select');
+        if (!select) return;
+        if (!CONFIG.INITIAL_CUSTOM_CSS) return;
+        if (STATE.settings.THEME !== 'custom') return;
+
+        const currentCss = STATE.settings.CUSTOM_CSS || CONFIG.INITIAL_CUSTOM_CSS;
+        if (currentCss !== CONFIG.INITIAL_CUSTOM_CSS) return;
+
+        const initialName = CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME || '仿微信（VX）';
+        const presets = Array.isArray(STATE.settings.CSS_PRESETS) ? STATE.settings.CSS_PRESETS : [];
+        const initialIndex = presets.findIndex(preset => preset
+            && preset.name === initialName
+            && preset.css === CONFIG.INITIAL_CUSTOM_CSS);
+        if (initialIndex >= 0) {
+            select.value = String(initialIndex);
+        }
     },
 
     // 保持 toggleTheme 不变，或者用你刚才发的那个
@@ -2872,7 +2901,9 @@ const UI = {
             // ★ 聊天页平时靠 transform 待在屏幕外，但节点本身必须保持 flex。
             // 心笺等二级页如果曾写入 display:none，只加 in-chat-mode 也无法让它重新出现。
             if (this.els.viewChat) this.els.viewChat.style.display = 'flex';
-            
+            // 空输入框也按同一套公式量一次高度，避免第一笔输入时出现 1px 抖动
+            this.autoGrowComposer(this.els.input);
+
             // 注意：因为你的聊天界面是靠 CSS 控制盖在上面的，所以这里不需要去改其他界面的 display
             
         } else if (viewName === 'contact-list') {
@@ -4350,6 +4381,20 @@ const UI = {
         if (!container) return;
         // 不需要任何延迟，瞬间到底
         container.scrollTop = container.scrollHeight;
+    },
+
+    // ★★★ 聊天输入框（线上/线下共用）自动增高 ★★★
+    // 高度上限由 CSS 的 max-height 控制（8 行封顶），超出后交给 overflow-y: auto 内部滚动。
+    autoGrowComposer(el) {
+        if (!el || !el.offsetParent) return;
+        // 测量时先隐藏滚动条：否则 Windows 上滚动条占宽会让文字提前换行，高度多算一行
+        el.style.overflowY = 'hidden';
+        el.style.height = 'auto';
+        // box-sizing: border-box 下 scrollHeight 不含上下边框，这里补上，避免输入框永远矮 2px
+        const borderH = el.offsetHeight - el.clientHeight;
+        el.style.height = (el.scrollHeight + borderH) + 'px';
+        // 恢复 CSS 里的 overflow-y: auto：未超上限不出现滚动条，超了才出现
+        el.style.overflowY = '';
     },
 
     // ★★★ 聊天 Header 在线状态：统一管理头像、绿点和“离开/离线”文案 ★★★
@@ -11004,7 +11049,8 @@ const App = {
 
             // 3. UI 清理 (清空输入框和预览)
             UI.els.input.value = '';
-            UI.els.input.style.height = '38px'; // ★★★ 就是这里！发送后，把输入框高度重置回 38px ★★★
+            // 清掉内联高度，交回 CSS 的 min-height（随聊天字号自动缩放）
+            UI.els.input.style.height = '';
             if (UI.els.previewContainer) UI.els.previewContainer.style.display = 'none'; // 隐藏预览
             STATE.pendingImage = null; // ★ 清空暂存，防止下次误发
             if (window.innerWidth < 800) UI.els.input.blur();
@@ -11615,6 +11661,8 @@ const App = {
         const offlineTabBar = document.getElementById('bottom-tab-bar');
         if (offlineTabBar) offlineTabBar.style.display = 'none';
         if (UI.els.viewOfflineChat) UI.els.viewOfflineChat.style.display = 'flex';
+        // 打开时才可见：把上次遗留的输入内容按当前字号重新适配高度
+        UI.autoGrowComposer(UI.els.offlineInput);
         UI.renderOfflineChatHistory(contact);
         Storage.saveContacts();
     },
@@ -11734,7 +11782,8 @@ const App = {
             UI.appendOfflineCard(contact, newUserMsg);
             if (inputEl) {
                 inputEl.value = '';
-                inputEl.style.height = '38px';
+                // 清掉内联高度，交回 CSS 的 min-height（随聊天字号自动缩放）
+                inputEl.style.height = '';
             }
             if (window.innerWidth < 800 && inputEl) inputEl.blur();
         } else {
@@ -12315,10 +12364,10 @@ const App = {
 
         UI.applyAppearance();
 
-        // CSS 输入框回显
+        // CSS 输入框回显：空 CSS 时和预览保持一致，显示初始仿微信主题。
         const cssInput = document.getElementById('custom-css-input');
         if (cssInput) {
-            cssInput.value = s.CUSTOM_CSS || '';
+            cssInput.value = s.CUSTOM_CSS || CONFIG.INITIAL_CUSTOM_CSS || '';
         }
 
         UI.renderPresetMenu();
@@ -12334,6 +12383,7 @@ const App = {
 
         UI.initWorldInfoTab();
         UI.renderCssPresetMenu();
+        UI.syncCssPresetSelection();
     },
 
     // --- 世界书相关操作 ---
@@ -15292,11 +15342,8 @@ const App = {
 
         // --- 输入与发送 ---
         if(UI.els.input) {
-            UI.els.input.style.overflowY = 'hidden'; 
             UI.els.input.addEventListener('input', function() {
-                this.style.height = 'auto'; 
-                this.style.height = (this.scrollHeight) + 'px';
-                if (this.value === '') this.style.height = '38px';
+                UI.autoGrowComposer(this);
             });
             UI.els.input.onkeydown = (e) => {
                 const isMobile = window.innerWidth < 800;
@@ -15352,9 +15399,7 @@ const App = {
         if (UI.els.offlineInput) {
             // 输入框自适应高度 + PC 端 Enter 发送（与线上输入框同款）
             UI.els.offlineInput.addEventListener('input', function() {
-                this.style.height = 'auto'; 
-                this.style.height = (this.scrollHeight) + 'px';
-                if (this.value === '') this.style.height = '38px';
+                UI.autoGrowComposer(this);
             });
             UI.els.offlineInput.addEventListener('keydown', (e) => {
                 const isMobile = window.innerWidth < 800;
@@ -16162,6 +16207,12 @@ const App = {
 
         const delCssBtn = document.getElementById('del-css-btn');
         if (delCssBtn) delCssBtn.addEventListener('click', () => this.handleDeleteCssPreset());
+
+        const restoreCssBtn = document.getElementById('restore-initial-css-btn');
+        if (restoreCssBtn) restoreCssBtn.addEventListener('click', () => this.handleRestoreInitialCss());
+
+        const copyCssBtn = document.getElementById('copy-css-for-ai-btn');
+        if (copyCssBtn) copyCssBtn.addEventListener('click', () => this.handleCopyCssForAi());
 
         const cssSelect = document.getElementById('css-preset-select');
         if (cssSelect) {
@@ -18414,6 +18465,8 @@ const App = {
             STATE.settings.CSS_PRESETS.push({ name: name, css: css });
         }
 
+        // 当前编辑框内容就是正在预览的样式；保存预设时一并落库。
+        STATE.settings.CUSTOM_CSS = css;
         Storage.saveSettings();
         UI.renderCssPresetMenu(); // 刷新下拉框
         alert(`样式预设 "${name}" 已保存！`);
@@ -18462,45 +18515,72 @@ const App = {
         }
     },
 
+    // 4. 恢复初始自定义主题：只回填内容，不依赖预设是否还在
+    async handleRestoreInitialCss() {
+        const css = CONFIG.INITIAL_CUSTOM_CSS || '';
+        const cssInput = document.getElementById('custom-css-input');
+        if (cssInput) cssInput.value = css;
+
+        STATE.settings.CUSTOM_CSS = css;
+
+        // 立即生效；和输入框实时预览保持同一条链路。
+        if (STATE.settings.THEME === 'custom') {
+            UI.applyAppearance();
+        }
+
+        // 恢复后不再对应某个用户预设，清空选择，避免名称和内容对不上。
+        const select = document.getElementById('css-preset-select');
+        if (select) select.value = '';
+
+        await Storage.saveSettings();
+    },
+
+    // 5. 复制当前 CSS + 一段 AI 修改说明，用户直接发给 AI 即可
+    async handleCopyCssForAi() {
+        const cssInput = document.getElementById('custom-css-input');
+        const css = (cssInput && cssInput.value.trim())
+            ? cssInput.value
+            : (CONFIG.INITIAL_CUSTOM_CSS || '');
+        const text = [
+            '请帮我修改下面这份自定义 CSS。',
+            '要求：',
+            '1. 只输出完整 CSS，不要解释，不要省略。',
+            '2. 保留我没要求改的部分，不要重写整个主题。',
+            '3. 选择器会自动加上 body.custom-mode 前缀，不要自己重复加。',
+            '',
+            '【我想要的效果】：',
+            '（在这里写你想要的样子，例如：用户气泡改成浅粉色、头像改成圆角）',
+            '',
+            '【当前 CSS】：',
+            css
+        ].join('\n');
+
+        const button = document.getElementById('copy-css-for-ai-btn');
+        const originalText = button ? button.textContent : '';
+        try {
+            await copyPlainText(text);
+            if (button) {
+                button.textContent = '已复制';
+                setTimeout(() => { button.textContent = originalText; }, 1500);
+            }
+        } catch (error) {
+            alert('复制失败，请手动选中编辑框里的 CSS 复制。');
+        }
+    },
+
     /**
-     * 为用户输入的CSS规则自动添加 'body.custom-mode' 前缀以提高权重
-     * @param {string} rawCss 用户输入的原始CSS字符串
-     * @returns {string} 处理后带前缀的CSS字符串
+     * 为用户输入的 CSS 选择器自动添加 body.custom-mode 前缀。
+     * 具体解析逻辑在 js/custom-css.js，方便单独测试。
+     * @param {string} rawCss 用户输入的原始 CSS 字符串
+     * @returns {string} 处理后带前缀的 CSS 字符串
      */
     prefixUserCss(rawCss) {
-        if (!rawCss || typeof rawCss !== 'string') return '';
-
-        const prefix = 'body.custom-mode ';
-        
-        // 简单的CSS解析：按 '}' 分割成块，然后处理每个块的头部
-        return rawCss.split('}').map(ruleBlock => {
-            if (!ruleBlock.trim()) return ''; // 忽略空块
-
-            const parts = ruleBlock.split('{');
-            if (parts.length < 2) return ruleBlock + '}'; // 如果不是标准的 "选择器 { 属性" 结构，直接返回
-
-            const selectors = parts[0];
-            const declarations = '{' + parts.slice(1).join('{'); // 重新拼接属性部分
-
-            // 处理组合选择器，如 h1, h2, .main-title
-            const prefixedSelectors = selectors.split(',')
-                .map(selector => {
-                    const trimmedSelector = selector.trim();
-                    if (trimmedSelector) {
-                        // 忽略 @keyframes, @font-face 等 @ 规则
-                        if (trimmedSelector.startsWith('@')) {
-                            return trimmedSelector;
-                        }
-                        return prefix + trimmedSelector;
-                    }
-                    return '';
-                })
-                .join(', '); // 用逗号和空格重新连接
-
-            return prefixedSelectors + declarations + '}';
-        }).join('\n'); // 最终用换行符合并所有规则
+        if (typeof CustomCss !== 'undefined' && typeof CustomCss.prefix === 'function') {
+            return CustomCss.prefix(rawCss);
+        }
+        return rawCss || '';
     },
-    
+
 };
 
 // =========================================

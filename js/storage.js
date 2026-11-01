@@ -195,6 +195,20 @@ const Storage = {
         if (!Array.isArray(STATE.settings.SYSTEM_PROMPT_PRESETS)) {
             STATE.settings.SYSTEM_PROMPT_PRESETS = [];
         }
+        if (!Array.isArray(STATE.settings.CSS_PRESETS)) {
+            STATE.settings.CSS_PRESETS = [];
+        }
+        // ★ 初始仿微信主题只注入一次；用户删掉后不会每次启动又回来。
+        //   原文来自 js/css-presets.js 的 CONFIG.INITIAL_CUSTOM_CSS，不写进 CONFIG.DEFAULT。
+        let cssPresetSeeded = false;
+        if (!STATE.settings.CSS_PRESETS_SEEDED && CONFIG.INITIAL_CUSTOM_CSS) {
+            const seedName = CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME || '仿微信（VX）';
+            if (!STATE.settings.CSS_PRESETS.some(preset => preset && preset.name === seedName)) {
+                STATE.settings.CSS_PRESETS.unshift({ name: seedName, css: CONFIG.INITIAL_CUSTOM_CSS });
+            }
+            STATE.settings.CSS_PRESETS_SEEDED = true;
+            cssPresetSeeded = true;
+        }
         // 空字符串是合法设置，代表不发送全局 system prompt；只有旧数据缺字段时才补默认值。
         if (STATE.settings.SYSTEM_PROMPT === undefined) {
             STATE.settings.SYSTEM_PROMPT = CONFIG.SYSTEM_PROMPT;
@@ -208,6 +222,9 @@ const Storage = {
             if (oldUserAvatar) STATE.settings.USER_AVATAR = oldUserAvatar;
             if (oldWallpaper) STATE.settings.WALLPAPER = oldWallpaper;
         }
+
+        // ★ 初始主题的落库放在旧头像/壁纸迁移之后，避免迁移值还没写进 STATE 就被保存。
+        if (cssPresetSeeded) await this.saveSettings();
 
         // ------------------------------------------------
         // 2. 加载联系人 (Contacts)
