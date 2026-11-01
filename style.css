@@ -5013,6 +5013,9 @@ textarea.setting-input.code-editor {
     background: #ffffff;
     color: #333;
     font-size: 0.82rem;
+    line-height: 1.25; /* 文案分两行：复制当前 / CSS */
+    text-align: center;
+    min-height: calc(2.5em + 15px); /* 点完变「已复制」单行时高度不变，避免布局跳动 */
     cursor: pointer;
     transition: all 0.2s ease;
 }

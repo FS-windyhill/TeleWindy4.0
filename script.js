@@ -18556,12 +18556,13 @@ const App = {
         ].join('\n');
 
         const button = document.getElementById('copy-css-for-ai-btn');
-        const originalText = button ? button.textContent : '';
+        // 按钮文案是两行（复制当前<br>CSS），恢复时要用 innerHTML 才能保留换行
+        const originalHTML = button ? button.innerHTML : '';
         try {
             await copyPlainText(text);
             if (button) {
                 button.textContent = '已复制';
-                setTimeout(() => { button.textContent = originalText; }, 1500);
+                setTimeout(() => { button.innerHTML = originalHTML; }, 1500);
             }
         } catch (error) {
             alert('复制失败，请手动选中编辑框里的 CSS 复制。');
