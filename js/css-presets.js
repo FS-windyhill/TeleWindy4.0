@@ -18,11 +18,23 @@ CONFIG.INITIAL_CUSTOM_CSS = String.raw`/* ======================================
    头部：.app-header、.chat-header、.chat-header-profile、
          .chat-header-avatar、.chat-header-meta、#chat-title、
          #typing-status、.presence-dot、.presence-text
+         默认布局：头像 + 名字 + 在线状态圆点，横排；
+         不想显示头像或圆点，去文件末尾「聊天页 Header」
+         那段把对应规则取消注释即可。
    底栏：.app-footer、#chat-messages、#task-input、#send-button、
          #upload-image-btn、#reroll-footer-btn
    主题变量：--message-bg-user、--message-border-user、
              --message-bg-ai、--message-border-ai、
              --primary-btn-text、--app-font-size
+   ---------------------------------------------------------
+   主题色（就是设置里那三个 HSL 滑条，改滑条这里会自动跟着变）：
+     hsl(var(--theme-color-h) var(--theme-color-s) var(--theme-color-l))        （原色）
+     hsl(var(--theme-color-h) var(--theme-color-s) var(--theme-color-l) / 0.2)  （再带透明度）
+   - --theme-color-h：色相 0–360，不带单位
+   - --theme-color-s、--theme-color-l：已经自带 %，自己不用再写 %
+   例：background: hsl(var(--theme-color-h) var(--theme-color-s) var(--theme-color-l) / 0.15);
+   想整体跟随主题色，优先改 var(--primary-btn-text) 这类现成变量；
+   想单独给某个元素上主题色，就直接用上面的 hsl(...) 写法。
    ---------------------------------------------------------
    想改成别样子？把整段 CSS 复制给 AI，描述你想要的效果，
    让 AI 改完再粘回编辑框即可。
@@ -230,53 +242,19 @@ CONFIG.INITIAL_CUSTOM_CSS = String.raw`/* ======================================
 }
 
 /* =========================================
-   聊天页 Header：恢复旧版居中标题，不显示头像
+   聊天页 Header：保持默认样式
+   -----------------------------------------
+   默认就是「头像 + 名字 + 在线状态圆点」横排，
+   本主题不再覆盖，基础样式直接生效。
+   不想要头像或圆点？把下面两条规则两边的
+   注释符号删掉即可（也就是取消注释）。
    ========================================= */
 
-/* 只改聊天页的新 Header 结构，不影响其它页面 */
-.chat-header {
-    text-align: center;
-}
+/* 取消注释即可隐藏头像 */
+/* .chat-header-avatar { display: none; } */
 
-/* 新版联系人块改回“居中标题区” */
-.chat-header-profile {
-    display: block;
-    height: auto;
-    margin-left: 42px;   /* 给左侧返回按钮留空间 */
-    margin-right: 42px;  /* 给右侧设置按钮留空间 */
-    text-align: center;
-}
-
-/* 隐藏聊天页 Header 头像 */
-.chat-header-avatar {
-    display: none;
-}
-
-/* 名字和状态都居中 */
-.chat-header-meta {
-    display: block;
-    min-width: 0;
-}
-
-.chat-header #chat-title {
-    text-align: center;
-    max-width: 100%;
-}
-
-.chat-header #typing-status {
-    display: block;
-    text-align: center;
-    max-width: 100%;
-    margin: 2px 0 0;
-}
-
-.chat-header .presence-dot {
-    display: none;
-}
-
-.chat-header .presence-text {
-    display: inline;
-}
+/* 取消注释即可隐藏在线状态小圆点 */
+/* .chat-header .presence-dot { display: none; } */
 `;
 
 CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME = '绿泡泡';
