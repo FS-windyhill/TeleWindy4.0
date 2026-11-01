@@ -262,7 +262,7 @@ body.dark-mode .chat-header-avatar {
     /* 1 行高度 = line-height(1.3em) + 上下 padding 12px + 上下边框 2px */
     min-height: calc(1.3em + 14px);
     /* 最多 8 行，超过后输入框内部滚动；小屏再用 35vh 兜底 */
-    max-height: min(calc(8 * 1.3 * 1em + 14px), 35vh);
+    max-height: min(calc(10 * 1.3 * 1em + 14px), 35vh);
     /* 未超出上限时不会出现滚动条，超出后才出现 */
     overflow-y: auto;
     /* 滚到顶/底后不要把滚动链传给聊天区 */
