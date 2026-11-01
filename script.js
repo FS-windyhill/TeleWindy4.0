@@ -636,7 +636,7 @@
 //     - handleLoadCssPreset(index): 根据索引加载指定的CSS预设内容到编辑框并应用
 //     - handleDeleteCssPreset(): 删除选中的CSS预设
 //     - handleRestoreInitialCss(): 把最初那份绿泡泡主题填回编辑框并立即生效
-//     - handleCopyCssForAi(): 复制当前 CSS 和一段 AI 修改说明
+//     - handleCopyCssForAi(): 原样复制编辑框里的 CSS，不加任何说明文字
 //     - prefixUserCss(rawCss): 为用户自定义的CSS规则自动添加'body.custom-mode '前缀以提高样式权重
 
 
@@ -18535,25 +18535,13 @@ const App = {
         await Storage.saveSettings();
     },
 
-    // 5. 复制当前 CSS + 一段 AI 修改说明，用户直接发给 AI 即可
+    // 5. 原样复制编辑框里的 CSS（裸代码），由用户自己决定发什么说明给 AI
     async handleCopyCssForAi() {
         const cssInput = document.getElementById('custom-css-input');
-        const css = (cssInput && cssInput.value.trim())
+        // 框里填啥就复制啥；空着时复制当前实际生效的初始主题
+        const text = (cssInput && cssInput.value.trim())
             ? cssInput.value
             : (CONFIG.INITIAL_CUSTOM_CSS || '');
-        const text = [
-            '请帮我修改下面这份自定义 CSS。',
-            '要求：',
-            '1. 只输出完整 CSS，不要解释，不要省略。',
-            '2. 保留我没要求改的部分，不要重写整个主题。',
-            '3. 选择器会自动加上 body.custom-mode 前缀，不要自己重复加。',
-            '',
-            '【我想要的效果】：',
-            '（在这里写你想要的样子，例如：用户气泡改成浅粉色、头像改成圆角）',
-            '',
-            '【当前 CSS】：',
-            css
-        ].join('\n');
 
         const button = document.getElementById('copy-css-for-ai-btn');
         // 按钮文案是两行（复制当前<br>CSS），恢复时要用 innerHTML 才能保留换行
