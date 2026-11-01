@@ -107,7 +107,7 @@ CONFIG.INITIAL_CUSTOM_CSS = String.raw`/* ======================================
    5. User (用户) 特定样式 & 尾巴
    ========================================= */
 .message-wrapper.user .message-bubble {
-    background-color: #29B461; /* 微信绿背景 */
+    background-color: #29B461; /* 绿泡泡主题绿背景 */
     color: #000000;            /* 黑色文字 */
 }
 

@@ -5881,7 +5881,7 @@ body.dark-mode .moment-comments {
 .comment-item:last-child { margin-bottom: 0; }
 
 .comment-name { 
-    color: #576b95; /* 微信经典文字蓝 */
+    color: #576b95; /* 绿泡泡经典文字蓝 */
     font-weight: 600; 
     cursor: pointer; 
 }
@@ -5893,7 +5893,7 @@ body.dark-mode .moment-comments {
 
 
 body.dark-mode .comment-name { 
-    color: #9dbcff; /* 微信经典文字蓝 */
+    color: #9dbcff; /* 绿泡泡经典文字蓝 */
     font-weight: 600; 
     cursor: pointer; 
 }
@@ -6026,7 +6026,7 @@ body.dark-mode .momment-btn.danger {
 /* 取消按钮 - 加粗加深，明确退出意图 */
 body.dark-mode .momment-btn.cancel {
     font-weight: 600;
-    color: #92b5ff; /* 微信经典蓝灰，或者可以直接用 #333 */
+    color: #92b5ff; /* 绿泡泡经典蓝灰，或者可以直接用 #333 */
 }
 
 /* =========================================================
@@ -6567,7 +6567,7 @@ body.dark-mode .moments-probability-value input[type="number"] {
 /* 取消按钮 - 加粗加深，明确退出意图 */
 .momment-btn.cancel {
     font-weight: 600;
-    color: #576b95; /* 微信经典蓝灰，或者可以直接用 #333 */
+    color: #576b95; /* 绿泡泡经典蓝灰，或者可以直接用 #333 */
 }
 
 /* 视觉隔离带：用于将"取消"和上方功能区隔开 */
@@ -6757,14 +6757,14 @@ body.dark-mode .m-modal-scroll-container{
 
 /* 朋友圈评论：回复某人的前缀样式 */
 .comment-reply-prefix {
-    color: #7585a9; /* 微信朋友圈名字的经典蓝色 */
+    color: #7585a9; /* 绿泡泡朋友圈名字的经典蓝色 */
     margin: 0 4px;
     font-weight: 500; /* 可选：让名字稍微加粗一点点，更好看 */
 }
 
 /* 朋友圈评论：回复某人的前缀样式 */
 body.dark-mode .comment-reply-prefix {
-    color: #8ea4d1; /* 微信朋友圈名字的经典蓝色 */
+    color: #8ea4d1; /* 绿泡泡朋友圈名字的经典蓝色 */
 
 }
 

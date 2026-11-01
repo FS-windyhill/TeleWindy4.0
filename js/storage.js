@@ -198,11 +198,11 @@ const Storage = {
         if (!Array.isArray(STATE.settings.CSS_PRESETS)) {
             STATE.settings.CSS_PRESETS = [];
         }
-        // ★ 初始仿微信主题只注入一次；用户删掉后不会每次启动又回来。
+        // ★ 初始绿泡泡主题只注入一次；用户删掉后不会每次启动又回来。
         //   原文来自 js/css-presets.js 的 CONFIG.INITIAL_CUSTOM_CSS，不写进 CONFIG.DEFAULT。
         let cssPresetSeeded = false;
         if (!STATE.settings.CSS_PRESETS_SEEDED && CONFIG.INITIAL_CUSTOM_CSS) {
-            const seedName = CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME || '仿微信（VX）';
+            const seedName = CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME || '绿泡泡';
             if (!STATE.settings.CSS_PRESETS.some(preset => preset && preset.name === seedName)) {
                 STATE.settings.CSS_PRESETS.unshift({ name: seedName, css: CONFIG.INITIAL_CUSTOM_CSS });
             }

@@ -195,7 +195,7 @@
 //     - SYSTEM_PROMPT_PRESETS: System Prompt 预设列表，供全局和角色专属选择使用
 //     - CUSTOM_CSS: 用户自定义 CSS
 //     - CSS_PRESETS: CSS 预设列表
-//     - CSS_PRESETS_SEEDED: 初始仿微信主题是否已一次性注入 CSS 预设列表
+//     - CSS_PRESETS_SEEDED: 初始绿泡泡主题是否已一次性注入 CSS 预设列表
 //     - VISION_URL: 默认视觉 API 地址
 //     - VISION_KEY: 默认视觉 API Key
 //     - VISION_MODEL: 默认视觉模型名称
@@ -427,7 +427,7 @@
 //   - syncThemeColorControls(color): 同步外观页主题色滑条、数值文字和预览色块
 //   - applyAppearance(): 应用壁纸、主题、字体大小、主题色和自定义 CSS，并同步主题控件状态
 //   - renderCssPresetMenu(): 渲染 CSS 样式预设下拉菜单
-//   - syncCssPresetSelection(): 空 CSS 走初始仿微信主题时，同步选中对应的预设
+//   - syncCssPresetSelection(): 空 CSS 走初始绿泡泡主题时，同步选中对应的预设
 //   - toggleTheme(newTheme): 切换主题并保存设置
 //   - switchView(viewName): 在桌面、联系人列表、聊天页、探索页、朋友圈页等视图之间切换，并记录二级页返回来源
 //   - renderVisionPresetMenu(): 渲染视觉模型预设下拉菜单
@@ -635,7 +635,7 @@
 //     - handleSaveCssPreset(): 保存用户自定义CSS为一个命名预设
 //     - handleLoadCssPreset(index): 根据索引加载指定的CSS预设内容到编辑框并应用
 //     - handleDeleteCssPreset(): 删除选中的CSS预设
-//     - handleRestoreInitialCss(): 把最初那份仿微信主题填回编辑框并立即生效
+//     - handleRestoreInitialCss(): 把最初那份绿泡泡主题填回编辑框并立即生效
 //     - handleCopyCssForAi(): 复制当前 CSS 和一段 AI 修改说明
 //     - prefixUserCss(rawCss): 为用户自定义的CSS规则自动添加'body.custom-mode '前缀以提高样式权重
 
@@ -2661,7 +2661,7 @@ const UI = {
         const WALLPAPER = settings.WALLPAPER || CONFIG.DEFAULT.WALLPAPER;
         const THEME = settings.THEME || CONFIG.DEFAULT.THEME; 
         const FONT_SIZE = settings.FONT_SIZE || CONFIG.DEFAULT.FONT_SIZE;
-        // ★ 用户没写过 CSS 时，自定义模式直接套上初始仿微信主题；写过则完全不动。
+        // ★ 用户没写过 CSS 时，自定义模式直接套上初始绿泡泡主题；写过则完全不动。
         const CUSTOM_CSS = settings.CUSTOM_CSS || CONFIG.INITIAL_CUSTOM_CSS || CONFIG.DEFAULT.CUSTOM_CSS;
         const CUSTOM_BASE_THEME = settings.CUSTOM_BASE_THEME || CONFIG.DEFAULT.CUSTOM_BASE_THEME || 'dark';
         const THEME_COLOR = this.getThemeColorSettings(settings);
@@ -2767,7 +2767,7 @@ const UI = {
         const currentCss = STATE.settings.CUSTOM_CSS || CONFIG.INITIAL_CUSTOM_CSS;
         if (currentCss !== CONFIG.INITIAL_CUSTOM_CSS) return;
 
-        const initialName = CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME || '仿微信（VX）';
+        const initialName = CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME || '绿泡泡';
         const presets = Array.isArray(STATE.settings.CSS_PRESETS) ? STATE.settings.CSS_PRESETS : [];
         const initialIndex = presets.findIndex(preset => preset
             && preset.name === initialName
@@ -12364,7 +12364,7 @@ const App = {
 
         UI.applyAppearance();
 
-        // CSS 输入框回显：空 CSS 时和预览保持一致，显示初始仿微信主题。
+        // CSS 输入框回显：空 CSS 时和预览保持一致，显示初始绿泡泡主题。
         const cssInput = document.getElementById('custom-css-input');
         if (cssInput) {
             cssInput.value = s.CUSTOM_CSS || CONFIG.INITIAL_CUSTOM_CSS || '';

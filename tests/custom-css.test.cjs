@@ -136,7 +136,7 @@ test('空输入直接返回空字符串', () => {
     assert.equal(prefix(123), '');
 });
 
-test('初始仿微信主题包含类名说明和关键选择器', () => {
+test('初始绿泡泡主题包含类名说明和关键选择器', () => {
     const context = { CONFIG: {} };
     vm.createContext(context);
     vm.runInContext(
@@ -145,8 +145,8 @@ test('初始仿微信主题包含类名说明和关键选择器', () => {
     );
 
     const css = context.CONFIG.INITIAL_CUSTOM_CSS;
-    assert.equal(context.CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME, '仿微信（VX）');
-    assert.ok(css.includes('仿微信（VX）'));
+    assert.equal(context.CONFIG.INITIAL_CUSTOM_CSS_PRESET_NAME, '绿泡泡');
+    assert.ok(css.includes('绿泡泡'));
     assert.ok(css.includes('.message-wrapper'));
     assert.ok(css.includes('.msg-time'));
 

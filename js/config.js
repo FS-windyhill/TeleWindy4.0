@@ -22,7 +22,7 @@
 //     - AGENT_SKILL_ROUTER_ENABLED / AGENT_SKILL_ROUTER_API_PRESET_INDEX: Agent 工具路由器开关和模型预设
 //     - MOMENTS_SETTINGS: 心迹页面默认设置
 //   - SYSTEM_PROMPT: 默认系统提示词
-//   - INITIAL_CUSTOM_CSS: 初始自定义主题（仿微信/VX），由 js/css-presets.js 挂到 CONFIG 上
+//   - INITIAL_CUSTOM_CSS: 初始自定义主题（绿泡泡），由 js/css-presets.js 挂到 CONFIG 上
 // =========================================
 
 const CONFIG = {
@@ -164,7 +164,7 @@ const CONFIG = {
 
         CUSTOM_CSS: '',
         CSS_PRESETS: [],
-        // ★ 初始仿微信主题只注入一次；用户删掉后不再自动加回来。
+        // ★ 初始绿泡泡主题只注入一次；用户删掉后不再自动加回来。
         CSS_PRESETS_SEEDED: false,
         // ★ 图片处理方式：老用户默认沿用“视觉 API 转文字”，避免升级后误把图片发给纯文字模型。
         IMAGE_API_MODE: 'separate',
