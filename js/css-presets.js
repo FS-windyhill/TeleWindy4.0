@@ -14,7 +14,8 @@ CONFIG.INITIAL_CUSTOM_CSS = String.raw`/* ======================================
    消息行：.message-wrapper（整行）、.message-wrapper.user / .ai
    气泡：.message-content、.message-bubble
    头像：.avatar-container、.avatar-img、.avatar-text
-   时间戳：.msg-time（本主题里选择隐藏；想显示可以删掉 display:none）
+   时间戳：.msg-time（本主题里选择隐藏；想显示就把 display:none
+           改成 block，内容层已调好，会紧贴气泡）
    头部：.app-header、.chat-header、.chat-header-profile、
          .chat-header-avatar、.chat-header-meta、#chat-title、
          #typing-status、.presence-dot、.presence-text
@@ -58,6 +59,7 @@ CONFIG.INITIAL_CUSTOM_CSS = String.raw`/* ======================================
    ========================================= */
 .message-wrapper .message-content {
     max-width: 73%;           /* 限制气泡最大宽度 */
+    flex: 0 1 auto;           /* 内容跟气泡同宽，时间戳才能紧贴气泡 */
     display: flex;
     flex-direction: column;
     overflow: visible !important; /* 关键：允许小尾巴溢出显示 */
