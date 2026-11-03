@@ -425,6 +425,25 @@ body.dark-mode .chat-header-avatar {
 
 
 
+/*  图片不要被气泡包裹 */
+.message-bubble:has(img) {
+    background: transparent !important;  /* 背景变透明 */
+    border: none !important;             /* 边框去掉 */
+    box-shadow: none !important;         /* 阴影去掉 */
+    -webkit-backdrop-filter: none !important; /* 去毛玻璃 */
+    backdrop-filter: none !important;
+    padding: 0 !important;               /* 内边距归零 */
+}
+
+
+.message-bubble:has(img) img {
+    border-radius: 13px; /* 给图片本身一点圆角，iOS 风拉满 */
+    display: block;      /* 消除图片底部自带的几像素空隙 */
+    max-width: 100%;
+}
+
+/*  图片不要被气泡包裹END */
+
 .message-wrapper.user .message-bubble {
     background: var(--message-bg-user);
     border: 1.2px solid var(--message-border-user);
@@ -488,6 +507,12 @@ body.dark-mode .chat-header-avatar {
     from { opacity: 0; }
     to   { opacity: 1; }
 }
+
+
+
+
+
+
 
 /* ======== 2. app-container 现在就是真正的 flex 爸爸  动效 页面切换 ======== */
 #app-container {
