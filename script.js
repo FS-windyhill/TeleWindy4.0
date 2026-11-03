@@ -3718,6 +3718,10 @@ const UI = {
             } 
             // ★ 分支 B：正常图片
             else {
+                // 纯图片气泡显式打标，CSS 不再用 :has() 猜结构（沿用 has-code-block 的约定）。
+                // 只标“无文字”的图片气泡：当前所有调用点传的 text 都是空串，
+                // 万一以后出现图文混排气泡，文字气泡的外观不会被一起剥掉。
+                if (!text) wrapper.classList.add('has-image');
                 const imgEl = document.createElement('img');
                 imgEl.src = imageUrl;
                 imgEl.className = 'chat-message-image'; // 使用之前 CSS 定义的类

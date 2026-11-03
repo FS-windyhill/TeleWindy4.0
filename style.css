@@ -19,6 +19,10 @@
     --btn-color: rgba(245, 245, 245, 0.75);
     --btn-border-color: #a9a9a9;
     --app-font-size: 17px;
+    /* 多选模式选中环颜色（文字气泡、图片气泡共用） */
+    --select-ring: #3770ff;
+    /* 聊天图片圆角：图片本身与纯图片气泡共用，保证选中环和图片边缘同心 */
+    --chat-image-radius: 13px;
 
 }
 
@@ -426,20 +430,43 @@ body.dark-mode .chat-header-avatar {
 
 
 /*  图片不要被气泡包裹 */
-.message-bubble:has(img) {
+/* 纯图片气泡由 JS 显式打标（.message-wrapper.has-image，沿用 has-code-block 的约定），
+   不用 :has() 猜结构（也省掉 :has() 的 WebView 版本门槛）。
+   用 4 个类（0,4,0）而不是 3 个：用户/AI 气泡的基础规则
+   .message-wrapper.user .message-bubble 本身就是 (0,3,0)，和 3 个类的写法同权重，
+   它又写在后面，会按源顺序把 padding、背景压回来。
+   background/border/padding 带 !important 是职责边界，不是抢优先级：
+   自定义 CSS 会被 js/custom-css.js 统一加 body.custom-mode 前缀（(0,4,1)，注入在 head 末尾），
+   若这层不带 !important，图片气泡的底和 padding 在自定义主题下会被整块压回来。
+   只有 box-shadow 不带 !important——它是“去掉主题阴影”，而不是“和主题抢阴影”：
+   主题想给气泡加阴影就让它在图片气泡上生效，选中时再由 .selected 的 !important 覆盖。 */
+.message-wrapper.has-image .message-content .message-bubble {
     background: transparent !important;  /* 背景变透明 */
     border: none !important;             /* 边框去掉 */
-    box-shadow: none !important;         /* 阴影去掉 */
-    -webkit-backdrop-filter: none !important; /* 去毛玻璃 */
-    backdrop-filter: none !important;
+    box-shadow: none;                    /* 阴影去掉；选中环由 .selected（带 !important）写回 */
     padding: 0 !important;               /* 内边距归零 */
+    /* 圆角跟图片一致：有些主题会把气泡圆角改小（绿泡泡是 6px），
+       气泡本身又透明，圆角不一致时选中环的角会和图片边缘错开。 */
+    border-radius: var(--chat-image-radius);
+    /* 深色模式 body.dark-mode .message-wrapper.user/.ai .message-bubble 是 (0,4,1)，
+       比本条高一级，且写在 3131/3142 更靠后；去掉 !important 会让 blur(5px) 回来。 */
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
 }
 
 
-.message-bubble:has(img) img {
-    border-radius: 13px; /* 给图片本身一点圆角，iOS 风拉满 */
+.message-bubble > img.chat-message-image {
+    border-radius: var(--chat-image-radius); /* 给图片本身一点圆角，iOS 风拉满 */
     display: block;      /* 消除图片底部自带的几像素空隙 */
     max-width: 100%;
+}
+
+/* 正文里的 markdown 图片：同样限宽去空隙，但不碰 .chat-message-image 的既有尺寸规则 */
+.message-bubble img:not(.chat-message-image) {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: var(--chat-image-radius);
 }
 
 /*  图片不要被气泡包裹END */
@@ -5210,7 +5237,12 @@ body.dark-mode .multi-select-bar {
 */
 .select-mode .message-group .message-bubble.selected {
     opacity: 1;
-    box-shadow: 0 0 0 2px #3770ff;
+    /* 选中环走 box-shadow，并带 !important：自定义 CSS 会被加上 body.custom-mode 前缀
+       （(0,4,1)，注入在 head 末尾），用户只要在主题里给气泡写过 box-shadow，
+       不带 !important 的环就会被压掉；选中态是交互反馈，不能输给主题样式。
+       代价是这一条也跟着进了 !important，属于有边界的最小军备竞赛：
+       它只影响 .selected 这一个状态，不改变任何非选中气泡的外观。 */
+    box-shadow: 0 0 0 2px var(--select-ring) !important;
     position: relative;
     z-index: 1;
 }
@@ -13215,7 +13247,7 @@ body.dark-mode .offline-card-divider {
     -webkit-user-select: none;
 }
 #offline-chat-messages.select-mode .offline-msg-card.selected {
-    box-shadow: 0 0 0 2px #3770ff;
+    box-shadow: 0 0 0 2px var(--select-ring);
 }
 
 /* reduced motion：关掉卡片入场动画 */
