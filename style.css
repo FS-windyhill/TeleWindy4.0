@@ -18,7 +18,7 @@
     --primary-btn-text: hsl(var(--theme-color-h), var(--theme-color-s), var(--theme-color-l));
     --btn-color: rgba(245, 245, 245, 0.75);
     --btn-border-color: #a9a9a9;
-    --app-font-size: 17px;#edit-prompt
+    --app-font-size: 17px;
     /* 多选模式选中环颜色（文字气泡、图片气泡共用） */
     --select-ring: #3770ff;
     /* 聊天图片圆角：图片本身与纯图片气泡共用，保证选中环和图片边缘同心 */
@@ -5242,7 +5242,7 @@ body.dark-mode .multi-select-bar {
        不带 !important 的环就会被压掉；选中态是交互反馈，不能输给主题样式。
        代价是这一条也跟着进了 !important，属于有边界的最小军备竞赛：
        它只影响 .selected 这一个状态，不改变任何非选中气泡的外观。 */
-    box-shadow: 0 0 0 2px var(--select-ring) !important;
+    box-shadow: 0 0 0 2px var(--select-ring, #3770ff) !important;
     position: relative;
     z-index: 1;
 }
