@@ -18,7 +18,7 @@
     --primary-btn-text: hsl(var(--theme-color-h), var(--theme-color-s), var(--theme-color-l));
     --btn-color: rgba(245, 245, 245, 0.75);
     --btn-border-color: #a9a9a9;
-    --app-font-size: 17px;
+    --app-font-size: 17px;#edit-prompt
     /* 多选模式选中环颜色（文字气泡、图片气泡共用） */
     --select-ring: #3770ff;
     /* 聊天图片圆角：图片本身与纯图片气泡共用，保证选中环和图片边缘同心 */
@@ -1246,7 +1246,7 @@ body.dark-mode button#btn-close-m-write.cancel-btn{
 /* =======人设=========== */
 #edit-prompt {
     width: 100%;
-    height: 200px;           /* 默认大一点 */
+    height: 350px;           /* 默认大一点 */
     min-height: 100px;       /* 拖小有底线 */
     resize: vertical;        /* 只允许垂直拖拽，出现右下角小柄 */
     border-radius: 8px;
