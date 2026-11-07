@@ -3664,7 +3664,7 @@ body.dark-mode .contact-menu-panel button[data-action="cancel"] {
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     min-width: 200px;       /* 最小别太小，防止挤爆 */
-    max-width: 240px;       /* 最大宽度限制 ← 重点防变胖 */
+    max-width: 220px;       /* 最大宽度限制 ← 重点防变胖 */
     border-radius: 16px;   /* 更大的圆角 */
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
     overflow: hidden;      /* 保证子元素不溢出圆角 */
@@ -3850,7 +3850,6 @@ body.dark-mode .menu-panel {
     position: relative;               /* 改成 relative 或者 fixed 都行 */
     background: rgba(115, 115, 115, 0.6);  /* 或者 #fff */
     border-radius: 12px;
-    min-width: 200px;
     z-index: 2;                       /* 关键：面板在遮罩上面！ */
     text-align: center;
 }
@@ -5161,13 +5160,13 @@ body.dark-mode .css-copy-btn:hover {
     bottom: 7px;
     left: 50%;
     transform: translateX(-50%);
-    width: 85%;
+    width: 88%;
     max-width: 600px;
     background-color: rgba(105, 105, 105, 0.6); /* 深色背景 */
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     border-radius: 16px;
-    padding: 12px 20px;
+    padding: 12px 16px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -5179,7 +5178,7 @@ body.dark-mode .css-copy-btn:hover {
 .select-count {
     color: #ffffff;
     font-weight: bold;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
 }
 
 .multi-select-bar.hidden {
@@ -5198,14 +5197,14 @@ body.dark-mode .multi-select-bar {
 
 .select-actions {
     display: flex;
-    gap: 6px;
+    gap: 8px;
 }
 
 .action-btn {
     padding: 6px 10px;
     border: none;
     border-radius: 8px;
-    font-size: 1rem;
+    font-size: 0.9rem;
     cursor: pointer;
     font-weight: 500;
     transition: transform 0.1s;
