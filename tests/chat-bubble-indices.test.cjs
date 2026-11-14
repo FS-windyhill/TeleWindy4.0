@@ -129,6 +129,49 @@ test('模型历史同时过滤隐藏文字、图片描述和纯图片占位', ()
     assert.equal(HistoryVisibility.buildVisibleMessage({ role: 'assistant', content: '公开\n\n<think>未闭合的秘密' }).content, '公开');
 });
 
+// ★ 日期条只属于显示层：覆盖同日去重、跨天、临时提示和分页重建，避免污染消息身份。
+test('聊天日期按当前显示范围分隔，未知日期和临时提示不猜日期', () => {
+    const { UI } = harness();
+    const makeList = () => ({ children: [], lastElementChild: null, appendChild(node) {
+        node.previousElementSibling = this.lastElementChild;
+        this.lastElementChild = node;
+        this.children.push(node);
+    } });
+    const append = timestamp => {
+        const group = { className: 'message-group', dataset: { msgIndex: '7' } };
+        UI.appendChatMessageGroup(group, timestamp);
+        assert.equal(group.dataset.msgIndex, '7');
+    };
+    const dates = () => UI.els.chatMsgs.children.filter(node => node.className === 'chat-date-divider');
+    UI.els.chatMsgs = makeList();
+    append('2026-11-14 09:00');
+    append(null);
+    append('2026-11-14 23:59');
+    append('2026-11-15 00:01');
+    assert.deepEqual(dates().map(node => node.textContent), ['2026-11-14', '2026-11-15']);
+    assert.ok(dates().every(node => node.dataset.msgIndex === undefined));
+
+    // ★ 加载更多时列表会重建；同一天的新旧分页合并后只保留一个日期条。
+    UI.els.chatMsgs = makeList();
+    append('08:00');
+    assert.equal(dates().length, 0);
+    append('2026-11-14 08:30');
+    append('2026-11-14 09:00');
+    assert.equal(dates().length, 1);
+});
+
+test('聊天日期拒绝无效日历日期，保留消息记录中的日期', () => {
+    const { UI } = harness();
+    for (const raw of [null, '', '09:00', 'Feb.30 09:00', 'Foo.14 09:00', '2026-02-30 09:00', '2026-13-01 09:00']) {
+        assert.equal(UI.getChatDateKey(raw), '');
+    }
+    assert.equal(UI.getChatDateKey('2028-02-29 00:01'), '2028-02-29');
+    assert.equal(UI.getChatDateKey('Nov.14 23:47'), '11-14');
+    assert.equal(UI.getChatDateKey('Nov.15 00:47'), '11-15');
+    assert.equal(UI.getChatDateKey('Feb.29 09:00'), '02-29');
+    assert.equal(UI.getChatDateKey('2026-11-14T23:59:00-08:00'), '2026-11-14');
+});
+
 // ★ 完整加载聊天页对象，测试真正由 createSingleBubble 写入的 DOM 身份字段。
 function harness() {
     const element = () => ({ style: {}, dataset: {}, className: '',

@@ -3620,6 +3620,50 @@ const UI = {
         return { displayParts, sourcePartCount: rawParts.length };
     },
 
+    // ★★★ 聊天日期分隔：只读取消息已有日期，不给缺少日期的旧记录猜年份 ★★★
+    getChatDateKey(timestampRaw) {
+        // ★ 旧版只保存 Nov.14 23:47，不含年份；仍显示月日分隔，但不能拿当前年份补历史。
+        const legacy = typeof timestampRaw === 'string'
+            ? timestampRaw.match(/^([A-Z][a-z]{2})\.(\d{1,2})(?:\s|$)/) : null;
+        if (legacy) {
+            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const month = months.indexOf(legacy[1]) + 1;
+            const day = Number(legacy[2]);
+            // ★ 未知年份允许 2 月 29 日，其余日期按实际月份校验。
+            const maxDays = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+            return month && day > 0 && day <= maxDays[month - 1]
+                ? `${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : '';
+        }
+        const match = typeof timestampRaw === 'string'
+            ? timestampRaw.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T]|$)/)
+            : null;
+        if (!match) return '';
+        const [, year, month, day] = match;
+        const date = new Date(`${year}-${month}-${day}T00:00:00Z`);
+        // ★ 拒绝 2 月 30 日等会被 Date 自动进位的日期；直接保留记录中的日历日期，避免时区偏移。
+        return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === match[0].slice(0, 10)
+            ? `${year}-${month}-${day}` : '';
+    },
+
+    appendChatMessageGroup(group, timestampRaw) {
+        const chatMsgs = this.els.chatMsgs;
+        const dateKey = this.getChatDateKey(timestampRaw);
+        if (dateKey) {
+            // ★ 从当前已显示的列表寻找上一个有效日期；分页重绘后首条自然补日期，临时失败提示不打断同一天。
+            let previous = chatMsgs.lastElementChild;
+            while (previous && !previous.dataset.chatDate) previous = previous.previousElementSibling;
+            if (!previous || previous.dataset.chatDate !== dateKey) {
+                const divider = document.createElement('div');
+                divider.className = 'chat-date-divider';
+                divider.textContent = dateKey;
+                chatMsgs.appendChild(divider);
+            }
+            // ★ 日期仅挂在 DOM 上，不占消息索引、不改历史，也不进入发送给 AI 的上下文。
+            group.dataset.chatDate = dateKey;
+        }
+        chatMsgs.appendChild(group);
+    },
+
     createAgentCallPanel(markedIntents, contactName, shouldAnimate = false) {
         const intents = (markedIntents || []).filter(Boolean);
         if (!intents.length) return null;
@@ -4103,7 +4147,10 @@ const UI = {
                 group.appendChild(imgBubble);
             }
 
-            chatMsgs.appendChild(group);
+            // ★ 部分导入的旧记录只在正文开头保存时间；仅读取约定的时间前缀，不扫描聊天正文猜日期。
+            const contentTimestamp = String(typeof msg === 'string' ? msg : msg.content || '')
+                .match(/^\[((?:\d{4}-\d{2}-\d{2}|[A-Z][a-z]{2}\.\d{1,2})\s\d{2}:\d{2})\]/)?.[1];
+            this.appendChatMessageGroup(group, this.getChatDateKey(msgTime) ? msgTime : contentTimestamp);
         }
 
         // ============================================
@@ -4415,7 +4462,7 @@ const UI = {
         group.className = 'message-group';
         group.dataset.sender = sender;
         group.appendChild(clone);
-        this.els.chatMsgs.appendChild(group);
+        this.appendChatMessageGroup(group, timestampRaw);
 
         this.scrollToBottom();
     },
@@ -4600,7 +4647,7 @@ const UI = {
         group.messageRef = waterfallRecord;
         if (waterfallRecord?.messageId) group.dataset.messageId = String(waterfallRecord.messageId);
 
-        this.els.chatMsgs.appendChild(group);
+        this.appendChatMessageGroup(group, timestamp);
         
 
 
@@ -11240,7 +11287,7 @@ const App = {
 
                 // --- 修复点结束 ---
 
-                UI.els.chatMsgs.appendChild(group);
+                UI.appendChatMessageGroup(group, timestamp);
                 UI.scrollToBottom();
 
                 // 3. UI 清理 (清空输入框和预览)
