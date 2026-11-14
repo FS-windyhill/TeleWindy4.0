@@ -10174,23 +10174,42 @@ body.dark-mode .agent-api-select {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-height: 0;
+    /* ★ TODO/心笺共用一个内容滚动区，长列表和失败明细一起滚动，执行按钮始终留在外面。 */
+    max-height: min(50vh, 440px);
+    max-height: min(50dvh, 440px);
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
 }
 
 .agent-suggestion-title {
     font-weight: 700;
+    flex-shrink: 0;
 }
 
 .agent-suggestion-list {
     display: flex;
     flex-direction: column;
     gap: 7px;
-    /* ★ Agent 不限制心笺数量，超过屏幕高度后只让选项区内部滚动。 */
-    max-height: min(42vh, 360px);
-    overflow-y: auto;
+    /* ★ 列表按全部文字自然撑高，不在内层压缩选项或形成第二个滚动区。 */
+    flex: 0 0 auto;
+    min-width: 0;
+}
+
+.agent-suggestion-option.desktop-switch-cell {
+    /* ★ 覆盖通用开关行布局：勾选框保持纵向居中，长文字自然撑高，禁止 flex 压扁后互相重叠。 */
+    flex: 0 0 auto;
+    height: auto;
+    max-height: none;
+    align-items: center;
+    padding-top: 6px;
+    padding-bottom: 6px;
 }
 
 .agent-suggestion-option span {
+    flex: 1;
     min-width: 0;
+    white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 

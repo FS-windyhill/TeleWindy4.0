@@ -17,7 +17,7 @@
 //   - normalizeMemoryText(text): 清理记忆文本，不做字数硬截断
 //   - parseAiMemory(rawText): 解析并校验 AI 记忆
 //   - buildGenerationMessages(contact, dateKey): 生成请求 AI 总结记忆的 messages
-//   - getInjectRecords(memory, now): 读取最近 N 天 + 手动长期记住的可注入记录
+//   - getInjectRecords(memory, now): 读取最近 N 个有记忆的日期 + 手动长期记住的可注入记录
 //   - buildChatPrompt(contactId, now): 生成聊天注入的长期记忆
 // =========================================
 
@@ -253,28 +253,31 @@ const CharacterMemory = {
     getInjectRecords(memory, now = new Date()) {
         if (!memory || memory.enabled !== true) return [];
         const injectDays = Math.max(1, Number.parseInt(memory.injectDays, 10) || this.defaultInjectDays);
-        const today = this.fromDateKey(this.getTodayKey(now));
-        const minDate = this.addDays(today, -injectDays);
-        const maxDate = this.addDays(today, -1);
+        const todayKey = this.getTodayKey(now);
+        // ★ 先去掉空文本，再按有内容的日期计数；断聊的自然日不占注入名额。
+        const records = (memory.records || [])
+            .filter(record => record && /^\d{4}-\d{2}-\d{2}$/.test(record.dateKey)
+                && this.toDateKey(this.fromDateKey(record.dateKey)) === record.dateKey)
+            .map(record => ({
+                ...record,
+                memories: (Array.isArray(record.memories) ? record.memories : [])
+                    .filter(item => String(typeof item === 'string' ? item : item?.text || '').trim())
+            }))
+            .filter(record => record.memories.length);
+        const recentDates = new Set([...new Set(records
+            .filter(record => record.dateKey < todayKey)
+            .map(record => record.dateKey))]
+            .sort((a, b) => b.localeCompare(a))
+            .slice(0, injectDays));
 
-        return (memory.records || [])
-            // ★ 最近 N 天照常全量注入；更早日期只带用户手动“长期记住”的单条记忆。
-            .filter(record => {
-                if (!record || !Array.isArray(record.memories) || !record.memories.length) return false;
-                const date = this.fromDateKey(record.dateKey);
-                const inRecentRange = date >= minDate && date <= maxDate;
-                return inRecentRange || record.memories.some(item => item && typeof item === 'object' && item.alwaysInject === true);
-            })
-            .map(record => {
-                const date = this.fromDateKey(record.dateKey);
-                const inRecentRange = date >= minDate && date <= maxDate;
-                return {
-                    ...record,
-                    memories: inRecentRange
-                        ? record.memories
-                        : record.memories.filter(item => item && typeof item === 'object' && item.alwaysInject === true)
-                };
-            })
+        // ★ 最近 N 个有记忆的日期全量注入；其余日期仍只放行长期记住的单条，不重复追加。
+        return records.map(record => ({
+            ...record,
+            memories: recentDates.has(record.dateKey)
+                ? record.memories
+                : record.memories.filter(item => item && typeof item === 'object' && item.alwaysInject === true)
+        }))
+            .filter(record => record.memories.length)
             .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
     },
 
@@ -283,7 +286,6 @@ const CharacterMemory = {
         const records = this.getInjectRecords(memory, now);
         if (!records.length) return '';
 
-        const injectDays = Math.max(1, Number.parseInt(memory.injectDays, 10) || this.defaultInjectDays);
         const lines = [
             '# 过往记忆',
             `以下是你近期的记忆内容。`

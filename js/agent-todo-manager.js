@@ -6,7 +6,7 @@
 // 函数目录：
 //   - getTodayKey(now): 获取今天日期 key
 //   - buildCapabilityPrompt(): 生成注入主模型角色描述的 TODO 能力说明
-//   - buildTodoSnapshot(now): 给 worker model 的精简 TODO 列表
+//   - buildTodoSnapshot(now, intentText): 按近期待办和本轮目标筛选 worker model 的 TODO 列表
 //   - buildExecutorMessages(contact, userText, now, sourceLabel): 生成 TODO 管理执行请求 messages，可标记输入来自用户消息或角色动作意图
 //   - buildPostSuggestionMessages(contact, assistantText, now): 生成回复后 TODO 建议请求 messages
 //   - extractJson(rawText): 从 worker model 返回里抽出 JSON
@@ -71,21 +71,39 @@ const AgentTodoManager = {
         return '你能管理对方的 todo 日程。当你想为对方新增、修改、完成或删除一件日程时，把你的意图放进『』内，如『把“论文整理”设为已完成』或『加一个“吃肯德基”的计划』，todo系统会为你解析并执行';
     },
 
-    buildTodoSnapshot(now = new Date()) {
+    buildTodoSnapshot(now = new Date(), intentText = '') {
         const todayKey = this.getTodayKey(now);
+        const recentStart = this.addDays(todayKey, -10);
+        const intentKey = this.normalizeMatchText(intentText);
+        const quotedTargets = Array.from(String(intentText).matchAll(/[“「\"']([^”」\"']+)[”」\"']/g), match => this.normalizeMatchText(match[1]))
+            .filter(text => text.length >= 2);
+        const allRequested = /全部|所有|一切/.test(intentText);
+        const completedRequested = /已完成|做完的|完成过/.test(intentText);
+        const cancelledRequested = /已取消|取消的|已删除|删除的/.test(intentText);
         return (STATE.todoPlans || [])
             .filter(item => item && item.text)
-            // ★ 只给 Agent 今天和未来的 TODO，避免过往已完成/已取消事项把注意力和 token 都拖走。
-            .filter(item => (this.isDateKey(item.dateKey) ? item.dateKey : todayKey) >= todayKey)
+            .filter(item => {
+                // ★ 默认只给近 10 天及未来的未完成任务，避免上古/已完成记录每轮占用上下文。
+                const active = item.done !== true && item.cancelled !== true;
+                const dateKey = this.isDateKey(item.dateKey) ? item.dateKey : todayKey;
+                if (active && dateKey >= recentStart) return true;
+                // ★ 明确的批量范围才扩展到历史；这是候选范围筛选，不限制实际操作条数。
+                if (allRequested && (active || (completedRequested && item.done === true)
+                    || (cancelledRequested && item.cancelled === true))) return true;
+                // ★ 旧任务仍在本地保留：点名原文、ID 或引号内的名称片段时按需补入，含同名候选供消歧。
+                const textKey = this.normalizeMatchText(item.text);
+                return Boolean(intentKey && ((item.id && String(intentText).includes(item.id))
+                    || (textKey && intentKey.includes(textKey))
+                    || quotedTargets.some(target => textKey.includes(target))));
+            })
             .sort((a, b) => {
                 if (a.done !== b.done) return a.done ? 1 : -1;
                 if (a.dateKey !== b.dateKey) return String(a.dateKey).localeCompare(String(b.dateKey));
                 return (a.createdAt || 0) - (b.createdAt || 0);
             })
-            .slice(0, 80)
             .map(item => ({
                 id: item.id,
-                text: this.cleanText(item.text, 80),
+                text: this.cleanText(item.text, Infinity),
                 dateKey: item.dateKey || todayKey,
                 done: item.done === true,
                 cancelled: item.cancelled === true,
@@ -119,7 +137,7 @@ const AgentTodoManager = {
             startTime: this.isTimeValue(raw.startTime) ? raw.startTime : '',
             endTime: this.isTimeValue(raw.endTime) ? raw.endTime : '',
             targetTodoId: this.cleanText(raw.targetTodoId || raw.todoId || raw.id || '', 80),
-            targetText: this.cleanText(raw.targetText || raw.matchText || raw.oldText || '', 120),
+            targetText: this.cleanText(raw.targetText || raw.matchText || raw.oldText || '', Infinity),
             newText: this.cleanText(raw.newText || '', 120),
             newDateKey: this.isDateKey(raw.newDateKey) ? raw.newDateKey : '',
             reason: this.cleanText(raw.reason || '', 160)
@@ -167,9 +185,10 @@ const AgentTodoManager = {
             '- 某事项需要改时间，输出 MANAGE_TODO 且 action=retime。',
             '- 删除、取消、不需要某个事项，输出 MANAGE_TODO 且 action=cancel。',
             '- 找不到唯一目标、信息不足，选 ASK_CONFIRMATION。',
-            '- 不确定日期时，放在今天。',
+            '- 只有新增任务未说明日期时，才默认今天；修改已有任务未说明原日期时，dateKey 留空。',
             '- 不要编造用户没有说的日期、任务或目标。',
-            '- 多个事项拆成多个 operations，不要合并。',
+            '- 列表是本轮候选，并非全部历史；未匹配到时说明本轮未找到候选，请补充原任务名称或 ID，不要断言历史中不存在。',
+            '- 多个事项拆成多个 operations，不要合并，不限制操作条数，必须完整返回。',
             '',
             'JSON 格式：',
             '{"intent":"MANAGE_TODO","operations":[{"action":"create","text":"继续写论文","dateKey":"2026-06-10","startTime":"","endTime":""},{"action":"complete","targetText":"买东方树叶","dateKey":"2026-06-10"},{"action":"reschedule","targetText":"喝茶","dateKey":"2026-06-10","newDateKey":"2026-06-29"}],"confirmation":{"message":""}}',
@@ -177,7 +196,9 @@ const AgentTodoManager = {
             '字段说明：',
             '- create 填 text/dateKey/startTime/endTime；没有明确时间就留空 startTime/endTime。',
             '- complete/cancel/restore/reschedule/rename/retime 必须填写 targetText 或 targetTodoId。',
-            '- 能从现有 TODO 里确定 id 时，优先填写 targetTodoId。',
+            '- 从现有 TODO 选择目标时，优先原样复制 targetTodoId，不得编造 ID；targetText 使用任务原文。',
+            '- dateKey 是目标任务的原日期，newDateKey 才是改期后的日期，不得混用。',
+            '- 批量操作逐项选择现有 TODO 并返回独立 operation，不要把多个任务名拼成一个 targetText。',
             '- reschedule 填 newDateKey；rename 填 newText；retime 填 startTime/endTime。',
             '- ASK_CONFIRMATION 时 confirmation.message 写给前端确认/提示用的一句话。',
             '- 不需要的对象字段留空字符串。'
@@ -191,8 +212,8 @@ const AgentTodoManager = {
             '【当前角色】',
             contact?.name || '未命名角色',
             '',
-            '【现有 TODO】',
-            JSON.stringify(this.buildTodoSnapshot(now), null, 2),
+            '【现有 TODO（近10天及未来未完成任务，另含本轮点名或明确批量范围的历史候选）】',
+            JSON.stringify(this.buildTodoSnapshot(now, userText), null, 2),
             '',
             `【${sourceLabel}】`,
             userText || ''
@@ -224,11 +245,11 @@ const AgentTodoManager = {
             '规则：',
             '- 回复里建议了一个可执行事项或 TODO 调整，输出 SUGGEST_TODO_MANAGE。',
             '- 闲聊、泛泛建议、角色语气承诺，选 NONE。',
-            '- 不确定日期时，就放在今天。',
+            '- 只有新增任务未说明日期时，才默认今天；修改已有任务未说明原日期时，dateKey 留空。',
             '- 不要编造回复里没有的任务、日期或时间。',
             '- complete/cancel/restore/reschedule/rename/retime 只有能匹配唯一现有 TODO 时才输出。',
-            '- 多个事项拆成多个 operations，不要合并。',
-            '- 最多返回 5 项操作。',
+            '- 多个事项拆成多个 operations，不要合并，不限制操作条数，必须完整返回。',
+            '- 完整返回所有明确的操作，不限制条数，不得遗漏批量任务。',
             '',
             'JSON 格式：',
             '{"intent":"SUGGEST_TODO_MANAGE","operations":[{"action":"create","text":"导出发票","dateKey":"2026-06-10","startTime":"21:00","endTime":""},{"action":"cancel","targetText":"去图书馆","dateKey":"2026-06-10"},{"action":"reschedule","targetText":"喝茶","dateKey":"2026-06-10","newDateKey":"2026-06-29"}],"confirmation":{"message":""}}',
@@ -236,7 +257,9 @@ const AgentTodoManager = {
             '字段说明：',
             '- NONE 时 operations 为空数组。',
             '- create 的 text 写清晰简短的任务名，不要长篇大论。',
-            '- 能从现有 TODO 里确定 id 时，优先填写 targetTodoId。',
+            '- 从现有 TODO 选择目标时，优先原样复制 targetTodoId，不得编造 ID；targetText 使用任务原文。',
+            '- dateKey 是目标任务的原日期，newDateKey 才是改期后的日期，不得混用。',
+            '- 批量操作逐项选择现有 TODO 并返回独立 operation，不要把多个任务名拼成一个 targetText。',
             '- dateKey/newDateKey 必须是 YYYY-MM-DD。',
             '- 没有明确时间就留空 startTime/endTime。'
         ].join('\n');
@@ -250,8 +273,8 @@ const AgentTodoManager = {
             '【当前角色】',
             contact?.name || '未命名角色',
             '',
-            '【现有 TODO】',
-            JSON.stringify(this.buildTodoSnapshot(now), null, 2),
+            '【现有 TODO（近10天及未来未完成任务，另含本轮点名或明确批量范围的历史候选）】',
+            JSON.stringify(this.buildTodoSnapshot(now, assistantText), null, 2),
             '',
             '【角色刚刚回复】',
             assistantText || ''
@@ -321,7 +344,7 @@ const AgentTodoManager = {
     findTodoCandidates(routerResult) {
         const update = routerResult?.update || routerResult || {};
         const matchId = this.cleanText(update.id || update.todoId || update.targetTodoId || '', 80);
-        const matchText = this.cleanText(update.matchText || update.targetText || update.text || update.oldText || '', 80);
+        const matchText = this.cleanText(update.matchText || update.targetText || update.text || update.oldText || '', Infinity);
         const matchTextKey = this.normalizeMatchText(matchText);
         const dateKey = this.isDateKey(update.dateKey) ? update.dateKey : '';
 
@@ -331,7 +354,9 @@ const AgentTodoManager = {
         if (action === 'complete') {
             items = items.filter(item => item.done !== true);
         }
-        if (matchId) items = items.filter(item => item.id === matchId);
+        // ★ ID 是稳定定位依据：角色复述名称或模型猜错原日期，不应再次筛掉已命中的任务。
+        // 无效 ID 不回退猜测别的任务，交给上层明确提示。
+        if (matchId) return items.filter(item => item.id === matchId);
         const beforeDateFilter = items;
         if (dateKey) items = items.filter(item => (item.dateKey || this.getTodayKey()) === dateKey);
         if (matchTextKey) {

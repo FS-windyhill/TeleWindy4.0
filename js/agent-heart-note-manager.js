@@ -17,7 +17,7 @@
 const AgentHeartNoteManager = {
     defaultInjectDays: 3,
     allowedIntents: ['NONE', 'MANAGE_HEART_NOTE', 'ASK_CONFIRMATION'],
-    allowedActions: ['create', 'update', 'delete', 'star', 'unstar'],
+    allowedActions: ['create', 'update', 'cancel', 'star', 'unstar'],
 
     pad(num) {
         return String(num).padStart(2, '0');
@@ -122,6 +122,7 @@ const AgentHeartNoteManager = {
     buildCapabilityPrompt() {
         return [
             '“心笺”是你的记事本，你可以在其中记录任何你想记录备忘的东西，也可修改、删除、星标（星标=长期记住）或取消星标每条“心笺”。',
+            '删除或取消心笺只会将其划掉并停止注入上下文，保留原始记录，用户可在心笺页面恢复。',
             '当你需要操作心笺时，把你的意图放进『』内，例如『添加/删除/星标心笺：XXX』、『修改心笺：XXX，修改为：YYY』，系统会为你解析并执行',
         ].join(' ');
     },
@@ -145,7 +146,8 @@ const AgentHeartNoteManager = {
         const action = String(value || '').trim().toLowerCase();
         if (['create', 'add', 'new'].includes(action)) return 'create';
         if (['update', 'edit', 'modify', 'rename'].includes(action)) return 'update';
-        if (['delete', 'remove'].includes(action)) return 'delete';
+        // ★ 与 TODO 一致：角色的删除意图统一转为取消，兼容旧模型和待执行记录里的 delete。
+        if (['cancel', 'cancelled', 'canceled', 'delete', 'remove'].includes(action)) return 'cancel';
         if (['star', 'pin', 'favorite'].includes(action)) return 'star';
         if (['unstar', 'unpin', 'unfavorite'].includes(action)) return 'unstar';
         return '';
@@ -175,12 +177,13 @@ const AgentHeartNoteManager = {
             '不要输出 Markdown，不要解释，只输出 JSON。',
             '',
             'intent 只能选择：NONE、MANAGE_HEART_NOTE、ASK_CONFIRMATION。',
-            'operation.action 只能选择：create、update、delete、star、unstar。',
+            'operation.action 只能选择：create、update、cancel、star、unstar。',
             '',
             '规则：',
             '- 每个输入意图可以产生一个或多个 operations，不要遗漏。',
             '- create 只填 text。',
-            '- update/delete/star/unstar 必须填 targetNoteId 或 targetText。',
+            '- 删除、移除或取消心笺，输出 action=cancel；只停止注入并保留原始记录。',
+            '- update/cancel/star/unstar 必须填 targetNoteId 或 targetText。',
             '- update 额外填 newText。',
             '- 能从现有心笺确定 id 时优先填 targetNoteId。',
             '- 不要伪造日期、时间、ID 或心笺内容。',

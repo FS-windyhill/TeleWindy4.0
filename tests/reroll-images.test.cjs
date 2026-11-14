@@ -94,7 +94,7 @@ test('主动 reroll 固定原消息之前的上下文，不重复回答晚安，
     assert.ok(!messages[1].content.includes('\\n'));
 });
 for (const mode of ['frontend', 'private_worker', 'server_secret']) {
-    test(`主动 reroll 按当前 ${mode} 请求，立即删除旧消息并用 waterfall 播放新消息`, async () => {
+    test(`主动 reroll 按当前 ${mode} 请求，等待成功后原位替换旧消息`, async () => {
         const contact = chat(); context.STATE.settings.PROACTIVE_MESSAGES.executionMode = mode;
         context.removedAiBubbles = 0; context.waterfalls = [];
         let captured;
@@ -102,19 +102,17 @@ for (const mode of ['frontend', 'private_worker', 'server_secret']) {
             captured = { messages, settings }; return '<think>思考</think>\n[2026-10-09 09:00] 新早安';
         } };
         const rerollPromise = p.reroll(contact);
-        // ★ 和普通聊天一样，请求开始后立即从历史与界面移除旧回复，不等待 API 返回。
-        assert.equal(contact.history.length, 2);
-        assert.equal(contact.history[1].content, '晚安！');
-        assert.equal(context.removedAiBubbles, 1);
+        // ★ API 返回前保留旧正文和气泡；成功后原位替换。
+        assert.equal(contact.history.length, 3);
+        assert.equal(contact.history[2].content, '[2026-10-09 09:00] 旧早安');
+        assert.equal(context.removedAiBubbles, 0);
         await rerollPromise;
         assert.equal(contact.history.length, 3);
         assert.equal(contact.history[2].content, '[2026-10-09 09:00] 新早安');
         assert.equal(contact.history[2].messageId, 'proactive-one');
         assert.equal(contact.history[2].heartbeatRunId, 'heartbeat');
         assert.equal(contact.history[2].eventAt, 3);
-        assert.equal(context.waterfalls.length, 1);
-        assert.equal(context.waterfalls[0][0], '新早安');
-        assert.equal(context.waterfalls[0][2], '2026-10-09 09:00');
+        assert.equal(context.waterfalls.length, 0); // 原位刷新不重复追加气泡
         assert.equal(captured.settings.ASYNC_BACKEND_ENABLED, mode !== 'frontend');
         if (mode !== 'frontend') {
             const reroll = captured.settings.ASYNC_BACKEND_PROACTIVE_REROLL;
@@ -124,15 +122,15 @@ for (const mode of ['frontend', 'private_worker', 'server_secret']) {
         }
         assert.equal(p.settings().localRuntimeByChar.char, undefined);
     });
-}test('主动生成失败或空正文时不恢复已删除的原消息，旧版本也不能回填', async () => {
+}test('主动生成失败或空正文时保留原消息，旧版本也不能回填', async () => {
     context.STATE.settings.PROACTIVE_MESSAGES.executionMode = 'frontend';
     for (const throwsError of [true, false]) {
         const contact = chat();
         context.API = { chat: async () => { if (throwsError) throw new Error('网络失败'); return '<think>只有思考</think>'; } };
         const rerollPromise = p.reroll(contact);
-        assert.equal(contact.history.length, 2);
+        assert.equal(contact.history.length, 3);
         await assert.rejects(() => rerollPromise);
-        assert.equal(contact.history.length, 2);
+        assert.equal(contact.history.length, 3);
         assert.equal(contact.history[1].content, '晚安！');
         assert.equal(contact.proactiveRerollState, undefined);
     }
@@ -209,7 +207,7 @@ test('真实 job 创建入口使用当前 Worker 的角色 reroll 路由，Secre
     assert.equal(captured[0].payload.proactive_object_name, undefined);
     assert.equal(captured[0].payload.proactive_reroll.messageId, 'morning');
 });
-test('后台轮询被打断时保持旧消息已删除，恢复后按 ID 用 waterfall 写回一次', async () => {
+test('后台轮询被打断时保留旧消息，恢复后原位替换', async () => {
     const contact = chat(); context.STATE.settings.PROACTIVE_MESSAGES.executionMode = 'private_worker';
     context.waterfalls = [];
     let savedContext; let scheduled = 0;
@@ -221,13 +219,13 @@ test('后台轮询被打断时保持旧消息已删除，恢复后按 ID 用 wat
     } };
     try {
         await p.reroll(contact);
-        assert.equal(contact.history.length, 2);
+        assert.equal(contact.history.length, 3);
         assert.equal(contact.history[1].content, '晚安！');
         assert.equal(contact.proactiveRerollState.revision, savedContext.revision);
         assert.equal(scheduled, 1);
         assert.equal(await p.applyRerollResult(contact, savedContext, '恢复后的早安', 'job'), true);
         assert.equal(contact.history.length, 3);
         assert.equal(contact.history[2].content, '[2026-10-09 09:00] 恢复后的早安');
-        assert.equal(context.waterfalls.at(-1)[0], '恢复后的早安');
+        assert.equal(context.waterfalls.length, 0);
     } finally { app.scheduleAsyncBackendResumeCheck = oldSchedule; }
 });

@@ -241,6 +241,12 @@ const Storage = {
 
         if (Array.isArray(contactsData)) {
             STATE.contacts = contactsData;
+            // ★ 修复旧版保存的默认头像绝对路径：移动文件夹或从备份恢复后仍读取当前工程的图片。
+            STATE.contacts.forEach(contact => {
+                if (/^file:.*\/assets\/images\/char\.jpg(?:[?#].*)?$/i.test(contact.avatar || '')) {
+                    contact.avatar = './assets/images/char.jpg';
+                }
+            });
         } else {
             STATE.contacts = [];
         }

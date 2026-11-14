@@ -682,6 +682,7 @@ const STATE = {
     currentBookId: null, // ★★★ 新增：当前正在编辑哪本书
     settings: {}, 
     typingContactId: null, // ★★★ 新增：用于追踪哪个联系人正在输入，null表示无人输入
+    chatRequestActive: false, // ★ 主聊天共用请求槽，准备上下文期间也阻止重复请求和跨角色结果覆盖
     visibleMsgCount: 15, // ★★★ 新增：当前聊天窗口显示的条数，默认为15
     isSelectMode: false,      // 当前是否处于多选模式
     selectedBubbles: new Set(),  // 存储选中的气泡DOM元素
@@ -1179,9 +1180,12 @@ const API = {
                 this.persistContextLog('main', window.LAST_API_LOG);
             }
 
-            await this.deleteChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN);
-            this.forgetPendingJob(job.jobId);
-            console.info('[AsyncBackend] job finished and deleted', {
+            // ★ 普通聊天由 App 落库后确认；否则 API 返回前删掉结果，数据库失败时就无从恢复。
+            if (!settings.CHAT_HISTORY_KEY) {
+                await this.deleteChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN);
+                this.forgetPendingJob(job.jobId);
+            }
+            console.info('[AsyncBackend] job finished', {
                 jobId: this.asyncJobLogId(job.jobId),
                 resultLength: (result.result || '').length
             });
@@ -1624,6 +1628,8 @@ const API = {
             userMessageIndex: settings.ASYNC_BACKEND_USER_MESSAGE_INDEX ?? null,
             userMessageId: settings.ASYNC_BACKEND_USER_MESSAGE_ID || null,
             context: settings.ASYNC_BACKEND_CONTEXT || null,
+            chatHistoryKey: settings.CHAT_HISTORY_KEY || 'history',
+            rerollMessageIds: settings.CHAT_REROLL_MESSAGE_IDS || [],
             // ★ 番茄钟请求快照随 job 保存，避免恢复时聊天索引因删除/重生成发生偏移。
             pomodoroInjection: settings.POMODORO_INJECTION || null,
             backendUrl: settings.ASYNC_BACKEND_URL.replace(/\/+$/, ''),
@@ -3353,7 +3359,7 @@ const UI = {
             // --- B. 处理头像 ---
             const avatarWrapper = clone.querySelector('.avatar-wrapper');
             // 简单判断：如果是 base64 或 http 开头，就是图片，否则是 emoji/文字
-            if (c.avatar && (c.avatar.startsWith('data:') || c.avatar.startsWith('http'))) {
+            if (c.avatar && /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(c.avatar)) {
                 const img = document.createElement('img');
                 img.src = c.avatar;
                 img.className = 'contact-avatar';
@@ -3775,7 +3781,8 @@ const UI = {
 
         // 6. 头像
         let currentAvatar = sender === 'user' ? (STATE.settings.USER_AVATAR || CONFIG.DEFAULT.USER_AVATAR) : (aiAvatarUrl || '🌸');
-        const isImage = currentAvatar.startsWith('http') || currentAvatar.startsWith('data:');
+        // ★ 本地 HTML 的头像可能是 file: 或 assets 相对路径，不能当成文字头像。
+        const isImage = /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(currentAvatar);
         if (isImage) {
             avatarImg.src = currentAvatar;
             avatarImg.onerror = () => { avatarImg.style.display='none'; avatarText.style.display='flex'; avatarText.innerText='?'; };
@@ -3873,6 +3880,50 @@ const UI = {
 
     // 渲染历史记录
 // 渲染历史记录
+    // ★ 重生成预览只控制界面，不改 history / isHidden，也不会被保存进聊天备份。
+    //   切换角色再回来仍按本地请求或 pending 快照隐藏；失败时清掉预览即可恢复原消息。
+    getRerollPreviewIds(contact, historyKey = 'history') {
+        const key = `${contact.id}:${historyKey}`;
+        if (this.rerollRestoredPreviews?.has(key)) return new Set();
+        const ids = new Set(this.rerollPreviews?.get(key) || []);
+        if (typeof API !== 'undefined' && typeof API.loadPendingJobs === 'function') {
+            for (const job of API.loadPendingJobs()) {
+                if (job.contactId !== contact.id || job.status !== 'running') continue;
+                if (job.context?.scope === 'proactive_reroll') {
+                    if (historyKey === 'history' && !(contact.history || []).some(msg => msg.rerollJobId === job.jobId)) {
+                        ids.add(job.context.messageId);
+                    }
+                } else if ((job.chatHistoryKey || 'history') === historyKey) {
+                    (job.rerollMessageIds || []).forEach(id => ids.add(id));
+                }
+            }
+        }
+        return ids;
+    },
+    beginRerollPreview(contact, historyKey, ids) {
+        if (!this.rerollPreviews) this.rerollPreviews = new Map();
+        this.rerollRestoredPreviews?.delete(`${contact.id}:${historyKey}`);
+        this.rerollPreviews.set(`${contact.id}:${historyKey}`, new Set(ids));
+        this.refreshRerollPreview(contact, historyKey);
+    },
+    clearRerollPreview(contact, historyKey, refresh = false) {
+        this.rerollPreviews?.delete(`${contact.id}:${historyKey}`);
+        if (refresh) {
+            // ★ 本轮已明确报错时即刻恢复旧正文，即使 pending 尚待下次后台确认。
+            if (!this.rerollRestoredPreviews) this.rerollRestoredPreviews = new Set();
+            this.rerollRestoredPreviews.add(`${contact.id}:${historyKey}`);
+            this.refreshRerollPreview(contact, historyKey);
+        }
+    },
+    refreshRerollPreview(contact, historyKey) {
+        // ★ 请求属于 A、当前在看 B 时，只清 A 的预览状态，不动 B 的页面。
+        if (historyKey === 'offlineHistory') {
+            if (App.isOfflineChatOpen(contact.id)) this.renderOfflineChatHistory(contact, false, true);
+        } else if (App.isViewingContactChat(contact.id)) {
+            this.renderChatHistory(contact, false, true);
+        }
+    },
+
     renderChatHistory(contact, isLoadMore = false, keepScrollPosition = false) {
         const chatMsgs = this.els.chatMsgs;
         const scrollContainer = chatMsgs.parentElement; 
@@ -3892,6 +3943,7 @@ const UI = {
         chatMsgs.innerHTML = '';
         this.updateChatHeader(contact);
 
+        const rerollHiddenIds = this.getRerollPreviewIds?.(contact, 'history') || new Set();
         const totalMsgs = contact.history.length;
         
         // ============================================
@@ -3931,7 +3983,7 @@ const UI = {
             const msg = contact.history[i];
             const historyIndex = i; 
 
-            if (msg.role === 'system') continue;
+            if (msg.role === 'system' || rerollHiddenIds.has(msg.messageId)) continue;
             ChatBubbles.ensure(msg);
             
             const sender = msg.role === 'assistant' ? 'ai' : 'user';
@@ -4140,6 +4192,7 @@ const UI = {
         container.innerHTML = '';
         this.updateOfflineHeader(contact);
 
+        const rerollHiddenIds = this.getRerollPreviewIds?.(contact, 'offlineHistory') || new Set();
         const totalMsgs = (contact.offlineHistory || []).length;
         STATE.offlineVisibleMsgCount = Math.max(CONFIG.CHAT_PAGE_SIZE || 15, STATE.offlineVisibleMsgCount || 0);
         const startIndex = Math.max(0, totalMsgs - STATE.offlineVisibleMsgCount);
@@ -4157,7 +4210,9 @@ const UI = {
         }
 
         for (let i = startIndex; i < endIndex; i++) {
-            container.appendChild(this.buildOfflineCard(contact, contact.offlineHistory[i], i));
+            if (!rerollHiddenIds.has(contact.offlineHistory[i]?.messageId)) {
+                container.appendChild(this.buildOfflineCard(contact, contact.offlineHistory[i], i));
+            }
         }
 
         if (isLoadMore) {
@@ -4199,7 +4254,7 @@ const UI = {
         const avatarSrc = sender === 'user'
             ? (STATE.settings.USER_AVATAR || CONFIG.DEFAULT.USER_AVATAR)
             : String(contact.avatar || '🌸');
-        if (/^(data:image\/|https?:\/\/|blob:|\.\/|assets\/)/i.test(avatarSrc)) {
+        if (/^(data:image\/|https?:\/\/|file:|blob:|\.\/|assets\/)/i.test(avatarSrc)) {
             const img = document.createElement('img');
             img.src = avatarSrc;
             img.onerror = () => { img.remove(); avatarBox.innerText = sender === 'user' ? '🙂' : '🌸'; };
@@ -4404,7 +4459,7 @@ const UI = {
     // ★★★ 聊天 Header 在线状态：统一管理头像、绿点和“离开/离线”文案 ★★★
     getChatHeaderAvatarSrc(contact) {
         const avatar = String(contact?.avatar || '').trim();
-        if (/^(data:image\/|https?:\/\/|blob:|\.\/assets\/|assets\/)/i.test(avatar)) return avatar;
+        if (/^(data:image\/|https?:\/\/|file:|blob:|\.\/assets\/|assets\/)/i.test(avatar)) return avatar;
         return './assets/images/char.jpg';
     },
 
@@ -4494,7 +4549,8 @@ const UI = {
     // UI渲染：对方正在输入
     setLoading(isLoading, contactId) { // ★★★ 参数 contactId 依然是必需的
         // 1. 更新全局状态，让程序知道“谁”在输入
-        STATE.typingContactId = isLoading ? contactId : null;
+        if (isLoading) STATE.typingContactId = contactId;
+        else if (STATE.typingContactId === contactId) STATE.typingContactId = null;
         
         // 2. 关键检查：只有当这个状态更新是针对“当前打开的”聊天窗口时，才刷新UI
         if (contactId === STATE.currentContactId) {
@@ -4986,8 +5042,9 @@ const App = {
                         // ★ 线下见面的请求挂起后由恢复链路落库：userMessageId 在 offlineHistory 里，
                         // 说明这一轮是线下请求，回复要写回线下记录而不是线上 history。
                         const offlineHistoryArr = Array.isArray(contact.offlineHistory) ? contact.offlineHistory : [];
-                        const offlineTargeted = !!(pending.userMessageId
-                            && offlineHistoryArr.some(item => item?.messageId === pending.userMessageId));
+                        const offlineTargeted = pending.chatHistoryKey
+                            ? pending.chatHistoryKey === 'offlineHistory'
+                            : !!(pending.userMessageId && offlineHistoryArr.some(item => item?.messageId === pending.userMessageId));
                         const targetHistory = offlineTargeted ? offlineHistoryArr : contact.history;
 
                         // ★ 后台识图回填：
@@ -5006,9 +5063,22 @@ const App = {
                             await this.applyAsyncAgentActions(job.agent_actions, contact);
                         }
 
+                        const previousHistory = targetHistory.slice();
+                        const previousRounds = {
+                            offlineBridgeRoundsLeft: contact.offlineBridgeRoundsLeft,
+                            offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId,
+                            offlineRecapRoundsLeft: contact.offlineRecapRoundsLeft,
+                            offlineRecapConsumedRoundId: contact.offlineRecapConsumedRoundId
+                        };
                         const alreadySaved = targetHistory.some(msg => msg.asyncJobId === pending.jobId);
                         let assistantMessage = null;
                         if (!alreadySaved) {
+                            if (!String(job.result || '').trim()) throw new Error('后台任务未返回正文，已保留原回复');
+                            // ★ 成功后才移除重生成目标，不能先删旧回复再等网络。
+                            const ids = new Set(pending.rerollMessageIds || []);
+                            for (let i = targetHistory.length - 1; i >= 0; i--) {
+                                if (ids.has(targetHistory[i].messageId)) targetHistory.splice(i, 1);
+                            }
                             assistantMessage = {
                                 role: 'assistant',
                                 content: (job.result || '').trim(),
@@ -5024,6 +5094,11 @@ const App = {
                             assistantMessage = targetHistory.find(msg => msg.asyncJobId === pending.jobId) || null;
                         }
 
+                        // ★ 与前台成功路径同口径消费桥接/回顾，按用户消息 ID 去重。
+                        if (typeof OfflineChat !== 'undefined') {
+                            if (offlineTargeted) OfflineChat.consumeBridgeRound(contact, pending.userMessageId);
+                            else OfflineChat.consumeRecapRound(contact, pending.userMessageId);
+                        }
                         // ★ 番茄钟后台恢复沿用请求时保存的快照，不消费后来才完成的新番茄。
                         const pomodoroSource = pending.userMessageId
                             ? targetHistory.find(item => item?.messageId === pending.userMessageId)
@@ -5033,7 +5108,7 @@ const App = {
                         // ★★★★★ Post Agent：后台恢复后补跑 START ★★★★★
                         // 轻量方案：Worker 恢复接收只负责保存 assistant 回复；保存后由前端补跑 post-agent。
                         // 预留方案：以后 Worker 如果返回 job.post_agent，则优先消费 Worker 结果，不再前端重跑。
-                        if (assistantMessage && assistantMessage.role === 'assistant') {
+                        if (!offlineTargeted && assistantMessage && assistantMessage.role === 'assistant') {
                             const consumedWorkerPostAgent = await this.consumeWorkerPostAgentResult(contact, assistantMessage, job.post_agent);
                             if (!consumedWorkerPostAgent) {
                                 this.runAgentPostAgents(contact, assistantMessage.content || '', assistantMessage).catch(error => {
@@ -5049,6 +5124,7 @@ const App = {
                         if (offlineTargeted) {
                             // 线下回复：还停在线下页面就只追加这张卡片；否则静默落库，下次打开见面页可见。
                             if (this.isOfflineChatOpen(contact.id)) {
+                                if ((pending.rerollMessageIds || []).length) UI.renderOfflineChatHistory(contact);
                                 if (!assistantMessage || !UI.appendOfflineCard(contact, assistantMessage)) {
                                     UI.renderOfflineChatHistory(contact);
                                 }
@@ -5061,9 +5137,18 @@ const App = {
                             this.markContactIncomingMessage(contact, { notice: !alreadySaved });
                         }
 
+                        // ★ 本地成功落库后才确认并删除服务端结果，保存失败恢复内存，允许完整重试。
+                        try {
+                            await Storage.saveContacts();
+                        } catch (saveError) {
+                            targetHistory.splice(0, targetHistory.length, ...previousHistory);
+                            Object.assign(contact, previousRounds);
+                            if (offlineTargeted && this.isOfflineChatOpen(contact.id)) UI.renderOfflineChatHistory(contact);
+                            else if (this.isViewingContactChat(contact.id)) UI.renderChatHistory(contact);
+                            throw saveError;
+                        }
                         await API.deleteChatJob(pending.backendUrl, pending.jobId, pending.token);
                         API.forgetPendingJob(pending.jobId);
-                        await Storage.saveContacts();
                         if (!alreadySaved && assistantMessage) {
                             ProactiveMessages.onAssistantMessage(contact).catch(error => console.warn('[主动消息] 后台恢复回复同步失败:', error));
                         }
@@ -5075,6 +5160,7 @@ const App = {
                         });
                     } else if (job.status === 'failed') {
                         API.markPendingJobFailed(pending.jobId, job.error || 'Async job failed');
+                        UI.clearRerollPreview?.(contact, pending.chatHistoryKey || 'history', true);
                         console.warn('[AsyncBackend] resume found failed job', {
                             jobId: API.asyncJobLogId(pending.jobId),
                             error: job.error || 'Async job failed'
@@ -5111,6 +5197,7 @@ const App = {
                         }
 
                         API.forgetPendingJob(pending.jobId);
+                        if (contact) UI.clearRerollPreview?.(contact, pending.chatHistoryKey || 'history', true);
                         if (contact) await Storage.saveContacts();
                         this.renderAsyncBackendPendingJobs();
                         continue;
@@ -5179,6 +5266,7 @@ const App = {
         }
 
         API.markPendingJobFailed(pending.jobId, message);
+        if (contact) UI.clearRerollPreview?.(contact, pending.chatHistoryKey || 'history', true);
         this.renderAsyncBackendPendingJobs();
     },
 
@@ -5488,7 +5576,7 @@ const App = {
             btn.dataset.id = contact.id;
             btn.title = contact.name || '联系人';
 
-            if (contact.avatar && (contact.avatar.startsWith('data:') || contact.avatar.startsWith('http'))) {
+            if (contact.avatar && /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(contact.avatar)) {
                 const img = document.createElement('img');
                 img.src = contact.avatar;
                 img.alt = contact.name || '联系人';
@@ -6281,7 +6369,8 @@ const App = {
         // 真正判断是不是正在聊天窗口，要同时看聊天层是否处在展开状态。
         return !!contactId
             && STATE.currentContactId === contactId
-            && appContainer?.classList.contains('in-chat-mode');
+            && appContainer?.classList.contains('in-chat-mode')
+            && !appContainer?.classList.contains('in-offline-mode');
     },
 
     markContactIncomingMessage(contact, options = {}) {
@@ -6407,7 +6496,8 @@ const App = {
         }
 
         notice.addEventListener('pointerdown', (event) => {
-            if (event.target.closest('.app-top-notice-action')) return;
+            // ★ 建议内容区的上下滑动用于浏览长列表，不启动通知的上划关闭，避免滚动时误关确认条。
+            if (event.target.closest('.app-top-notice-action, .agent-suggestion-notice')) return;
             dragging = true;
             didDrag = false;
             startY = event.clientY;
@@ -7099,7 +7189,7 @@ const App = {
 
     // ★★★★★ 心笺 START：页面逻辑层 ★★★★★
     renderHeartNoteAvatar(contact) {
-        if (contact.avatar && (contact.avatar.startsWith('data:') || contact.avatar.startsWith('http'))) {
+        if (contact.avatar && /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(contact.avatar)) {
             return `<img class="heart-note-avatar" src="${this.escapeHtml(contact.avatar)}" alt="">`;
         }
         return `<div class="heart-note-avatar heart-note-text-avatar">${this.escapeHtml(contact.avatar || '🌼')}</div>`;
@@ -7800,7 +7890,7 @@ const App = {
         return executions[skillName];
     },
 
-    normalizeAgentPostTodoSuggestions(postResult) {
+    normalizeAgentPostTodoSuggestions(postResult, failures = []) {
         const rawOperations = Array.isArray(postResult?.operations) && postResult.operations.length
             ? postResult.operations
             : (Array.isArray(postResult?.todos) ? postResult.todos.map(todo => ({ ...todo, action: 'create' })) : []);
@@ -7810,15 +7900,18 @@ const App = {
 
         return rawOperations.map((rawOperation, index) => {
             const operation = AgentTodoManager.normalizeOperation(rawOperation);
-            if (!operation) return null;
+            if (!operation) {
+                failures.push('无法识别的 TODO 操作，请重新说明要新增、完成还是改期。');
+                return null;
+            }
             if (operation.action === 'create') {
                 const text = AgentTodoManager.cleanText(operation.text || '', 120);
                 const dateKey = AgentTodoManager.isDateKey(operation.dateKey) ? operation.dateKey : AgentTodoManager.getTodayKey();
                 const startTime = AgentTodoManager.isTimeValue(operation.startTime) ? operation.startTime : '';
                 const endTime = AgentTodoManager.isTimeValue(operation.endTime) ? operation.endTime : '';
-                if (!text) return null;
+                if (!text) { failures.push('新增 TODO 缺少任务名称。'); return null; }
                 const duplicateKey = this.buildTodoDuplicateKey(text, dateKey);
-                if (seenKeys.has(duplicateKey)) return null;
+                if (seenKeys.has(duplicateKey)) { failures.push(`TODO 已存在或本批重复：${text}（${dateKey}）`); return null; }
                 seenKeys.add(duplicateKey);
                 const item = {
                     action: 'create',
@@ -7838,6 +7931,11 @@ const App = {
 
             const candidates = AgentTodoManager.findTodoCandidates(operation);
             if (candidates.length !== 1) {
+                // ★ 批量请求逐项记录失败原因；同名候选展示日期，避免把歧义误报成未找到。
+                const label = operation.targetText || operation.targetTodoId || '未提供目标';
+                failures.push(candidates.length
+                    ? `TODO 目标不唯一：${label}；候选：${candidates.map(item => AgentTodoManager.formatTodoLabel(item)).join('；')}`
+                    : `未找到可${this.getAgentTodoOperationVerb(operation)}的 TODO：${label}${operation.targetTodoId ? `（ID：${operation.targetTodoId}）` : ''}`);
                 console.warn('[Agent][TODO建议] 目标匹配失败:', {
                     operation,
                     candidateCount: candidates.length,
@@ -7853,7 +7951,10 @@ const App = {
             }
             const target = candidates[0];
             const patchInfo = this.buildTodoPatchFromOperation(operation);
-            if (!patchInfo || !Object.keys(patchInfo.patch).length) return null;
+            if (!patchInfo || !Object.keys(patchInfo.patch).length) {
+                failures.push(`TODO 操作缺少有效修改内容：${target.text}`);
+                return null;
+            }
             return {
                 ...operation,
                 targetTodoId: target.id,
@@ -7863,7 +7964,7 @@ const App = {
                 patch: patchInfo.patch,
                 actionText: patchInfo.actionText
             };
-        }).filter(Boolean).slice(0, 5);
+        }).filter(Boolean);
     },
 
     buildTodoPatchFromOperation(operation = {}) {
@@ -7972,7 +8073,7 @@ const App = {
                 item.endTime = endTime;
             }
             return item;
-        }).filter(Boolean).slice(0, 10);
+        }).filter(Boolean);
     },
 
     buildAsyncBackendAgentPayload(contact, userText, requestSettings, userMessage = null) {
@@ -8211,7 +8312,7 @@ const App = {
         if (STATE.settings.AGENT_TODO_MANAGER_ENABLED !== true) return null;
         if (typeof AgentTodoManager === 'undefined') return null;
         const validIntentTexts = Array.isArray(intentTexts)
-            ? intentTexts.map(text => AgentTodoManager.cleanText(text, 200)).filter(Boolean)
+            ? intentTexts.map(text => AgentTodoManager.cleanText(text, Infinity)).filter(Boolean)
             : [];
         if (!validIntentTexts.length || !assistantMessage) return null;
 
@@ -8242,7 +8343,7 @@ const App = {
             });
 
             // ★★★★★ Agent：TODO 意图确认 START ★★★★★
-            // 『』里是角色发出的动作意图；为了防误删/误改，解析后先复用 suggestion 确认条，不直接落地。
+            // 『』里是角色发出的动作意图；完整保留批量文本，解析后先复用 suggestion 确认条，不直接落地。
             const messages = AgentTodoManager.buildExecutorMessages(contact, validIntentTexts.join('\n'), new Date(), '角色动作意图');
             console.log('[Agent][TODO意图] Messages:', messages);
             const rawText = await API.chat(messages, {
@@ -8279,17 +8380,19 @@ const App = {
                 return null;
             }
 
-            const suggestions = this.normalizeAgentPostTodoSuggestions(routerResult);
+            const failures = [];
+            const suggestions = this.normalizeAgentPostTodoSuggestions(routerResult, failures);
             if (!suggestions.length) {
                 console.warn('[Agent][TODO意图] 操作包没有匹配到可执行 TODO:', {
                     intentTexts: validIntentTexts,
                     operations: routerResult.operations,
                     todoCount: Array.isArray(STATE.todoPlans) ? STATE.todoPlans.length : 0
                 });
-                this.showTodoTopNotice(`${contact?.name || 'TODO 管理'} 没有执行：没有匹配到唯一的 TODO`, { type: 'pending' });
+                this.showTodoTopNotice(`${contact?.name || 'TODO 管理'} 没有执行：${failures.join('；') || '没有可执行的 TODO 操作'}`, { type: 'pending' });
                 await this.setAgentExecutionState(contact, assistantMessage, 'todo', {
                     status: 'skipped',
                     reason: 'intent_no_valid_suggestions',
+                    failures,
                     intents: validIntentTexts
                 });
                 return null;
@@ -8298,6 +8401,7 @@ const App = {
             await this.setAgentExecutionState(contact, assistantMessage, 'todo', {
                 status: 'suggested',
                 intents: validIntentTexts,
+                failures,
                 suggestions
             });
             this.showAgentPostTodoSuggestionNotice(contact, assistantMessage, suggestions);
@@ -8363,7 +8467,8 @@ const App = {
         const verb = {
             create: '添加',
             update: '修改',
-            delete: '删除',
+            delete: '取消',
+            cancel: '取消',
             star: '星标',
             unstar: '取消星标'
         }[operation.action] || '更新';
@@ -8472,7 +8577,10 @@ const App = {
         const applied = [];
         const originalOrder = (notebook.records || []).map(record => record.id);
 
-        for (const suggestion of suggestions) {
+        for (const rawSuggestion of suggestions) {
+            // ★ 执行前再次归一化，旧版保存的 delete 建议恢复后也只能取消，不能真正删掉心笺。
+            const suggestion = { ...rawSuggestion, action: AgentHeartNoteManager.normalizeAction(rawSuggestion.action) };
+            if (!suggestion.action) continue;
             if (suggestion.action === 'create') {
                 const now = Date.now();
                 const dateKey = AgentHeartNoteManager.getTodayKey(new Date(now));
@@ -8508,7 +8616,8 @@ const App = {
             if (!snapshots.some(snapshot => snapshot.record.id === record.id)) {
                 snapshots.push({ record: { ...record }, index: originalOrder.indexOf(record.id) });
             }
-            if (suggestion.action === 'delete') notebook.records.splice(index, 1);
+            // ★ 取消保留原文、日期和星标；现有快照撤销逻辑可直接恢复取消前的状态。
+            if (suggestion.action === 'cancel') Object.assign(record, { cancelled: true, updatedAt: Date.now() });
             if (suggestion.action === 'update') Object.assign(record, { text: suggestion.newText, updatedAt: Date.now() });
             if (suggestion.action === 'star') Object.assign(record, { alwaysInject: true, updatedAt: Date.now() });
             if (suggestion.action === 'unstar') Object.assign(record, { alwaysInject: false, updatedAt: Date.now() });
@@ -8529,7 +8638,7 @@ const App = {
             ? ({
                 create: `已添加心笺：${single.text}`,
                 update: `已修改心笺：${single.newText}`,
-                delete: `已删除心笺：${single.targetText}`,
+                cancel: `已取消心笺：${single.targetText}`,
                 star: `已星标心笺：${single.targetText}`,
                 unstar: `已取消星标心笺：${single.targetText}`
             }[single.action] || '已更新心笺')
@@ -8613,17 +8722,20 @@ const App = {
                 return null;
             }
 
-            const suggestions = this.normalizeAgentPostTodoSuggestions(postResult);
+            const failures = [];
+            const suggestions = this.normalizeAgentPostTodoSuggestions(postResult, failures);
             if (!suggestions.length) {
                 await this.setAgentExecutionState(contact, assistantMessage, 'todo', {
                     status: 'skipped',
-                    reason: 'post_no_valid_suggestions'
+                    reason: 'post_no_valid_suggestions',
+                    failures
                 });
                 return null;
             }
 
             await this.setAgentExecutionState(contact, assistantMessage, 'todo', {
                 status: 'suggested',
+                failures,
                 suggestions
             });
             this.showAgentPostTodoSuggestionNotice(contact, assistantMessage, suggestions);
@@ -8701,6 +8813,18 @@ const App = {
                     checkboxList.appendChild(row);
                 });
                 wrap.appendChild(checkboxList);
+                // ★ 成功项仍可勾选执行，失败项只展示原因；持久状态让重开确认条也能看到遗漏情况。
+                const failures = this.getAgentExecutionState(assistantMessage, 'todo')?.failures || [];
+                if (failures.length) {
+                    const failureList = document.createElement('div');
+                    failureList.className = 'agent-suggestion-list';
+                    failures.forEach(message => {
+                        const row = document.createElement('div');
+                        row.textContent = message;
+                        failureList.appendChild(row);
+                    });
+                    wrap.appendChild(failureList);
+                }
                 return wrap;
             },
             actions: [
@@ -8998,7 +9122,7 @@ const App = {
                 item.endTime = endTime;
             }
             return item;
-        }).filter(Boolean).slice(0, 10);
+        }).filter(Boolean);
     },
 
     buildTodoDuplicateKey(text, dateKey) {
@@ -9266,9 +9390,9 @@ const App = {
     // ★★★★★ Agent END：TODO 管理设置 + skill 执行 ★★★★★
 
     // ★★★★★ 角色记忆 START：页面逻辑层 ★★★★★
-    // 角色记忆是“每日总结”：生成昨天，聊天时注入昨天及更早的最近 N 天。
+    // 角色记忆是“每日总结”：生成昨天，聊天时注入昨天及更早最近 N 个有内容的日期。
     renderMemoryAvatar(contact) {
-        if (contact.avatar && (contact.avatar.startsWith('data:') || contact.avatar.startsWith('http'))) {
+        if (contact.avatar && /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(contact.avatar)) {
             return `<img class="character-memory-avatar" src="${this.escapeHtml(contact.avatar)}" alt="">`;
         }
         return `<div class="character-memory-avatar text-avatar">${this.escapeHtml(contact.avatar || '🌼')}</div>`;
@@ -9278,7 +9402,7 @@ const App = {
         if (!memory || memory.enabled !== true) return '未开启';
         if (memory.isGenerating) return '生成中';
         const records = (memory.records || []).filter(record => record && Array.isArray(record.memories) && record.memories.length);
-        if (records.length) return `${records.length} 天记忆 · 注入 ${memory.injectDays || CharacterMemory.defaultInjectDays} 天`;
+        if (records.length) return `${records.length} 天记忆 · 注入最近 ${memory.injectDays || CharacterMemory.defaultInjectDays} 个有记忆的日期`;
         if ((memory.records || []).some(record => record?.error)) return '有生成失败记录';
         return '待生成';
     },
@@ -9771,7 +9895,7 @@ const App = {
     // ★★★★★ 角色日程 START：页面逻辑层 ★★★★★
     // 角色日程是“探索页玩法”，但生成结果会作为角色自己的动态状态注入聊天。
     renderScheduleAvatar(contact) {
-        if (contact.avatar && (contact.avatar.startsWith('data:') || contact.avatar.startsWith('http'))) {
+        if (contact.avatar && /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(contact.avatar)) {
             return `<img class="character-schedule-avatar" src="${this.escapeHtml(contact.avatar)}" alt="">`;
         }
         return `<div class="character-schedule-avatar text-avatar">${this.escapeHtml(contact.avatar || '🌼')}</div>`;
@@ -10554,7 +10678,8 @@ const App = {
             .filter(record => {
                 const msg = record.msg || {};
                 const isOldAsyncFailBubble = msg?.asyncJobId && String(msg.content || '').startsWith('(发送失败:');
-                return msg.role !== 'system' && msg.isTransientError !== true && !isOldAsyncFailBubble;
+                return !(requestSettings.CHAT_REROLL_MESSAGE_IDS || []).includes(msg.messageId)
+                    && msg.role !== 'system' && msg.isTransientError !== true && !isOldAsyncFailBubble;
             });
         const isAiVisibleRecord = (record) => !!HistoryVisibility.buildVisibleMessage(record.msg, {
             preserveTimestamp: true,
@@ -10834,7 +10959,11 @@ const App = {
     async handleSend(isReroll = false) {
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!contact) return;
-        // ★ 主动消息沿用自己的前端/Worker 请求方式，但删除旧气泡和 waterfall 与普通聊天保持一致。
+        // ★ 在首次 await 前占用请求槽；跨角色也不能并发覆盖 API.lastAsyncBackendResult。
+        if (STATE.chatRequestActive || STATE.typingContactId) return;
+        if (typeof API.loadPendingJobs === 'function' && API.loadPendingJobs().some(job =>
+            job.contactId === contact.id && job.status === 'running')) return;
+        // ★ 主动消息沿用自己的前端/Worker 请求方式，旧正文保留到新结果成功。
         if (isReroll && contact.history?.at(-1)?.proactiveSource) {
             if (STATE.typingContactId === contact.id || !confirm('重新生成这条主动消息？')) return;
             if (STATE.chatMode === 'jump') {
@@ -10869,584 +10998,591 @@ const App = {
         if (!requestSettings) return;
 
         const usingAsyncBackend = API.shouldUseAsyncBackend(requestSettings);
-
-        // 调试日志：看看最终发出去的参数对不对
-        console.log("最终发送参数:", { 
-            model: requestSettings.MODEL, 
-            tokens: requestSettings.MAX_TOKENS, 
-            temp: requestSettings.TEMPERATURE,
-            historyMinContext: requestSettings.CONTEXT_LIMIT,
-            historyWindowStrategy: requestSettings.HISTORY_WINDOW_STRATEGY,
-            historyWindowMaxContext: requestSettings.HISTORY_WINDOW_MAX_CONTEXT,
-            dynamicContextInsertMode: requestSettings.DYNAMIC_CONTEXT_INSERT_MODE,
-            imageApiMode: requestSettings.IMAGE_API_MODE,
-            linkedPresetName: contact.linkedPresetName || "跟随全局默认设置",
-            extraBodyJson: requestSettings.CUSTOM_REQUEST_BODY_JSON || ""
-        });
-
-        // 角色没有绑定专属 System Prompt 时，永远跟随主设置里当前保存的全局提示词。
-        // 注意：空字符串是有效设置，代表本次请求不发送第一条 system prompt。
-        let systemPrompt = STATE.settings.SYSTEM_PROMPT !== undefined
-            ? STATE.settings.SYSTEM_PROMPT
-            : CONFIG.SYSTEM_PROMPT;
-        if (contact.linkedSystemPromptPresetName) {
-            const systemPresets = STATE.settings.SYSTEM_PROMPT_PRESETS || [];
-            const targetSystemPreset = systemPresets.find(p => p.name === contact.linkedSystemPromptPresetName);
-            if (targetSystemPreset) {
-                systemPrompt = targetSystemPreset.prompt !== undefined ? targetSystemPreset.prompt : '';
-                console.log(`[System Prompt] 使用角色专属预设: ${targetSystemPreset.name}`);
-            } else {
-                console.warn(`[System Prompt] 绑定的预设 "${contact.linkedSystemPromptPresetName}" 未找到，已回退到全局设置。`);
-            }
-        }
-
-        // ============================================================
-        // 2. 准备发送内容 (Reroll vs New Message)
-        // ============================================================
-        let userText = UI.els.input.value.trim();
-        const timestamp = formatTimestamp();
-        let agentUserMessage = null;
-        let currentMomentTurnId = null;
-        
-        // ★ 判断是否有待发送的图片 (只有非 Reroll 时才处理新图)
-        const hasPendingImage = (STATE.pendingImage && !isReroll);
-        let imageDescription = ""; 
-        let currentImageBase64 = null;
-
-        // 如果既没文本也没图，且不是reroll，就退出
-        if (!isReroll && !userText && !hasPendingImage) return;
-
-        // =================================================================
-        // ★★★ 第一步：如果是 Reroll，先弹窗问用户确不确定 ★★★
-        // =================================================================
-        if (isReroll) {
-            const isConfirmed = confirm("重新生成消息？"); 
-            if (!isConfirmed) return; // 如果点取消，直接退出，页面一动不动，还在看历史
-        }
-        
-        // =================================================================
-        // ★★★ 第二步：现在确认要发消息（或确认Reroll）了，强制切回最新底部 ★★★
-        // =================================================================
-        if (STATE.chatMode === 'jump') {
-            STATE.chatMode = 'normal';
-            STATE.visibleMsgCount = Math.max(CONFIG.CHAT_PAGE_SIZE, STATE.visibleMsgCount || 15);
-            UI.renderChatHistory(contact);
-        }
-        // ★★★ Presence：用户主动发消息/重生成时，立刻把角色状态拉回在线 ★★★
-        UI.touchContactPresence(contact);
-
-        // =================================================================
-
-        // =================================================================
-        // ★★★ 第三步：执行真正的 Reroll 或 发新消息逻辑 ★★★
-        // =================================================================
-        if (isReroll) {
-            const lastUserMsg = [...contact.history].reverse().find(m => m.role === 'user');
-            if (!lastUserMsg) return;
-            agentUserMessage = lastUserMsg;
-            // ★ 重 roll 图片时同样绑定原用户消息 ID，主动消息插入历史后也不会把描述回填到错误位置。
-            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = lastUserMsg.messageId || null;
-            // 朋友圈按“用户消息轮次”消费；重 roll 复用同一个 turnId，不再额外扣次数。
-            if (!lastUserMsg.momentInjectionTurnId) {
-                lastUserMsg.momentInjectionTurnId = `moment_turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-            }
-            currentMomentTurnId = lastUserMsg.momentInjectionTurnId;
-            // Reroll 复用历史记录里的文本
-            userText = lastUserMsg.content;
-            
-            // ★ 多模态重新生成必须复用这条用户消息原来的图片；普通模式仍然只复用已经保存的识图描述。
-            // 图片气泡被“向 Ta 隐藏”后不能偷偷重新带回请求，索引规则与渲染/删除保持一致。
-            if (requestSettings.IMAGE_API_MODE === 'multimodal' && Array.isArray(lastUserMsg.images) && lastUserMsg.images[0]) {
-                const imagePartIndex = HistoryVisibility.getTextParagraphs(lastUserMsg).length;
-                const hiddenIndices = Array.isArray(lastUserMsg.hiddenIndices) ? lastUserMsg.hiddenIndices : [];
-                if (!hiddenIndices.includes(imagePartIndex)) {
-                    currentImageBase64 = lastUserMsg.images[0];
-                }
-            }
-            
-            // 移除最近的 AI 回复；同时作废绑定在旧回复上的 Agent 待确认操作。
-            const removedAssistantMessages = [];
-            while(contact.history.length > 0 && contact.history[contact.history.length-1].role === 'assistant') {
-                removedAssistantMessages.push(contact.history.pop());
-            }
-            this.discardAgentConfirmationsForMessages(removedAssistantMessages);
-            UI.removeLatestAiBubbles();
-        } 
-
-        // New Message 逻辑：上屏 & 识图
-        else {
-            // 1. 决定图片数据
-            if (hasPendingImage) {
-                currentImageBase64 = STATE.pendingImage;
-            }
-
-            // ★ 新消息先入库并生成气泡身份，首次上屏的菜单和多选才能直接定位原消息。
-            const currentMsgIndex = contact.history.length;
-            const momentInjectionTurnId = `moment_turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-            const newUserMsg = {
-                role: 'user',
-                content: `[${timestamp}] ${userText}`, // 注意：content 里不含描述，描述是后台用的
-                timestamp,
-                messageId: ProactiveMessages.makeId('user'),
-                eventAt: Date.now(),
-                recordedAt: Date.now(),
-                momentInjectionTurnId,
-                images: currentImageBase64 ? [currentImageBase64] : null,
-                image_description: null
-            };
-            ChatBubbles.ensure(newUserMsg);
-            contact.history.push(newUserMsg);
-            agentUserMessage = newUserMsg;
-            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = newUserMsg.messageId;
-            currentMomentTurnId = momentInjectionTurnId;
-
-            // 2. 立即在 UI 显示用户消息
-            const paragraphs = splitMessageIntoBubbleParts(userText);
-            
-            const group = document.createElement('div');
-            group.className = 'message-group';
-            group.dataset.msgIndex = currentMsgIndex;
-            group.dataset.sender = 'user';
-            group.messageRef = newUserMsg;
-            group.dataset.messageId = newUserMsg.messageId;
-
-            // --- 修复点开始 ---
-            
-            // 2.1 渲染文本部分
-            // 只要有文本就渲染文本气泡，不处理图片
-            if (paragraphs.length > 0) {
-                paragraphs.forEach((p, index) => {
-                    if (p.trim() === '---') {
-                        // ✅ 正确做法：创建一个节点，然后塞进 group
-                        const separator = document.createElement('div');
-                        separator.className = 'chat-separator animate';
-                        group.appendChild(separator); 
-                    } else {
-                        // ★ 纯文本气泡，传 null (不带图)
-                        const bubble = UI.createSingleBubble(
-                            parseCustomMarkdown(p.trim()), 'user', null, timestamp, currentMsgIndex, true, index, null,
-                            false, false, newUserMsg
-                        );
-                        group.appendChild(bubble);
-                    }
-                });
-            } 
-            // 删除了原本这里的 else if (hasPendingImage) {...} 
-            // 因为它和下面的逻辑重复，会导致纯图发送时出现两个气泡
-
-            // 2.2 ★★★ 统一渲染图片气泡 ★★★
-            // 无论是“纯图”还是“文+图”，图片都由此处统一生成
-            if (currentImageBase64) {
-                // 这是一个只有图的气泡
-                // 注意：index 使用 paragraphs.length，这样如果上面有文本，图片的 index 就是接在文本后面的
-                const imgBubble = UI.createSingleBubble(
-                    "", 'user', null, timestamp, currentMsgIndex, true, paragraphs.length, currentImageBase64,
-                    false, false, newUserMsg
-                );
-                group.appendChild(imgBubble);
-            }
-
-            // --- 修复点结束 ---
-
-            UI.els.chatMsgs.appendChild(group);
-            UI.scrollToBottom();
-
-            // 3. UI 清理 (清空输入框和预览)
-            UI.els.input.value = '';
-            // 清掉内联高度，交回 CSS 的 min-height（随聊天字号自动缩放）
-            UI.els.input.style.height = '';
-            if (UI.els.previewContainer) UI.els.previewContainer.style.display = 'none'; // 隐藏预览
-            STATE.pendingImage = null; // ★ 清空暂存，防止下次误发
-            if (window.innerWidth < 800) UI.els.input.blur();
-
-            // 4. ★★★ 核心分支：如果有图，先跑识图 API ★★★
-            // 4. ★★★ 核心分支：如果有图，先跑识图 API ★★★
-            if (hasPendingImage && requestSettings.IMAGE_API_MODE === 'separate') {
-                const visionSettings = {
-                    // 稍微优化下默认值，如果这里是空字符串， fetch 会直接报错被 catch 捕获
-                    url: STATE.settings.VISION_URL, 
-                    key: STATE.settings.VISION_KEY || STATE.settings.API_KEY,
-                    model: STATE.settings.VISION_MODEL || 'Qwen/Qwen3-VL-30B-A3B-Instruct',
-                    prompt: STATE.settings.VISION_PROMPT || '描述这张图片'
-                };
-
-                if (usingAsyncBackend) {
-                    // ★ 后台识图：
-                    // 走 Worker 时不在前端等待视觉模型，避免手机切屏时识图请求被浏览器杀掉。
-                    // 图片和视觉配置只随本次 job 临时发送，Worker 用完不会存 KV。
-                    const visionAuthMode = requestSettings.ASYNC_BACKEND_KEY_MODE || 'client_key';
-                    requestSettings.ASYNC_BACKEND_VISION = {
-                        image: currentImageBase64,
-                        url: visionSettings.url,
-                        key: visionAuthMode === 'server_secret' ? '' : visionSettings.key,
-                        model: visionSettings.model,
-                        prompt: visionSettings.prompt,
-                        auth_mode: visionAuthMode
-                    };
-                    requestSettings.ASYNC_BACKEND_USER_MESSAGE_INDEX = currentMsgIndex;
-                } else {
-                    UI.setLoading(true, contact.id);
-                    try {
-                        // 如果连 URL 都没填，直接抛出错误，不发请求了
-                        if (!visionSettings.url) throw new Error("未配置视觉API地址");
-
-                        imageDescription = await API.analyzeImage(currentImageBase64, visionSettings);
-
-                    } catch (err) {
-                        console.error("识图流程跳过/失败:", err);
-                        // ★ 给 AI 一个明确的提示，告诉它为什么看不见
-                        imageDescription = "（系统提示：用户发送了一张图片，但由于未配置视觉模型或网络错误，无法提供图片内容的文本描述。请根据用户的文字上下文进行回复，如果需要，可以礼貌地询问图片内容。）";
-                    }
-                }
-            }
-
-            // ★ 识图结果补到同一条已上屏消息，保留原消息和气泡身份。
-            newUserMsg.image_description = imageDescription || null;
-
-            // ★ 存储优化：只保留最后 3 张图的 base64，旧的删掉 base64 省空间
-            let imgCount = 0;
-            if (newUserMsg.images) imgCount++; 
-            for (let i = contact.history.length - 1; i >= 0; i--) {
-                // ★ 本轮图片已计数；消息提前入库后，这里不能再把它算成第二张。
-                if (contact.history[i] === newUserMsg) continue;
-                if (contact.history[i].images && contact.history[i].images.length > 0) {
-                    imgCount++;
-                    if (imgCount > 3) {
-                        contact.history[i].images = null; 
-                        contact.history[i].isImageExpired = true; 
-                    }
-                }
-            }
-            
-        }
-
-        // 保存一次（包含刚刚优化的图片数据）
-        await Storage.saveContacts();
-        if (!isReroll && agentUserMessage) {
-            ProactiveMessages.onUserMessage(contact).catch(error => console.warn('[主动消息] 用户消息同步失败:', error));
-        }
+        let replacementRollback = null; // ★ 保存新正文失败时恢复旧数组，避免内存和磁盘各留一半。
+        STATE.chatRequestActive = true;
         UI.setLoading(true, contact.id);
-
-        // ★★★★★ Agent：前置执行关闭 START ★★★★★
-        // 新协议由角色回复里的『行动意图』触发 skill；用户消息阶段不再让副模型抢先判断。
-        const agentRuntimeResult = null;
-        // ★★★★★ Agent：前置执行关闭 END ★★★★★
-
-        // ============================================================
-        // 3. 构建发送给 AI 的上下文 (缝合怪逻辑)
-        // ============================================================
-        
-        const historyMetadataChanged = this.ensureHistoryCacheMetadata(contact);
-        if (historyMetadataChanged) {
-            await Storage.saveContacts();
-        }
-        const historyWindow = this.selectHistoryWindowRecords(contact, requestSettings);
-        if (historyWindow.changed) {
-            await Storage.saveContacts();
-        }
-
-        // 预处理 History：统一走 AI 可见历史清洗，避免聊天、朋友圈、记忆各写一套隐藏规则。
-        const recentHistory = historyWindow.records
-            .map(record => record.msg)
-            .map(msg => HistoryVisibility.buildVisibleMessage(msg, {
-                preserveTimestamp: true,
-                includeImageDescription: true,
-                // ★ 只给本轮图片保留占位，等待后台识图时不能把当前 user 清洗掉。
-                preserveImagePlaceholder: msg === agentUserMessage && !!currentImageBase64
-            }))
-            .filter(m => m !== null);
-        historyWindow.log.sentCount = recentHistory.length;
-        requestSettings.HISTORY_WINDOW_LOG = historyWindow.log;
-
-        // ★★★ 缓存优化：把“当前 user”从历史尾部拆出来。
-        // 日级稳定背景前置到角色设定后；auto 模式把本轮触发世界书并入当前 user，避免打穿历史前缀缓存。
-        const historyForPayload = [...recentHistory];
-        let currentUserMessage = null;
-        if (historyForPayload.length && historyForPayload[historyForPayload.length - 1].role === 'user') {
-            currentUserMessage = historyForPayload.pop();
-        }
-
-        // ★ 纯图片的占位与时间已由统一清洗保留，隐藏图片不在这里额外补回。
-
-
-        // 构造最终 Payload
-        // 空白 System Prompt 不塞空壳 system 消息，避免请求体里出现无意义的 content: ""。
-        const messagesToSend = [];
-        const routineDynamicContextPrompts = [];
-        const volatileDynamicContextPrompts = [];
-        let triggeredWorldInfoPrompt = '';
-        if ((systemPrompt || '').trim()) {
-            messagesToSend.push({ role: 'system', content: systemPrompt });
-        }
-        const agentCapabilityPrompt = this.buildAgentCapabilityPrompt();
-        const contactPromptBlocks = [
-            (contact.prompt || '').trim(),
-            agentCapabilityPrompt
-        ].filter(Boolean);
-        // User Prompt 和 skill 能力都为空时不塞空壳 system 消息，保持 messages 列表干净。
-        if (contactPromptBlocks.length) {
-            messagesToSend.push({ role: 'system', content: `=== User Prompt ===\n${contactPromptBlocks.join('\n\n')}` });
-        }
-
-        // ★★★★★ 世界书分层注入 START ★★★★★
-        // 常驻世界书放进前置世界书 system；关键词触发世界书按插入方式进入 user 或同一个世界书 system。
-        // 图片描述是给主模型看的辅助信息，不属于用户亲口说的话；
-        // 所以世界书扫描单独吃一份去掉图片描述的 history，避免图片内容误触发关键词。
-        const worldInfoScanHistory = recentHistory.map(m => ({
-            role: m.role,
-            content: (m.content || '').replace(/\n\n\[System Info: 对方发送了一张图片，图片内容描述:[\s\S]*$/g, '')
-        }));
-        const worldInfoByType = (typeof WorldInfoEngine.scanByType === 'function')
-            ? WorldInfoEngine.scanByType(userText, worldInfoScanHistory, contact.id, contact.name)
-            : { constant: null, triggered: WorldInfoEngine.scan(userText, worldInfoScanHistory, contact.id, contact.name) };
-        // ★★★★★ 世界书分层注入 END ★★★★★
-
-        // ★★★★★ 世界感知：收集本轮动态背景 START ★★★★★
-        // 这里会先检查天气缓存是不是当前 0/12 点刷新时段的。
-        // 如果今天还没有缓存，就在真正发请求前补一次。
-        await this.ensureWorldSenseWeatherReady();
-        const worldSensePrompt = WorldSense.buildPromptFromSettings(STATE.settings, new Date());
-        if (worldSensePrompt) {
-            routineDynamicContextPrompts.push(worldSensePrompt);
-        }
-        // ★★★★★ 世界感知：收集本轮动态背景 END ★★★★★
-
-        // ★★★★★ 探索 TO DO / 倒数日：收集本轮动态背景 START ★★★★★
-        // 开关只控制是否告诉 AI；本地列表本身会继续保存在 IndexedDB。
-        const todoContextPrompt = TodoContext.buildPrompt(new Date());
-        if (todoContextPrompt) {
-            routineDynamicContextPrompts.push(todoContextPrompt);
-        }
-        // ★★★★★ 探索 TO DO / 倒数日：收集本轮动态背景 END ★★★★★
-
-        // ★★★★★ 角色记忆：收集本轮动态背景 START ★★★★★
-        // 记忆只注入昨天及更早的总结；寄语只在 UI 展示，不进入上下文。
-        await this.ensureCharacterMemoryReady(contact.id, { priority: true, silent: true });
-        const characterMemoryPrompt = CharacterMemory.buildChatPrompt(contact.id, new Date());
-        if (characterMemoryPrompt) {
-            routineDynamicContextPrompts.push(characterMemoryPrompt);
-        }
-        // ★★★★★ 角色记忆：收集本轮动态背景 END ★★★★★
-
-        // ★★★★★ 心笺：收集本轮动态背景 START ★★★★★
-        // ★ 心笺允许当天记录立即注入；超出天数后只保留用户/角色星标的内容。
-        const heartNotePrompt = typeof AgentHeartNoteManager !== 'undefined'
-            ? AgentHeartNoteManager.buildChatPrompt(contact.id, new Date())
-            : '';
-        if (heartNotePrompt) routineDynamicContextPrompts.push(heartNotePrompt);
-        // ★★★★★ 心笺：收集本轮动态背景 END ★★★★★
-
-        // ★★★★★ Agent：skill 执行结果回注 START ★★★★★
-        // 主模型只看到自然语言摘要，不能看到 worker model 的原始 JSON。
-        // Agent 刚刚改变了前端状态，属于“本轮即时信息”，和触发世界书一样按缓存优化策略分流。
-        if (agentRuntimeResult && Array.isArray(agentRuntimeResult.prompts)) {
-            volatileDynamicContextPrompts.push(...agentRuntimeResult.prompts);
-        }
-        // ★★★★★ Agent：skill 执行结果回注 END ★★★★★
-
-        // ★★★★★ 角色日程：收集本轮动态背景 START ★★★★★
-        // 日程只在该角色开启时注入；如果今天还没生成，会优先补当前角色这一份。
-        await this.ensureCharacterScheduleReady(contact.id, { priority: true, silent: true });
-        const characterSchedulePrompt = CharacterSchedule.buildChatPrompt(contact.id, new Date());
-        if (characterSchedulePrompt) {
-            routineDynamicContextPrompts.push(characterSchedulePrompt);
-        }
-        // ★★★★★ 角色日程：收集本轮动态背景 END ★★★★★
-        
-        // World Info 扫描：这里只放关键词触发条目，常驻条目已经放进稳定区。
-        if (worldInfoByType.triggered) {
-            triggeredWorldInfoPrompt = `=== 背景信息补充 ===\n${worldInfoByType.triggered}`;
-        }
-
-
-        // ★★★★★ 番茄钟：按角色收集实时状态与完成通知 START ★★★★★
-        // 先校正截止时间，避免后台定时器延迟导致已完成的番茄仍被写成进行中。
-        // ★ 正式聊天只需要校正番茄钟状态，不在聊天输入期间重绘隐藏的番茄钟页面。
-        await Pomodoro.tick(Date.now(), { renderMode: 'indicator' });
-        const pomodoroUpdateInfo = Pomodoro.context(contact.id, currentMomentTurnId);
-        requestSettings.POMODORO_INJECTION = pomodoroUpdateInfo;
-        // 与朋友圈共用即时背景队列且排在它前面，统一走 auto / user / system 分流。
-        if (pomodoroUpdateInfo.prompt) volatileDynamicContextPrompts.push(pomodoroUpdateInfo.prompt);
-        // 请求快照随用户消息保存，后台恢复也只消费本次实际发送的记录。
-        const pomodoroUserMessage = [...contact.history].reverse().find(m => m.role === 'user');
-        if (pomodoroUserMessage) {
-            pomodoroUserMessage.pomodoroInjection = pomodoroUpdateInfo;
-            await Storage.saveContacts();
-        }
-        // ★★★★★ 番茄钟：按角色收集实时状态与完成通知 END ★★★★★
-
-        // ★★★ 【核心修改】检查朋友圈并注入 ★★★
-        let momentsUpdateInfo = null;
+        requestSettings.CHAT_HISTORY_KEY = 'history';
         try {
-            // 调用我们刚才写的辅助函数
-            // 注意：如果你把函数放在 App 对象下，记得用 this.getMomentsContextForChat
-            // 如果是定义在外部，直接用
-            if (typeof this.getMomentsContextForChat === 'function') {
-                momentsUpdateInfo = this.getMomentsContextForChat(contact.id, currentMomentTurnId);
-            } else if (typeof App !== 'undefined' && typeof App.getMomentsContextForChat === 'function') {
-                momentsUpdateInfo = App.getMomentsContextForChat(contact.id, currentMomentTurnId);
-            }
 
-            if (momentsUpdateInfo && momentsUpdateInfo.prompt) {
-                console.log(`[Chat] 注入朋友圈动态 context (${momentsUpdateInfo.momentIds.length}条)`);
-                // 朋友圈是本轮通知型背景，不混进“今日稳定背景”；auto 下随本轮触发世界书并入当前 user。
-                volatileDynamicContextPrompts.push(momentsUpdateInfo.prompt);
-            }
-        } catch (e) {
-            console.warn("朋友圈注入失败:", e);
-        }
-
-        // ★★★ 线下见面回顾：切回线上的前几轮请求附带线下最后一条消息 START ★★★
-        // 与朋友圈一样属于本轮易变背景：auto/user 模式并入当前 user，system 模式并入本轮即时系统信息。
-        if (typeof OfflineChat !== 'undefined' && OfflineChat.shouldInjectRecap(contact)) {
-            const offlineRecapPrompt = OfflineChat.buildRecapPrompt(contact);
-            if (offlineRecapPrompt) {
-                console.log('[Chat] 注入线下见面回顾');
-                volatileDynamicContextPrompts.push(offlineRecapPrompt);
-            }
-        }
-        // ★★★ 线下见面回顾 END ★★★
-
-        let dynamicContextContent = '';
-        const allDynamicContextPrompts = [
-            ...routineDynamicContextPrompts,
-            ...volatileDynamicContextPrompts,
-            triggeredWorldInfoPrompt
-        ].filter(Boolean);
-        const systemDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
-            ? []
-            : routineDynamicContextPrompts;
-        const userDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
-            ? allDynamicContextPrompts
-            : requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'auto'
-                ? [triggeredWorldInfoPrompt, ...volatileDynamicContextPrompts].filter(Boolean)
-                : [];
-
-        if (allDynamicContextPrompts.length) {
-            dynamicContextContent = [
-                '=== 本轮背景资料 ===',
-                '',
-                ...allDynamicContextPrompts
-            ].join('\n\n');
-        }
-
-        if (systemDynamicContextPrompts.length) {
-            // ★★★★★ 日级稳定背景前置 START ★★★★★
-            // 天气、日期、TODO、日程等一天内相对稳定的信息，紧跟角色设定；不再插到最新 user 前面。
-            messagesToSend.push({
-                role: 'system',
-                content: [
-                    '=== 今日背景信息 ===',
-                    '',
-                    ...systemDynamicContextPrompts
-                ].join('\n\n')
+            // 调试日志：看看最终发出去的参数对不对
+            console.log("最终发送参数:", { 
+                model: requestSettings.MODEL, 
+                tokens: requestSettings.MAX_TOKENS, 
+                temp: requestSettings.TEMPERATURE,
+                historyMinContext: requestSettings.CONTEXT_LIMIT,
+                historyWindowStrategy: requestSettings.HISTORY_WINDOW_STRATEGY,
+                historyWindowMaxContext: requestSettings.HISTORY_WINDOW_MAX_CONTEXT,
+                dynamicContextInsertMode: requestSettings.DYNAMIC_CONTEXT_INSERT_MODE,
+                imageApiMode: requestSettings.IMAGE_API_MODE,
+                linkedPresetName: contact.linkedPresetName || "跟随全局默认设置",
+                extraBodyJson: requestSettings.CUSTOM_REQUEST_BODY_JSON || ""
             });
-            // ★★★★★ 日级稳定背景前置 END ★★★★★
-        }
 
-        const worldInfoSystemBlocks = [];
-        if (worldInfoByType.constant) {
-            worldInfoSystemBlocks.push(`=== 常驻世界知识/环境信息 ===\n${worldInfoByType.constant}`);
-        }
-        if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && triggeredWorldInfoPrompt) {
-            // ★ system 模式没有缓存收益；本轮触发世界书和常驻世界书放在同一条世界书 system 里，语义更集中。
-            worldInfoSystemBlocks.push(triggeredWorldInfoPrompt);
-        }
-        if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && volatileDynamicContextPrompts.length) {
-            worldInfoSystemBlocks.push([
-                '=== 本轮即时系统信息 ===',
-                '',
-                ...volatileDynamicContextPrompts
-            ].join('\n\n'));
-        }
-        if (worldInfoSystemBlocks.length) {
-            messagesToSend.push({
-                role: 'system',
-                content: worldInfoSystemBlocks.join('\n\n')
-            });
-        }
+            // 角色没有绑定专属 System Prompt 时，永远跟随主设置里当前保存的全局提示词。
+            // 注意：空字符串是有效设置，代表本次请求不发送第一条 system prompt。
+            let systemPrompt = STATE.settings.SYSTEM_PROMPT !== undefined
+                ? STATE.settings.SYSTEM_PROMPT
+                : CONFIG.SYSTEM_PROMPT;
+            if (contact.linkedSystemPromptPresetName) {
+                const systemPresets = STATE.settings.SYSTEM_PROMPT_PRESETS || [];
+                const targetSystemPreset = systemPresets.find(p => p.name === contact.linkedSystemPromptPresetName);
+                if (targetSystemPreset) {
+                    systemPrompt = targetSystemPreset.prompt !== undefined ? targetSystemPreset.prompt : '';
+                    console.log(`[System Prompt] 使用角色专属预设: ${targetSystemPreset.name}`);
+                } else {
+                    console.warn(`[System Prompt] 绑定的预设 "${contact.linkedSystemPromptPresetName}" 未找到，已回退到全局设置。`);
+                }
+            }
 
-        // 追加历史：当前 user 已经拆到最后单独处理，保证用户原话仍然压轴。
-        historyForPayload.forEach(h => messagesToSend.push(h));
+            // ============================================================
+            // 2. 准备发送内容 (Reroll vs New Message)
+            // ============================================================
+            let userText = UI.els.input.value.trim();
+            const timestamp = formatTimestamp();
+            let agentUserMessage = null;
+            let currentMomentTurnId = null;
+        
+            // ★ 判断是否有待发送的图片 (只有非 Reroll 时才处理新图)
+            const hasPendingImage = (STATE.pendingImage && !isReroll);
+            let imageDescription = ""; 
+            let currentImageBase64 = null;
 
-        if (userDynamicContextPrompts.length && currentUserMessage) {
-            // ★★★★★ 自动缓存优化：本轮触发世界书并入当前 user START ★★★★★
-            // user 模式会把所有动态背景合并进当前 user；auto 模式只合并变化最大的本轮触发世界书。
-            // 日级稳定背景已经前置；新增世界书尽量压到末尾，保护历史前缀缓存。
-            const userContextTitle = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'auto'
-                ? '【系统信息补充】'
-                : '【系统信息补充】';
-            currentUserMessage = {
-                ...currentUserMessage,
-                content: [
-                    userContextTitle,
-                    userDynamicContextPrompts.join('\n\n'),
-                    '',
-                    '【系统信息补充END】',
-                    '',
-                    '【用户当前消息】',
-                    currentUserMessage.content
-                ].join('\n\n')
-            };
-            // ★★★★★ 自动缓存优化：本轮触发世界书并入当前 user END ★★★★★
-        } else if (userDynamicContextPrompts.length) {
-            // 极少数没有当前 user 的调用兜底：不能合并时仍保留动态背景，避免世界书静默丢失。
-            const firstNonSystemIndex = messagesToSend.findIndex(message => message?.role !== 'system');
-            const insertIndex = firstNonSystemIndex >= 0 ? firstNonSystemIndex : messagesToSend.length;
-            messagesToSend.splice(insertIndex, 0, {
-                role: 'system',
-                content: [
+            // 如果既没文本也没图，且不是reroll，就退出
+            if (!isReroll && !userText && !hasPendingImage) return;
+
+            // =================================================================
+            // ★★★ 第一步：如果是 Reroll，先弹窗问用户确不确定 ★★★
+            // =================================================================
+            if (isReroll) {
+                const isConfirmed = confirm("重新生成消息？"); 
+                if (!isConfirmed) return; // 如果点取消，直接退出，页面一动不动，还在看历史
+            }
+        
+            // =================================================================
+            // ★★★ 第二步：现在确认要发消息（或确认Reroll）了，强制切回最新底部 ★★★
+            // =================================================================
+            if (STATE.chatMode === 'jump') {
+                STATE.chatMode = 'normal';
+                STATE.visibleMsgCount = Math.max(CONFIG.CHAT_PAGE_SIZE, STATE.visibleMsgCount || 15);
+                UI.renderChatHistory(contact);
+            }
+            // ★★★ Presence：用户主动发消息/重生成时，立刻把角色状态拉回在线 ★★★
+            UI.touchContactPresence(contact);
+
+            // =================================================================
+
+            // =================================================================
+            // ★★★ 第三步：执行真正的 Reroll 或 发新消息逻辑 ★★★
+            // =================================================================
+            if (isReroll) {
+                const lastUserMsg = [...contact.history].reverse().find(m => m.role === 'user');
+                if (!lastUserMsg) return;
+                agentUserMessage = lastUserMsg;
+                // ★ 重 roll 图片时同样绑定原用户消息 ID，主动消息插入历史后也不会把描述回填到错误位置。
+                requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = lastUserMsg.messageId || null;
+                // 朋友圈按“用户消息轮次”消费；重 roll 复用同一个 turnId，不再额外扣次数。
+                if (!lastUserMsg.momentInjectionTurnId) {
+                    lastUserMsg.momentInjectionTurnId = `moment_turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                }
+                currentMomentTurnId = lastUserMsg.momentInjectionTurnId;
+                // Reroll 复用历史记录里的文本
+                userText = lastUserMsg.content;
+            
+                // ★ 多模态重新生成必须复用这条用户消息原来的图片；普通模式仍然只复用已经保存的识图描述。
+                // 图片气泡被“向 Ta 隐藏”后不能偷偷重新带回请求，索引规则与渲染/删除保持一致。
+                if (requestSettings.IMAGE_API_MODE === 'multimodal' && Array.isArray(lastUserMsg.images) && lastUserMsg.images[0]) {
+                    const imagePartIndex = HistoryVisibility.getTextParagraphs(lastUserMsg).length;
+                    const hiddenIndices = Array.isArray(lastUserMsg.hiddenIndices) ? lastUserMsg.hiddenIndices : [];
+                    if (!hiddenIndices.includes(imagePartIndex)) {
+                        currentImageBase64 = lastUserMsg.images[0];
+                    }
+                }
+            
+                // 记录最近的 AI 回复；只有新回复成功后才作废旧回复及其待确认操作。
+                // ★ 只记录替换目标，失败/切屏时旧回复仍完整保留；成功后再按身份替换。
+                const removedAssistantMessages = [];
+                for (let i = contact.history.length - 1; i >= 0 && contact.history[i].role === 'assistant'; i--) {
+                    const message = contact.history[i];
+                    if (!message.messageId) message.messageId = ProactiveMessages.makeId('assistant');
+                    removedAssistantMessages.push(message);
+                }
+                requestSettings.CHAT_REROLL_MESSAGE_IDS = removedAssistantMessages.map(message => message.messageId);
+                UI.beginRerollPreview?.(contact, 'history', requestSettings.CHAT_REROLL_MESSAGE_IDS);
+            } 
+
+            // New Message 逻辑：上屏 & 识图
+            else {
+                // 1. 决定图片数据
+                if (hasPendingImage) {
+                    currentImageBase64 = STATE.pendingImage;
+                }
+
+                // ★ 新消息先入库并生成气泡身份，首次上屏的菜单和多选才能直接定位原消息。
+                const currentMsgIndex = contact.history.length;
+                const momentInjectionTurnId = `moment_turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const newUserMsg = {
+                    role: 'user',
+                    content: `[${timestamp}] ${userText}`, // 注意：content 里不含描述，描述是后台用的
+                    timestamp,
+                    messageId: ProactiveMessages.makeId('user'),
+                    eventAt: Date.now(),
+                    recordedAt: Date.now(),
+                    momentInjectionTurnId,
+                    images: currentImageBase64 ? [currentImageBase64] : null,
+                    image_description: null
+                };
+                ChatBubbles.ensure(newUserMsg);
+                contact.history.push(newUserMsg);
+                agentUserMessage = newUserMsg;
+                requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = newUserMsg.messageId;
+                currentMomentTurnId = momentInjectionTurnId;
+
+                // 2. 立即在 UI 显示用户消息
+                const paragraphs = splitMessageIntoBubbleParts(userText);
+            
+                const group = document.createElement('div');
+                group.className = 'message-group';
+                group.dataset.msgIndex = currentMsgIndex;
+                group.dataset.sender = 'user';
+                group.messageRef = newUserMsg;
+                group.dataset.messageId = newUserMsg.messageId;
+
+                // --- 修复点开始 ---
+            
+                // 2.1 渲染文本部分
+                // 只要有文本就渲染文本气泡，不处理图片
+                if (paragraphs.length > 0) {
+                    paragraphs.forEach((p, index) => {
+                        if (p.trim() === '---') {
+                            // ✅ 正确做法：创建一个节点，然后塞进 group
+                            const separator = document.createElement('div');
+                            separator.className = 'chat-separator animate';
+                            group.appendChild(separator); 
+                        } else {
+                            // ★ 纯文本气泡，传 null (不带图)
+                            const bubble = UI.createSingleBubble(
+                                parseCustomMarkdown(p.trim()), 'user', null, timestamp, currentMsgIndex, true, index, null,
+                                false, false, newUserMsg
+                            );
+                            group.appendChild(bubble);
+                        }
+                    });
+                } 
+                // 删除了原本这里的 else if (hasPendingImage) {...} 
+                // 因为它和下面的逻辑重复，会导致纯图发送时出现两个气泡
+
+                // 2.2 ★★★ 统一渲染图片气泡 ★★★
+                // 无论是“纯图”还是“文+图”，图片都由此处统一生成
+                if (currentImageBase64) {
+                    // 这是一个只有图的气泡
+                    // 注意：index 使用 paragraphs.length，这样如果上面有文本，图片的 index 就是接在文本后面的
+                    const imgBubble = UI.createSingleBubble(
+                        "", 'user', null, timestamp, currentMsgIndex, true, paragraphs.length, currentImageBase64,
+                        false, false, newUserMsg
+                    );
+                    group.appendChild(imgBubble);
+                }
+
+                // --- 修复点结束 ---
+
+                UI.els.chatMsgs.appendChild(group);
+                UI.scrollToBottom();
+
+                // 3. UI 清理 (清空输入框和预览)
+                UI.els.input.value = '';
+                // 清掉内联高度，交回 CSS 的 min-height（随聊天字号自动缩放）
+                UI.els.input.style.height = '';
+                if (UI.els.previewContainer) UI.els.previewContainer.style.display = 'none'; // 隐藏预览
+                STATE.pendingImage = null; // ★ 清空暂存，防止下次误发
+                if (window.innerWidth < 800) UI.els.input.blur();
+
+                // 4. ★★★ 核心分支：如果有图，先跑识图 API ★★★
+                // 4. ★★★ 核心分支：如果有图，先跑识图 API ★★★
+                if (hasPendingImage && requestSettings.IMAGE_API_MODE === 'separate') {
+                    const visionSettings = {
+                        // 稍微优化下默认值，如果这里是空字符串， fetch 会直接报错被 catch 捕获
+                        url: STATE.settings.VISION_URL, 
+                        key: STATE.settings.VISION_KEY || STATE.settings.API_KEY,
+                        model: STATE.settings.VISION_MODEL || 'Qwen/Qwen3-VL-30B-A3B-Instruct',
+                        prompt: STATE.settings.VISION_PROMPT || '描述这张图片'
+                    };
+
+                    if (usingAsyncBackend) {
+                        // ★ 后台识图：
+                        // 走 Worker 时不在前端等待视觉模型，避免手机切屏时识图请求被浏览器杀掉。
+                        // 图片和视觉配置只随本次 job 临时发送，Worker 用完不会存 KV。
+                        const visionAuthMode = requestSettings.ASYNC_BACKEND_KEY_MODE || 'client_key';
+                        requestSettings.ASYNC_BACKEND_VISION = {
+                            image: currentImageBase64,
+                            url: visionSettings.url,
+                            key: visionAuthMode === 'server_secret' ? '' : visionSettings.key,
+                            model: visionSettings.model,
+                            prompt: visionSettings.prompt,
+                            auth_mode: visionAuthMode
+                        };
+                        requestSettings.ASYNC_BACKEND_USER_MESSAGE_INDEX = currentMsgIndex;
+                    } else {
+                        UI.setLoading(true, contact.id);
+                        try {
+                            // 如果连 URL 都没填，直接抛出错误，不发请求了
+                            if (!visionSettings.url) throw new Error("未配置视觉API地址");
+
+                            imageDescription = await API.analyzeImage(currentImageBase64, visionSettings);
+
+                        } catch (err) {
+                            console.error("识图流程跳过/失败:", err);
+                            // ★ 给 AI 一个明确的提示，告诉它为什么看不见
+                            imageDescription = "（系统提示：用户发送了一张图片，但由于未配置视觉模型或网络错误，无法提供图片内容的文本描述。请根据用户的文字上下文进行回复，如果需要，可以礼貌地询问图片内容。）";
+                        }
+                    }
+                }
+
+                // ★ 识图结果补到同一条已上屏消息，保留原消息和气泡身份。
+                newUserMsg.image_description = imageDescription || null;
+
+                // ★ 存储优化：只保留最后 3 张图的 base64，旧的删掉 base64 省空间
+                let imgCount = 0;
+                if (newUserMsg.images) imgCount++; 
+                for (let i = contact.history.length - 1; i >= 0; i--) {
+                    // ★ 本轮图片已计数；消息提前入库后，这里不能再把它算成第二张。
+                    if (contact.history[i] === newUserMsg) continue;
+                    if (contact.history[i].images && contact.history[i].images.length > 0) {
+                        imgCount++;
+                        if (imgCount > 3) {
+                            contact.history[i].images = null; 
+                            contact.history[i].isImageExpired = true; 
+                        }
+                    }
+                }
+            
+            }
+
+            // 保存一次（包含刚刚优化的图片数据）
+            await Storage.saveContacts();
+            if (!isReroll && agentUserMessage) {
+                ProactiveMessages.onUserMessage(contact).catch(error => console.warn('[主动消息] 用户消息同步失败:', error));
+            }
+            UI.setLoading(true, contact.id);
+
+            // ★★★★★ Agent：前置执行关闭 START ★★★★★
+            // 新协议由角色回复里的『行动意图』触发 skill；用户消息阶段不再让副模型抢先判断。
+            const agentRuntimeResult = null;
+            // ★★★★★ Agent：前置执行关闭 END ★★★★★
+
+            // ============================================================
+            // 3. 构建发送给 AI 的上下文 (缝合怪逻辑)
+            // ============================================================
+        
+            const historyMetadataChanged = this.ensureHistoryCacheMetadata(contact);
+            if (historyMetadataChanged) {
+                await Storage.saveContacts();
+            }
+            const historyWindow = this.selectHistoryWindowRecords(contact, requestSettings);
+            if (historyWindow.changed) {
+                await Storage.saveContacts();
+            }
+
+            // 预处理 History：统一走 AI 可见历史清洗，避免聊天、朋友圈、记忆各写一套隐藏规则。
+            const recentHistory = historyWindow.records
+                .map(record => record.msg)
+                .map(msg => HistoryVisibility.buildVisibleMessage(msg, {
+                    preserveTimestamp: true,
+                    includeImageDescription: true,
+                    // ★ 只给本轮图片保留占位，等待后台识图时不能把当前 user 清洗掉。
+                    preserveImagePlaceholder: msg === agentUserMessage && !!currentImageBase64
+                }))
+                .filter(m => m !== null);
+            historyWindow.log.sentCount = recentHistory.length;
+            requestSettings.HISTORY_WINDOW_LOG = historyWindow.log;
+
+            // ★★★ 缓存优化：把“当前 user”从历史尾部拆出来。
+            // 日级稳定背景前置到角色设定后；auto 模式把本轮触发世界书并入当前 user，避免打穿历史前缀缓存。
+            const historyForPayload = [...recentHistory];
+            let currentUserMessage = null;
+            if (historyForPayload.length && historyForPayload[historyForPayload.length - 1].role === 'user') {
+                currentUserMessage = historyForPayload.pop();
+            }
+
+            // ★ 纯图片的占位与时间已由统一清洗保留，隐藏图片不在这里额外补回。
+
+
+            // 构造最终 Payload
+            // 空白 System Prompt 不塞空壳 system 消息，避免请求体里出现无意义的 content: ""。
+            const messagesToSend = [];
+            const routineDynamicContextPrompts = [];
+            const volatileDynamicContextPrompts = [];
+            let triggeredWorldInfoPrompt = '';
+            if ((systemPrompt || '').trim()) {
+                messagesToSend.push({ role: 'system', content: systemPrompt });
+            }
+            const agentCapabilityPrompt = this.buildAgentCapabilityPrompt();
+            const contactPromptBlocks = [
+                (contact.prompt || '').trim(),
+                agentCapabilityPrompt
+            ].filter(Boolean);
+            // User Prompt 和 skill 能力都为空时不塞空壳 system 消息，保持 messages 列表干净。
+            if (contactPromptBlocks.length) {
+                messagesToSend.push({ role: 'system', content: `=== User Prompt ===\n${contactPromptBlocks.join('\n\n')}` });
+            }
+
+            // ★★★★★ 世界书分层注入 START ★★★★★
+            // 常驻世界书放进前置世界书 system；关键词触发世界书按插入方式进入 user 或同一个世界书 system。
+            // 图片描述是给主模型看的辅助信息，不属于用户亲口说的话；
+            // 所以世界书扫描单独吃一份去掉图片描述的 history，避免图片内容误触发关键词。
+            const worldInfoScanHistory = recentHistory.map(m => ({
+                role: m.role,
+                content: (m.content || '').replace(/\n\n\[System Info: 对方发送了一张图片，图片内容描述:[\s\S]*$/g, '')
+            }));
+            const worldInfoByType = (typeof WorldInfoEngine.scanByType === 'function')
+                ? WorldInfoEngine.scanByType(userText, worldInfoScanHistory, contact.id, contact.name)
+                : { constant: null, triggered: WorldInfoEngine.scan(userText, worldInfoScanHistory, contact.id, contact.name) };
+            // ★★★★★ 世界书分层注入 END ★★★★★
+
+            // ★★★★★ 世界感知：收集本轮动态背景 START ★★★★★
+            // 这里会先检查天气缓存是不是当前 0/12 点刷新时段的。
+            // 如果今天还没有缓存，就在真正发请求前补一次。
+            await this.ensureWorldSenseWeatherReady();
+            const worldSensePrompt = WorldSense.buildPromptFromSettings(STATE.settings, new Date());
+            if (worldSensePrompt) {
+                routineDynamicContextPrompts.push(worldSensePrompt);
+            }
+            // ★★★★★ 世界感知：收集本轮动态背景 END ★★★★★
+
+            // ★★★★★ 探索 TO DO / 倒数日：收集本轮动态背景 START ★★★★★
+            // 开关只控制是否告诉 AI；本地列表本身会继续保存在 IndexedDB。
+            const todoContextPrompt = TodoContext.buildPrompt(new Date());
+            if (todoContextPrompt) {
+                routineDynamicContextPrompts.push(todoContextPrompt);
+            }
+            // ★★★★★ 探索 TO DO / 倒数日：收集本轮动态背景 END ★★★★★
+
+            // ★★★★★ 角色记忆：收集本轮动态背景 START ★★★★★
+            // 记忆只注入昨天及更早的总结；寄语只在 UI 展示，不进入上下文。
+            await this.ensureCharacterMemoryReady(contact.id, { priority: true, silent: true });
+            const characterMemoryPrompt = CharacterMemory.buildChatPrompt(contact.id, new Date());
+            if (characterMemoryPrompt) {
+                routineDynamicContextPrompts.push(characterMemoryPrompt);
+            }
+            // ★★★★★ 角色记忆：收集本轮动态背景 END ★★★★★
+
+            // ★★★★★ 心笺：收集本轮动态背景 START ★★★★★
+            // ★ 心笺允许当天记录立即注入；超出天数后只保留用户/角色星标的内容。
+            const heartNotePrompt = typeof AgentHeartNoteManager !== 'undefined'
+                ? AgentHeartNoteManager.buildChatPrompt(contact.id, new Date())
+                : '';
+            if (heartNotePrompt) routineDynamicContextPrompts.push(heartNotePrompt);
+            // ★★★★★ 心笺：收集本轮动态背景 END ★★★★★
+
+            // ★★★★★ Agent：skill 执行结果回注 START ★★★★★
+            // 主模型只看到自然语言摘要，不能看到 worker model 的原始 JSON。
+            // Agent 刚刚改变了前端状态，属于“本轮即时信息”，和触发世界书一样按缓存优化策略分流。
+            if (agentRuntimeResult && Array.isArray(agentRuntimeResult.prompts)) {
+                volatileDynamicContextPrompts.push(...agentRuntimeResult.prompts);
+            }
+            // ★★★★★ Agent：skill 执行结果回注 END ★★★★★
+
+            // ★★★★★ 角色日程：收集本轮动态背景 START ★★★★★
+            // 日程只在该角色开启时注入；如果今天还没生成，会优先补当前角色这一份。
+            await this.ensureCharacterScheduleReady(contact.id, { priority: true, silent: true });
+            const characterSchedulePrompt = CharacterSchedule.buildChatPrompt(contact.id, new Date());
+            if (characterSchedulePrompt) {
+                routineDynamicContextPrompts.push(characterSchedulePrompt);
+            }
+            // ★★★★★ 角色日程：收集本轮动态背景 END ★★★★★
+        
+            // World Info 扫描：这里只放关键词触发条目，常驻条目已经放进稳定区。
+            if (worldInfoByType.triggered) {
+                triggeredWorldInfoPrompt = `=== 背景信息补充 ===\n${worldInfoByType.triggered}`;
+            }
+
+
+            // ★★★★★ 番茄钟：按角色收集实时状态与完成通知 START ★★★★★
+            // 先校正截止时间，避免后台定时器延迟导致已完成的番茄仍被写成进行中。
+            // ★ 正式聊天只需要校正番茄钟状态，不在聊天输入期间重绘隐藏的番茄钟页面。
+            await Pomodoro.tick(Date.now(), { renderMode: 'indicator' });
+            const pomodoroUpdateInfo = Pomodoro.context(contact.id, currentMomentTurnId);
+            requestSettings.POMODORO_INJECTION = pomodoroUpdateInfo;
+            // 与朋友圈共用即时背景队列且排在它前面，统一走 auto / user / system 分流。
+            if (pomodoroUpdateInfo.prompt) volatileDynamicContextPrompts.push(pomodoroUpdateInfo.prompt);
+            // 请求快照随用户消息保存，后台恢复也只消费本次实际发送的记录。
+            const pomodoroUserMessage = [...contact.history].reverse().find(m => m.role === 'user');
+            if (pomodoroUserMessage) {
+                pomodoroUserMessage.pomodoroInjection = pomodoroUpdateInfo;
+                await Storage.saveContacts();
+            }
+            // ★★★★★ 番茄钟：按角色收集实时状态与完成通知 END ★★★★★
+
+            // ★★★ 【核心修改】检查朋友圈并注入 ★★★
+            let momentsUpdateInfo = null;
+            try {
+                // 调用我们刚才写的辅助函数
+                // 注意：如果你把函数放在 App 对象下，记得用 this.getMomentsContextForChat
+                // 如果是定义在外部，直接用
+                if (typeof this.getMomentsContextForChat === 'function') {
+                    momentsUpdateInfo = this.getMomentsContextForChat(contact.id, currentMomentTurnId);
+                } else if (typeof App !== 'undefined' && typeof App.getMomentsContextForChat === 'function') {
+                    momentsUpdateInfo = App.getMomentsContextForChat(contact.id, currentMomentTurnId);
+                }
+
+                if (momentsUpdateInfo && momentsUpdateInfo.prompt) {
+                    console.log(`[Chat] 注入朋友圈动态 context (${momentsUpdateInfo.momentIds.length}条)`);
+                    // 朋友圈是本轮通知型背景，不混进“今日稳定背景”；auto 下随本轮触发世界书并入当前 user。
+                    volatileDynamicContextPrompts.push(momentsUpdateInfo.prompt);
+                }
+            } catch (e) {
+                console.warn("朋友圈注入失败:", e);
+            }
+
+            // ★★★ 线下见面回顾：切回线上的前几轮请求附带线下最后一条消息 START ★★★
+            // 与朋友圈一样属于本轮易变背景：auto/user 模式并入当前 user，system 模式并入本轮即时系统信息。
+            if (typeof OfflineChat !== 'undefined' && OfflineChat.shouldInjectRecap(contact)) {
+                const offlineRecapPrompt = OfflineChat.buildRecapPrompt(contact);
+                if (offlineRecapPrompt) {
+                    console.log('[Chat] 注入线下见面回顾');
+                    volatileDynamicContextPrompts.push(offlineRecapPrompt);
+                }
+            }
+            // ★★★ 线下见面回顾 END ★★★
+
+            let dynamicContextContent = '';
+            const allDynamicContextPrompts = [
+                ...routineDynamicContextPrompts,
+                ...volatileDynamicContextPrompts,
+                triggeredWorldInfoPrompt
+            ].filter(Boolean);
+            const systemDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
+                ? []
+                : routineDynamicContextPrompts;
+            const userDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
+                ? allDynamicContextPrompts
+                : requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'auto'
+                    ? [triggeredWorldInfoPrompt, ...volatileDynamicContextPrompts].filter(Boolean)
+                    : [];
+
+            if (allDynamicContextPrompts.length) {
+                dynamicContextContent = [
                     '=== 本轮背景资料 ===',
                     '',
-                    ...userDynamicContextPrompts
-                ].join('\n\n')
+                    ...allDynamicContextPrompts
+                ].join('\n\n');
+            }
+
+            if (systemDynamicContextPrompts.length) {
+                // ★★★★★ 日级稳定背景前置 START ★★★★★
+                // 天气、日期、TODO、日程等一天内相对稳定的信息，紧跟角色设定；不再插到最新 user 前面。
+                messagesToSend.push({
+                    role: 'system',
+                    content: [
+                        '=== 今日背景信息 ===',
+                        '',
+                        ...systemDynamicContextPrompts
+                    ].join('\n\n')
+                });
+                // ★★★★★ 日级稳定背景前置 END ★★★★★
+            }
+
+            const worldInfoSystemBlocks = [];
+            if (worldInfoByType.constant) {
+                worldInfoSystemBlocks.push(`=== 常驻世界知识/环境信息 ===\n${worldInfoByType.constant}`);
+            }
+            if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && triggeredWorldInfoPrompt) {
+                // ★ system 模式没有缓存收益；本轮触发世界书和常驻世界书放在同一条世界书 system 里，语义更集中。
+                worldInfoSystemBlocks.push(triggeredWorldInfoPrompt);
+            }
+            if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && volatileDynamicContextPrompts.length) {
+                worldInfoSystemBlocks.push([
+                    '=== 本轮即时系统信息 ===',
+                    '',
+                    ...volatileDynamicContextPrompts
+                ].join('\n\n'));
+            }
+            if (worldInfoSystemBlocks.length) {
+                messagesToSend.push({
+                    role: 'system',
+                    content: worldInfoSystemBlocks.join('\n\n')
+                });
+            }
+
+            // 追加历史：当前 user 已经拆到最后单独处理，保证用户原话仍然压轴。
+            historyForPayload.forEach(h => messagesToSend.push(h));
+
+            if (userDynamicContextPrompts.length && currentUserMessage) {
+                // ★★★★★ 自动缓存优化：本轮触发世界书并入当前 user START ★★★★★
+                // user 模式会把所有动态背景合并进当前 user；auto 模式只合并变化最大的本轮触发世界书。
+                // 日级稳定背景已经前置；新增世界书尽量压到末尾，保护历史前缀缓存。
+                const userContextTitle = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'auto'
+                    ? '【系统信息补充】'
+                    : '【系统信息补充】';
+                currentUserMessage = {
+                    ...currentUserMessage,
+                    content: [
+                        userContextTitle,
+                        userDynamicContextPrompts.join('\n\n'),
+                        '',
+                        '【系统信息补充END】',
+                        '',
+                        '【用户当前消息】',
+                        currentUserMessage.content
+                    ].join('\n\n')
+                };
+                // ★★★★★ 自动缓存优化：本轮触发世界书并入当前 user END ★★★★★
+            } else if (userDynamicContextPrompts.length) {
+                // 极少数没有当前 user 的调用兜底：不能合并时仍保留动态背景，避免世界书静默丢失。
+                const firstNonSystemIndex = messagesToSend.findIndex(message => message?.role !== 'system');
+                const insertIndex = firstNonSystemIndex >= 0 ? firstNonSystemIndex : messagesToSend.length;
+                messagesToSend.splice(insertIndex, 0, {
+                    role: 'system',
+                    content: [
+                        '=== 本轮背景资料 ===',
+                        '',
+                        ...userDynamicContextPrompts
+                    ].join('\n\n')
+                });
+            }
+
+            const stableMessageCount = messagesToSend.length;
+
+            if (currentUserMessage) {
+                messagesToSend.push(currentUserMessage);
+            }
+            requestSettings.ASYNC_BACKEND_REQUEST_USER_MESSAGE_INDEX = currentUserMessage
+                ? messagesToSend.length - 1
+                : -1;
+
+            // ★ 多模态只携带本轮原图：历史中的其它 images 不进入 messagesToSend，避免每轮重复计算图片 Token。
+            requestSettings.MULTIMODAL_IMAGE = requestSettings.IMAGE_API_MODE === 'multimodal'
+                ? (currentImageBase64 || '')
+                : '';
+            requestSettings.MULTIMODAL_MESSAGE_INDEX = requestSettings.MULTIMODAL_IMAGE
+                ? requestSettings.ASYNC_BACKEND_REQUEST_USER_MESSAGE_INDEX
+                : -1;
+            requestSettings.ASYNC_BACKEND_AGENT = null;
+            if (requestSettings.ASYNC_BACKEND_AGENT?.todo_manager) {
+                await this.setAgentExecutionState(contact, agentUserMessage, 'todo_manager', {
+                    status: 'pending',
+                    error: '',
+                    resultPrompt: ''
+                });
+            }
+            requestSettings.ASYNC_BACKEND_ON_JOB_UPDATE = usingAsyncBackend
+                ? async (job) => this.applyAsyncBackendAgentStage(job, contact, agentUserMessage)
+                : null;
+            requestSettings.REQUEST_CACHE_DEBUG_LOG = this.buildRequestCacheDebugLog({
+                messages: messagesToSend,
+                stableMessageCount,
+                dynamicContextText: dynamicContextContent,
+                originalUserText: userText,
+                insertMode: requestSettings.DYNAMIC_CONTEXT_INSERT_MODE,
+                historyWindowLog: requestSettings.HISTORY_WINDOW_LOG,
+                triggeredWorldInfoEntries: worldInfoByType.triggeredEntries || [],
+                constantWorldInfoEntries: worldInfoByType.constantEntries || [],
+                extraBodyJson: requestSettings.CUSTOM_REQUEST_BODY_JSON || '',
+                model: requestSettings.MODEL
             });
-        }
 
-        const stableMessageCount = messagesToSend.length;
-
-        if (currentUserMessage) {
-            messagesToSend.push(currentUserMessage);
-        }
-        requestSettings.ASYNC_BACKEND_REQUEST_USER_MESSAGE_INDEX = currentUserMessage
-            ? messagesToSend.length - 1
-            : -1;
-
-        // ★ 多模态只携带本轮原图：历史中的其它 images 不进入 messagesToSend，避免每轮重复计算图片 Token。
-        requestSettings.MULTIMODAL_IMAGE = requestSettings.IMAGE_API_MODE === 'multimodal'
-            ? (currentImageBase64 || '')
-            : '';
-        requestSettings.MULTIMODAL_MESSAGE_INDEX = requestSettings.MULTIMODAL_IMAGE
-            ? requestSettings.ASYNC_BACKEND_REQUEST_USER_MESSAGE_INDEX
-            : -1;
-        requestSettings.ASYNC_BACKEND_AGENT = null;
-        if (requestSettings.ASYNC_BACKEND_AGENT?.todo_manager) {
-            await this.setAgentExecutionState(contact, agentUserMessage, 'todo_manager', {
-                status: 'pending',
-                error: '',
-                resultPrompt: ''
-            });
-        }
-        requestSettings.ASYNC_BACKEND_ON_JOB_UPDATE = usingAsyncBackend
-            ? async (job) => this.applyAsyncBackendAgentStage(job, contact, agentUserMessage)
-            : null;
-        requestSettings.REQUEST_CACHE_DEBUG_LOG = this.buildRequestCacheDebugLog({
-            messages: messagesToSend,
-            stableMessageCount,
-            dynamicContextText: dynamicContextContent,
-            originalUserText: userText,
-            insertMode: requestSettings.DYNAMIC_CONTEXT_INSERT_MODE,
-            historyWindowLog: requestSettings.HISTORY_WINDOW_LOG,
-            triggeredWorldInfoEntries: worldInfoByType.triggeredEntries || [],
-            constantWorldInfoEntries: worldInfoByType.constantEntries || [],
-            extraBodyJson: requestSettings.CUSTOM_REQUEST_BODY_JSON || '',
-            model: requestSettings.MODEL
-        });
-
-        // ============================================================
-        // 4. 发送请求给 AI (Step 4)
-        // ============================================================
-        try {
+            // ============================================================
+            // 4. 发送请求给 AI (Step 4)
+            // ============================================================
             requestSettings.USAGE_CHAT = true;
             requestSettings.USAGE_REROLL = isReroll;
             const aiText = await API.chat(messagesToSend, requestSettings);
@@ -11511,7 +11647,22 @@ const App = {
             // 2. visibilitychange/pageshow 触发的 pending job 恢复链路。
             // 两边拿到的是同一个 Worker job，所以前台保存时也写 asyncJobId，
             // 并且保存前先查一次，防止恢复链路已经把同一条回复写进 history。
+            if (!String(aiText || '').trim()) throw new Error('模型未返回正文，已保留原回复');
+            if (!STATE.contacts.includes(contact)) return;
             if (!alreadySavedByResume) {
+                const ids = new Set(requestSettings.CHAT_REROLL_MESSAGE_IDS || []);
+                const replaced = contact.history.filter(message => ids.has(message.messageId));
+                const originalHistory = contact.history;
+                const originalBridge = { offlineBridgeRoundsLeft: contact.offlineBridgeRoundsLeft,
+                    offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId };
+                replacementRollback = () => {
+                    contact.history = originalHistory;
+                    Object.assign(contact, originalBridge);
+                };
+                contact.history = contact.history.filter(message => !ids.has(message.messageId));
+                this.discardAgentConfirmationsForMessages(replaced);
+                if (this.isViewingContactChat(contact.id) && replaced.length) UI.renderChatHistory(contact);
+
                 const aiMessage = {
                     role: 'assistant',
                     content: aiText,
@@ -11532,6 +11683,10 @@ const App = {
             // ★★★ Presence：AI 回复入库后也算一次互动，保持顶部状态新鲜 ★★★
             UI.touchContactPresence(contact);
 
+            // ★ 先保存正文，附加 Agent/动画失败不能让主回复只停留在内存。
+            await Storage.saveContacts();
+            replacementRollback = null;
+            UI.clearRerollPreview?.(contact, 'history');
             const assistantMessage = contact.history[newAiMessageIndex] || null;
             if (assistantMessage && assistantMessage.role === 'assistant') {
                 const consumedWorkerPostAgent = await this.consumeWorkerPostAgentResult(contact, assistantMessage, API.lastAsyncBackendResult?.post_agent);
@@ -11608,9 +11763,20 @@ const App = {
                 this.refreshDesktopUnreadDotsIfNeeded();
             }
             
+            // ★ 写入完成才清理 Worker；确认失败保留 pending，恢复时按 jobId 去重。
+            if (asyncJobId) {
+                try {
+                    await API.deleteChatJob(requestSettings.ASYNC_BACKEND_URL, asyncJobId, requestSettings.ASYNC_BACKEND_TOKEN);
+                    API.forgetPendingJob(asyncJobId);
+                } catch (ackError) { console.warn('[AsyncBackend] 等待下次确认:', ackError); }
+            }
             UI.setLoading(false, contact.id);
             
         } catch (error) {
+            if (replacementRollback) {
+                replacementRollback();
+                if (this.isViewingContactChat(contact.id)) UI.renderChatHistory(contact);
+            }
             console.error(error);
 
             // ★★★★★ 后台回复接收：手机切屏保护 START ★★★★★
@@ -11625,6 +11791,7 @@ const App = {
             }
             // ★★★★★ 后台回复接收：手机切屏保护 END ★★★★★
 
+            UI.clearRerollPreview?.(contact, 'history', true);
             await this.maybePromptDynamicContextCompatMode(error, requestSettings, contact);
 
             if (this.isViewingContactChat(contact.id)) {
@@ -11633,11 +11800,14 @@ const App = {
                 UI.appendMessageBubble(`(发送失败: ${error.message})`, 'ai', contact.avatar, null, errorIndex);
             }
         } finally {
+            UI.clearRerollPreview?.(contact, 'history');
+            STATE.chatRequestActive = false;
+            UI.setLoading(false, contact.id);
             if (this.isViewingContactChat(contact.id)) {
                 UI.updateRerollState(contact);
             }
             // 手机端不自动聚焦，防止键盘弹起遮挡
-            if (window.innerWidth >= 800 && UI.els.input) UI.els.input.focus();
+            if (this.isViewingContactChat(contact.id) && window.innerWidth >= 800 && UI.els.input) UI.els.input.focus();
         }
     },
 
@@ -11730,6 +11900,10 @@ const App = {
     async handleOfflineSend(isReroll = false) {
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!contact || !OfflineChat.isOffline(contact)) return;
+        // ★ 在首次 await 前占用请求槽；跨角色也不能并发覆盖 API.lastAsyncBackendResult。
+        if (STATE.chatRequestActive || STATE.typingContactId) return;
+        if (typeof API.loadPendingJobs === 'function' && API.loadPendingJobs().some(job =>
+            job.contactId === contact.id && job.status === 'running')) return;
         OfflineChat.ensureFields(contact);
         if (STATE.typingContactId === contact.id) return;
 
@@ -11749,214 +11923,219 @@ const App = {
         const inputEl = UI.els.offlineInput;
         let userText = (inputEl?.value || '').trim();
         if (!isReroll && !userText) return;
-
-        // 2. Reroll：确认后移除末尾所有 assistant 卡片（含临时失败占位）
-        if (isReroll) {
-            if (!confirm('重新生成这条回复？')) return;
-            const lastUserMsg = [...contact.offlineHistory].reverse().find(m => m.role === 'user');
-            if (!lastUserMsg) return;
-            userText = lastUserMsg.content;
-            const removedAssistantMessages = [];
-            while (contact.offlineHistory.length > 0 && contact.offlineHistory[contact.offlineHistory.length - 1].role === 'assistant') {
-                removedAssistantMessages.push(contact.offlineHistory.pop());
-            }
-            // ★ 只摘掉被重生成的旧卡片，其他卡片保持原样、不重播动画。
-            if (!UI.removeOfflineCards(contact, removedAssistantMessages)) {
-                UI.renderOfflineChatHistory(contact, false, true);
-            }
-        }
-
-        // 3. 新消息入库并上屏
-        const timestamp = formatTimestamp();
-        let agentUserMessage = null;
-        if (!isReroll) {
-            const newUserMsg = {
-                role: 'user',
-                content: `[${timestamp}] ${userText}`, // ★ 时间戳隐式拼在最前，与线上一致
-                timestamp,
-                messageId: ProactiveMessages.makeId('user'),
-                eventAt: Date.now(),
-                recordedAt: Date.now()
-            };
-            contact.offlineHistory.push(newUserMsg);
-            agentUserMessage = newUserMsg;
-            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = newUserMsg.messageId;
-
-            // ★ 只追加新卡片，不重建整列；旧卡片不会重播入场动画。
-            UI.appendOfflineCard(contact, newUserMsg);
-            if (inputEl) {
-                inputEl.value = '';
-                // 清掉内联高度，交回 CSS 的 min-height（随聊天字号自动缩放）
-                inputEl.style.height = '';
-            }
-            if (window.innerWidth < 800 && inputEl) inputEl.blur();
-        } else {
-            agentUserMessage = [...contact.offlineHistory].reverse().find(m => m.role === 'user') || null;
-            requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = agentUserMessage?.messageId || null;
-        }
-        // 轮次 id：reroll 复用同一条用户消息的 messageId，桥接轮次不会重复扣。
-        const roundId = agentUserMessage?.messageId || '';
-
-        await Storage.saveContacts();
+        let replacementRollback = null; // ★ 保存新正文失败时恢复旧数组，避免内存和磁盘各留一半。
+        STATE.chatRequestActive = true;
         STATE.typingContactId = contact.id;
-        UI.setOfflineTyping(true);
-        if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.disabled = true;
-
-        // ============================================================
-        // 4. 构建线下见面 prompt
-        // ============================================================
-        const messagesToSend = [];
-        const routineDynamicContextPrompts = [];
-        let triggeredWorldInfoPrompt = '';
-
-        // ① 恒定的线下场景提示
-        messagesToSend.push({ role: 'system', content: OfflineChat.SYSTEM_PROMPT });
-
-        // ② 人设：为空则整条不发
-        const personaBlock = (contact.prompt || '').trim();
-        if (personaBlock) {
-            messagesToSend.push({ role: 'system', content: `=== User Prompt ===\n${personaBlock}` });
-        }
-
-        // 线下历史窗口：与线上同一套缓存友好/严格最近策略，序号落在 offlineHistory 自己的字段里
-        const historyMetadataChanged = this.ensureHistoryCacheMetadata(contact, 'offlineHistory');
-        if (historyMetadataChanged) await Storage.saveContacts();
-        const historyWindow = this.selectHistoryWindowRecords(contact, requestSettings, 'offlineHistory');
-        if (historyWindow.changed) await Storage.saveContacts();
-        const offlineVisible = historyWindow.records
-            .map(record => record.msg)
-            .map(msg => HistoryVisibility.buildVisibleMessage(msg, { preserveTimestamp: true, includeImageDescription: true }))
-            .filter(m => m !== null);
-        requestSettings.HISTORY_WINDOW_LOG = historyWindow.log;
-
-        // ★ 把当前 user 从历史尾部拆出来压轴，与线上组装保持同构。
-        const historyForPayload = [...offlineVisible];
-        let currentUserMessage = null;
-        if (historyForPayload.length && historyForPayload[historyForPayload.length - 1].role === 'user') {
-            currentUserMessage = historyForPayload.pop();
-        }
-
-        // ③ 今日背景信息：世界感知/TODO/角色记忆/心笺/角色日程整套照搬（线下无朋友圈/番茄钟/Agent）
-        await this.ensureWorldSenseWeatherReady();
-        const worldSensePrompt = WorldSense.buildPromptFromSettings(STATE.settings, new Date());
-        if (worldSensePrompt) routineDynamicContextPrompts.push(worldSensePrompt);
-
-        const todoContextPrompt = TodoContext.buildPrompt(new Date());
-        if (todoContextPrompt) routineDynamicContextPrompts.push(todoContextPrompt);
-
-        await this.ensureCharacterMemoryReady(contact.id, { priority: true, silent: true });
-        const characterMemoryPrompt = CharacterMemory.buildChatPrompt(contact.id, new Date());
-        if (characterMemoryPrompt) routineDynamicContextPrompts.push(characterMemoryPrompt);
-
-        const heartNotePrompt = typeof AgentHeartNoteManager !== 'undefined'
-            ? AgentHeartNoteManager.buildChatPrompt(contact.id, new Date())
-            : '';
-        if (heartNotePrompt) routineDynamicContextPrompts.push(heartNotePrompt);
-
-        await this.ensureCharacterScheduleReady(contact.id, { priority: true, silent: true });
-        const characterSchedulePrompt = CharacterSchedule.buildChatPrompt(contact.id, new Date());
-        if (characterSchedulePrompt) routineDynamicContextPrompts.push(characterSchedulePrompt);
-
-        // ④ 世界书：常驻 + 关键词触发（扫描历史与线上同口径：去掉图片描述尾巴）
-        const worldInfoScanHistory = historyForPayload.map(m => ({
-            role: m.role,
-            content: (m.content || '').replace(/\n\n\[System Info: 对方发送了一张图片，图片内容描述:[\s\S]*$/g, '')
-        }));
-        const worldInfoByType = (typeof WorldInfoEngine.scanByType === 'function')
-            ? WorldInfoEngine.scanByType(userText, worldInfoScanHistory, contact.id, contact.name)
-            : { constant: null, triggered: WorldInfoEngine.scan(userText, worldInfoScanHistory, contact.id, contact.name) };
-        if (worldInfoByType.triggered) {
-            triggeredWorldInfoPrompt = `=== 背景信息补充 ===\n${worldInfoByType.triggered}`;
-        }
-
-        // ⑤ 今日背景信息 system：为空则整条不发
-        const systemDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
-            ? []
-            : routineDynamicContextPrompts;
-        if (systemDynamicContextPrompts.length) {
-            messagesToSend.push({
-                role: 'system',
-                content: ['=== 今日背景信息 ===', '', ...systemDynamicContextPrompts].join('\n\n')
-            });
-        }
-
-        // ⑥ 世界书 system：为空则整条不发
-        const worldInfoSystemBlocks = [];
-        if (worldInfoByType.constant) {
-            worldInfoSystemBlocks.push(`=== 常驻世界知识/环境信息 ===\n${worldInfoByType.constant}`);
-        }
-        if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && triggeredWorldInfoPrompt) {
-            worldInfoSystemBlocks.push(triggeredWorldInfoPrompt);
-        }
-        if (worldInfoSystemBlocks.length) {
-            messagesToSend.push({ role: 'system', content: worldInfoSystemBlocks.join('\n\n') });
-        }
-
-        // ⑦ 桥接：切到线下的前 2 轮请求，固定附带线上最后 6 条（3 轮）聊天记录
-        if (OfflineChat.shouldInjectBridge(contact)) {
-            const bridgeMessages = OfflineChat.buildBridgeMessages(contact.history);
-            bridgeMessages.forEach(m => messagesToSend.push(m));
-        }
-
-        // ⑧ 线下历史
-        historyForPayload.forEach(h => messagesToSend.push(h));
-
-        // 动态内容按用户选的缓存命中优化方式分流（与线上同构；线下没有其它易变项）
-        const allDynamicContextPrompts = [...routineDynamicContextPrompts, triggeredWorldInfoPrompt].filter(Boolean);
-        const userDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
-            ? allDynamicContextPrompts
-            : requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'auto'
-                ? [triggeredWorldInfoPrompt].filter(Boolean)
-                : [];
-
-        if (userDynamicContextPrompts.length && currentUserMessage) {
-            currentUserMessage = {
-                ...currentUserMessage,
-                content: [
-                    '【系统信息补充】',
-                    userDynamicContextPrompts.join('\n\n'),
-                    '',
-                    '【系统信息补充END】',
-                    '',
-                    '【用户当前消息】',
-                    currentUserMessage.content
-                ].join('\n\n')
-            };
-        } else if (userDynamicContextPrompts.length) {
-            // 极少数没有当前 user 的调用兜底：不能合并时仍保留动态背景。
-            const firstNonSystemIndex = messagesToSend.findIndex(message => message?.role !== 'system');
-            const insertIndex = firstNonSystemIndex >= 0 ? firstNonSystemIndex : messagesToSend.length;
-            messagesToSend.splice(insertIndex, 0, {
-                role: 'system',
-                content: ['=== 本轮背景资料 ===', '', ...userDynamicContextPrompts].join('\n\n')
-            });
-        }
-
-        const stableMessageCount = messagesToSend.length;
-        if (currentUserMessage) {
-            messagesToSend.push(currentUserMessage);
-        }
-        requestSettings.ASYNC_BACKEND_REQUEST_USER_MESSAGE_INDEX = currentUserMessage
-            ? messagesToSend.length - 1
-            : -1;
-
-        requestSettings.REQUEST_CACHE_DEBUG_LOG = this.buildRequestCacheDebugLog({
-            messages: messagesToSend,
-            stableMessageCount,
-            dynamicContextText: allDynamicContextPrompts.join('\n\n'),
-            originalUserText: userText,
-            insertMode: requestSettings.DYNAMIC_CONTEXT_INSERT_MODE,
-            historyWindowLog: requestSettings.HISTORY_WINDOW_LOG,
-            triggeredWorldInfoEntries: worldInfoByType.triggeredEntries || [],
-            constantWorldInfoEntries: worldInfoByType.constantEntries || [],
-            extraBodyJson: requestSettings.CUSTOM_REQUEST_BODY_JSON || '',
-            model: requestSettings.MODEL
-        });
-
-        // ============================================================
-        // 5. 发送请求
-        // ============================================================
+        requestSettings.CHAT_HISTORY_KEY = 'offlineHistory';
         try {
+
+            // 2. Reroll：确认后记录末尾 assistant 卡片，成功后才替换（含临时失败占位）
+            if (isReroll) {
+                if (!confirm('重新生成这条回复？')) return;
+                const lastUserMsg = [...contact.offlineHistory].reverse().find(m => m.role === 'user');
+                if (!lastUserMsg) return;
+                userText = lastUserMsg.content;
+                // ★ 只记录替换目标，失败/切屏时旧回复仍完整保留；成功后再按身份替换。
+                const removedAssistantMessages = [];
+                for (let i = contact.offlineHistory.length - 1; i >= 0 && contact.offlineHistory[i].role === 'assistant'; i--) {
+                    const message = contact.offlineHistory[i];
+                    if (!message.messageId) message.messageId = ProactiveMessages.makeId('assistant');
+                    removedAssistantMessages.push(message);
+                }
+                requestSettings.CHAT_REROLL_MESSAGE_IDS = removedAssistantMessages.map(message => message.messageId);
+                UI.beginRerollPreview?.(contact, 'offlineHistory', requestSettings.CHAT_REROLL_MESSAGE_IDS);
+            }
+
+            // 3. 新消息入库并上屏
+            const timestamp = formatTimestamp();
+            let agentUserMessage = null;
+            if (!isReroll) {
+                const newUserMsg = {
+                    role: 'user',
+                    content: `[${timestamp}] ${userText}`, // ★ 时间戳隐式拼在最前，与线上一致
+                    timestamp,
+                    messageId: ProactiveMessages.makeId('user'),
+                    eventAt: Date.now(),
+                    recordedAt: Date.now()
+                };
+                contact.offlineHistory.push(newUserMsg);
+                agentUserMessage = newUserMsg;
+                requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = newUserMsg.messageId;
+
+                // ★ 只追加新卡片，不重建整列；旧卡片不会重播入场动画。
+                UI.appendOfflineCard(contact, newUserMsg);
+                if (inputEl) {
+                    inputEl.value = '';
+                    // 清掉内联高度，交回 CSS 的 min-height（随聊天字号自动缩放）
+                    inputEl.style.height = '';
+                }
+                if (window.innerWidth < 800 && inputEl) inputEl.blur();
+            } else {
+                agentUserMessage = [...contact.offlineHistory].reverse().find(m => m.role === 'user') || null;
+                requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = agentUserMessage?.messageId || null;
+            }
+            // 轮次 id：reroll 复用同一条用户消息的 messageId，桥接轮次不会重复扣。
+            const roundId = agentUserMessage?.messageId || '';
+
+            await Storage.saveContacts();
+            STATE.typingContactId = contact.id;
+            UI.setOfflineTyping(true);
+            if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.disabled = true;
+
+            // ============================================================
+            // 4. 构建线下见面 prompt
+            // ============================================================
+            const messagesToSend = [];
+            const routineDynamicContextPrompts = [];
+            let triggeredWorldInfoPrompt = '';
+
+            // ① 恒定的线下场景提示
+            messagesToSend.push({ role: 'system', content: OfflineChat.SYSTEM_PROMPT });
+
+            // ② 人设：为空则整条不发
+            const personaBlock = (contact.prompt || '').trim();
+            if (personaBlock) {
+                messagesToSend.push({ role: 'system', content: `=== User Prompt ===\n${personaBlock}` });
+            }
+
+            // 线下历史窗口：与线上同一套缓存友好/严格最近策略，序号落在 offlineHistory 自己的字段里
+            const historyMetadataChanged = this.ensureHistoryCacheMetadata(contact, 'offlineHistory');
+            if (historyMetadataChanged) await Storage.saveContacts();
+            const historyWindow = this.selectHistoryWindowRecords(contact, requestSettings, 'offlineHistory');
+            if (historyWindow.changed) await Storage.saveContacts();
+            const offlineVisible = historyWindow.records
+                .map(record => record.msg)
+                .map(msg => HistoryVisibility.buildVisibleMessage(msg, { preserveTimestamp: true, includeImageDescription: true }))
+                .filter(m => m !== null);
+            requestSettings.HISTORY_WINDOW_LOG = historyWindow.log;
+
+            // ★ 把当前 user 从历史尾部拆出来压轴，与线上组装保持同构。
+            const historyForPayload = [...offlineVisible];
+            let currentUserMessage = null;
+            if (historyForPayload.length && historyForPayload[historyForPayload.length - 1].role === 'user') {
+                currentUserMessage = historyForPayload.pop();
+            }
+
+            // ③ 今日背景信息：世界感知/TODO/角色记忆/心笺/角色日程整套照搬（线下无朋友圈/番茄钟/Agent）
+            await this.ensureWorldSenseWeatherReady();
+            const worldSensePrompt = WorldSense.buildPromptFromSettings(STATE.settings, new Date());
+            if (worldSensePrompt) routineDynamicContextPrompts.push(worldSensePrompt);
+
+            const todoContextPrompt = TodoContext.buildPrompt(new Date());
+            if (todoContextPrompt) routineDynamicContextPrompts.push(todoContextPrompt);
+
+            await this.ensureCharacterMemoryReady(contact.id, { priority: true, silent: true });
+            const characterMemoryPrompt = CharacterMemory.buildChatPrompt(contact.id, new Date());
+            if (characterMemoryPrompt) routineDynamicContextPrompts.push(characterMemoryPrompt);
+
+            const heartNotePrompt = typeof AgentHeartNoteManager !== 'undefined'
+                ? AgentHeartNoteManager.buildChatPrompt(contact.id, new Date())
+                : '';
+            if (heartNotePrompt) routineDynamicContextPrompts.push(heartNotePrompt);
+
+            await this.ensureCharacterScheduleReady(contact.id, { priority: true, silent: true });
+            const characterSchedulePrompt = CharacterSchedule.buildChatPrompt(contact.id, new Date());
+            if (characterSchedulePrompt) routineDynamicContextPrompts.push(characterSchedulePrompt);
+
+            // ④ 世界书：常驻 + 关键词触发（扫描历史与线上同口径：去掉图片描述尾巴）
+            const worldInfoScanHistory = historyForPayload.map(m => ({
+                role: m.role,
+                content: (m.content || '').replace(/\n\n\[System Info: 对方发送了一张图片，图片内容描述:[\s\S]*$/g, '')
+            }));
+            const worldInfoByType = (typeof WorldInfoEngine.scanByType === 'function')
+                ? WorldInfoEngine.scanByType(userText, worldInfoScanHistory, contact.id, contact.name)
+                : { constant: null, triggered: WorldInfoEngine.scan(userText, worldInfoScanHistory, contact.id, contact.name) };
+            if (worldInfoByType.triggered) {
+                triggeredWorldInfoPrompt = `=== 背景信息补充 ===\n${worldInfoByType.triggered}`;
+            }
+
+            // ⑤ 今日背景信息 system：为空则整条不发
+            const systemDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
+                ? []
+                : routineDynamicContextPrompts;
+            if (systemDynamicContextPrompts.length) {
+                messagesToSend.push({
+                    role: 'system',
+                    content: ['=== 今日背景信息 ===', '', ...systemDynamicContextPrompts].join('\n\n')
+                });
+            }
+
+            // ⑥ 世界书 system：为空则整条不发
+            const worldInfoSystemBlocks = [];
+            if (worldInfoByType.constant) {
+                worldInfoSystemBlocks.push(`=== 常驻世界知识/环境信息 ===\n${worldInfoByType.constant}`);
+            }
+            if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && triggeredWorldInfoPrompt) {
+                worldInfoSystemBlocks.push(triggeredWorldInfoPrompt);
+            }
+            if (worldInfoSystemBlocks.length) {
+                messagesToSend.push({ role: 'system', content: worldInfoSystemBlocks.join('\n\n') });
+            }
+
+            // ⑦ 桥接：切到线下的前 2 轮请求，固定附带线上最后 6 条（3 轮）聊天记录
+            if (OfflineChat.shouldInjectBridge(contact)) {
+                const bridgeMessages = OfflineChat.buildBridgeMessages(contact.history);
+                bridgeMessages.forEach(m => messagesToSend.push(m));
+            }
+
+            // ⑧ 线下历史
+            historyForPayload.forEach(h => messagesToSend.push(h));
+
+            // 动态内容按用户选的缓存命中优化方式分流（与线上同构；线下没有其它易变项）
+            const allDynamicContextPrompts = [...routineDynamicContextPrompts, triggeredWorldInfoPrompt].filter(Boolean);
+            const userDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
+                ? allDynamicContextPrompts
+                : requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'auto'
+                    ? [triggeredWorldInfoPrompt].filter(Boolean)
+                    : [];
+
+            if (userDynamicContextPrompts.length && currentUserMessage) {
+                currentUserMessage = {
+                    ...currentUserMessage,
+                    content: [
+                        '【系统信息补充】',
+                        userDynamicContextPrompts.join('\n\n'),
+                        '',
+                        '【系统信息补充END】',
+                        '',
+                        '【用户当前消息】',
+                        currentUserMessage.content
+                    ].join('\n\n')
+                };
+            } else if (userDynamicContextPrompts.length) {
+                // 极少数没有当前 user 的调用兜底：不能合并时仍保留动态背景。
+                const firstNonSystemIndex = messagesToSend.findIndex(message => message?.role !== 'system');
+                const insertIndex = firstNonSystemIndex >= 0 ? firstNonSystemIndex : messagesToSend.length;
+                messagesToSend.splice(insertIndex, 0, {
+                    role: 'system',
+                    content: ['=== 本轮背景资料 ===', '', ...userDynamicContextPrompts].join('\n\n')
+                });
+            }
+
+            const stableMessageCount = messagesToSend.length;
+            if (currentUserMessage) {
+                messagesToSend.push(currentUserMessage);
+            }
+            requestSettings.ASYNC_BACKEND_REQUEST_USER_MESSAGE_INDEX = currentUserMessage
+                ? messagesToSend.length - 1
+                : -1;
+
+            requestSettings.REQUEST_CACHE_DEBUG_LOG = this.buildRequestCacheDebugLog({
+                messages: messagesToSend,
+                stableMessageCount,
+                dynamicContextText: allDynamicContextPrompts.join('\n\n'),
+                originalUserText: userText,
+                insertMode: requestSettings.DYNAMIC_CONTEXT_INSERT_MODE,
+                historyWindowLog: requestSettings.HISTORY_WINDOW_LOG,
+                triggeredWorldInfoEntries: worldInfoByType.triggeredEntries || [],
+                constantWorldInfoEntries: worldInfoByType.constantEntries || [],
+                extraBodyJson: requestSettings.CUSTOM_REQUEST_BODY_JSON || '',
+                model: requestSettings.MODEL
+            });
+
+            // ============================================================
+            // 5. 发送请求
+            // ============================================================
             requestSettings.USAGE_CHAT = true;
             requestSettings.USAGE_REROLL = isReroll;
             const aiText = await API.chat(messagesToSend, requestSettings);
@@ -11967,7 +12146,21 @@ const App = {
                 : false;
 
             let aiMessage = null;
+            if (!String(aiText || '').trim()) throw new Error('模型未返回正文，已保留原回复');
+            if (!STATE.contacts.includes(contact)) return;
             if (!alreadySavedByResume) {
+                const ids = new Set(requestSettings.CHAT_REROLL_MESSAGE_IDS || []);
+                const replaced = contact.offlineHistory.filter(message => ids.has(message.messageId));
+                const originalHistory = contact.offlineHistory;
+                const originalBridge = { offlineBridgeRoundsLeft: contact.offlineBridgeRoundsLeft,
+                    offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId };
+                replacementRollback = () => {
+                    contact.offlineHistory = originalHistory;
+                    Object.assign(contact, originalBridge);
+                };
+                contact.offlineHistory = contact.offlineHistory.filter(message => !ids.has(message.messageId));
+                if (this.isOfflineChatOpen(contact.id)) UI.removeOfflineCards(contact, replaced);
+
                 aiMessage = {
                     role: 'assistant',
                     content: aiText,
@@ -11988,18 +12181,32 @@ const App = {
             OfflineChat.consumeBridgeRound(contact, roundId);
 
             await Storage.saveContacts();
+            replacementRollback = null;
+            UI.clearRerollPreview?.(contact, 'offlineHistory');
+            // ★ 写入完成才清理 Worker；确认失败保留 pending，恢复时按 jobId 去重。
+            if (asyncJobId) {
+                try {
+                    await API.deleteChatJob(requestSettings.ASYNC_BACKEND_URL, asyncJobId, requestSettings.ASYNC_BACKEND_TOKEN);
+                    API.forgetPendingJob(asyncJobId);
+                } catch (ackError) { console.warn('[AsyncBackend] 等待下次确认:', ackError); }
+            }
             // ★ 只追加这张回复卡片，旧卡片保持原样。
-            if (!aiMessage || !UI.appendOfflineCard(contact, aiMessage)) {
+            if (this.isOfflineChatOpen(contact.id) && (!aiMessage || !UI.appendOfflineCard(contact, aiMessage))) {
                 // 极少数异常/旧数据路径找不到可追加的卡片时，退回整页渲染。
                 UI.renderOfflineChatHistory(contact);
             }
         } catch (error) {
+            if (replacementRollback) {
+                replacementRollback();
+                if (this.isOfflineChatOpen(contact.id)) UI.renderOfflineChatHistory(contact);
+            }
             console.error(error);
             if (error.isAsyncBackendPending) {
                 // 手机切屏保护：请求已在 Worker 排队，保留 pending 等回前台取结果。
                 this.scheduleAsyncBackendResumeCheck(1200);
                 return;
             }
+            UI.clearRerollPreview?.(contact, 'offlineHistory', true);
             await this.maybePromptDynamicContextCompatMode(error, requestSettings, contact);
             // 失败占位卡片：只进线下记录，不进入 AI 上下文（可见性清洗会过滤 isTransientError）。
             const errorMessage = {
@@ -12011,15 +12218,18 @@ const App = {
                 recordedAt: Date.now(),
                 isTransientError: true
             };
+            if (!STATE.contacts.includes(contact)) return;
             contact.offlineHistory.push(errorMessage);
             await Storage.saveContacts();
             // ★ 失败占位也只追加一张卡片。
-            UI.appendOfflineCard(contact, errorMessage);
+            if (this.isOfflineChatOpen(contact.id)) UI.appendOfflineCard(contact, errorMessage);
         } finally {
-            STATE.typingContactId = null;
-            UI.setOfflineTyping(false);
+            UI.clearRerollPreview?.(contact, 'offlineHistory');
+            STATE.chatRequestActive = false;
+            if (STATE.typingContactId === contact.id) STATE.typingContactId = null;
+            if (this.isOfflineChatOpen(contact.id)) UI.setOfflineTyping(false);
             if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.disabled = false;
-            if (window.innerWidth >= 800 && UI.els.offlineInput) UI.els.offlineInput.focus();
+            if (this.isOfflineChatOpen(contact.id) && window.innerWidth >= 800 && UI.els.offlineInput) UI.els.offlineInput.focus();
         }
     },
 
@@ -13812,7 +14022,7 @@ const App = {
 
     renderMomentAvatar(author, className = 'moment-author-avatar') {
         const avatar = String(author?.avatar || '').trim();
-        if (/^(data:image\/|https?:\/\/|blob:|\.\/assets\/|assets\/)/i.test(avatar)) {
+        if (/^(data:image\/|https?:\/\/|file:|blob:|\.\/assets\/|assets\/)/i.test(avatar)) {
             return `<img class="${className}" src="${this.escapeHtml(avatar)}" alt="">`;
         }
         return `<span class="${className} text-avatar">${this.escapeHtml(avatar || '🌼')}</span>`;
@@ -13913,7 +14123,7 @@ const App = {
             }
             if (avatarImg) {
                 const avatar = String(headerAuthor.avatar || '');
-                avatarImg.src = /^(data:image\/|https?:\/\/|blob:|\.\/assets\/|assets\/)/i.test(avatar)
+                avatarImg.src = /^(data:image\/|https?:\/\/|file:|blob:|\.\/assets\/|assets\/)/i.test(avatar)
                     ? avatar
                     : 'assets/images/char.jpg';
                 avatarImg.title = !isProfile ? '进入我的主页' : (headerAuthor.isUser ? '点击更换头像' : headerAuthor.name);
@@ -18263,9 +18473,9 @@ const App = {
         const name = document.getElementById('edit-name').value.trim() || '未命名';
         const prompt = document.getElementById('edit-prompt').value.trim();
         
-        // 【关键修改】：不再找 edit-avatar 输入框，而是直接拿图片的 src
-        // 这样无论是你上传的本地图片(Base64)，还是网络图片，都在这里面
-        const avatar = document.getElementById('edit-avatar-preview').src;
+        // ★ 用原始 src 属性保留默认头像的相对路径，避免保存本机 file:/// 绝对路径。
+        // 上传图片的 Base64 和网络图片地址也会原样保留。
+        const avatar = document.getElementById('edit-avatar-preview').getAttribute('src') || './assets/images/char.jpg';
 
         // 【保留】：获取下拉框选中的预设
         const linkedPresetName = document.getElementById('edit-char-preset').value;
