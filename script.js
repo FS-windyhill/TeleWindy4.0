@@ -6574,6 +6574,61 @@ const App = {
             .replace(/'/g, '&#039;');
     },
 
+    // ★ 搜索摘要：围绕命中位置取约 35 字，最多三段；按字符截取，避免拆开 emoji。
+    buildSearchResultPreview(text, keyword) {
+        const chars = Array.from(String(text ?? ''));
+        if (!keyword) return '';
+        // 搜索词按普通文字处理，括号、星号等符号不能变成正则表达式。
+        const pattern = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
+        const source = chars.join('');
+        const offsets = new Map();
+        let offset = 0;
+        chars.forEach((char, index) => {
+            offsets.set(offset, index);
+            offset += char.length;
+        });
+        offsets.set(offset, chars.length);
+        const hits = Array.from(source.matchAll(pattern), match => ({
+            start: offsets.get(match.index),
+            end: offsets.get(match.index + match[0].length)
+        }));
+        if (!hits.length) return '';
+
+        const windows = [];
+        hits.forEach(hit => {
+            // 关键词自身超过 35 字时保留完整关键词；靠近两端时由另一侧补足。
+            const size = Math.max(35, hit.end - hit.start);
+            let start = Math.max(0, hit.start - Math.floor((size - (hit.end - hit.start)) / 2));
+            const end = Math.min(chars.length, start + size);
+            start = Math.max(0, end - size);
+            const previous = windows[windows.length - 1];
+            if (previous && hit.start >= previous.start && hit.end <= previous.end) return;
+            // 邻近命中能放进同一段时合并，避免连续命中把摘要无限拉长。
+            if (previous && start <= previous.end && end - previous.start <= size) {
+                previous.end = end;
+            } else {
+                windows.push({ start, end });
+            }
+        });
+
+        const snippets = windows.slice(0, 3).map(({ start, end }) => {
+            const snippet = chars.slice(start, end).join('');
+            let cursor = 0;
+            let html = '';
+            // ★ 先分别转义正文和关键词，再拼高亮标签，聊天中的 HTML 只显示为文字。
+            for (const match of snippet.matchAll(pattern)) {
+                html += this.escapeHtml(snippet.slice(cursor, match.index));
+                html += `<mark class="search-keyword-highlight">${this.escapeHtml(match[0])}</mark>`;
+                cursor = match.index + match[0].length;
+            }
+            html += this.escapeHtml(snippet.slice(cursor));
+            return `<div class="search-result-snippet">${start > 0 ? '…' : ''}${html}${end < chars.length ? '…' : ''}</div>`;
+        }).join('');
+        const count = windows.length > 3
+            ? `<div class="search-result-hit-count">本条共命中 ${hits.length} 处</div>` : '';
+        return snippets + count;
+    },
+
     // 朋友圈和搜索结果走 innerHTML 拼装时，所有可控文本都先从这里过一遍。
     // 图片只允许常见安全来源，避免 javascript: / svg data 等地址被塞进 src。
     sanitizeImageSrc(src) {
@@ -17778,8 +17833,6 @@ const App = {
             contact.history.forEach((msg, index) => {
                 // 过滤系统提示词，匹配用户或助手的消息
                 if (msg.role !== 'system' && msg.content.toLowerCase().includes(keyword)) {
-                    found = true;
-                    
                     // ★ 1. 剔除用户搜索结果里的时间戳标记
                     let cleanMsgText = msg.content;
                     if (msg.role === 'user') {
@@ -17808,10 +17861,13 @@ const App = {
                     const div = document.createElement('div');
                     div.className = 'search-result-item';
                     const safeDisplayTime = this.escapeHtml(displayTime);
-                    const safeCleanMsgText = this.escapeHtml(cleanMsgText);
+                    const previewHtml = this.buildSearchResultPreview(cleanMsgText, keyword);
+                    // 清理掉的时间戳不参与正文摘要，避免出现只有日期匹配的空结果。
+                    if (!previewHtml) return;
+                    found = true;
                     div.innerHTML = `
                         <div class="search-result-date">${safeDisplayTime} - ${msg.role === 'user' ? '我' : 'TA'}</div>
-                        <div class="search-result-text">${safeCleanMsgText}</div>
+                        <div class="search-result-text">${previewHtml}</div>
                     `;
                     
                     // 点击结果，触发跳转

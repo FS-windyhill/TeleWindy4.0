@@ -7003,10 +7003,24 @@ body.dark-mode details.thought-process {
 .search-result-text {
     font-size: 0.9rem;
     color: var(--text-color);
-    display: -webkit-box;
-    -webkit-line-clamp: 2; /* 最多显示两行 */
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    /* ★ 每段已按关键词截取，允许换行，避免后面的命中摘要被两行限制遮住。 */
+    overflow-wrap: anywhere;
+    line-height: 1.5;
+}
+.search-result-snippet + .search-result-snippet {
+    margin-top: 4px;
+}
+/* 高亮文字跟随主题文字色，半透明底色兼顾深浅背景。 */
+.search-keyword-highlight {
+    color: inherit;
+    background: rgba(255, 193, 7, 0.35);
+    border-radius: 2px;
+    font-weight: 600;
+}
+.search-result-hit-count {
+    margin-top: 4px;
+    font-size: 0.8em;
+    color: gray;
 }
 
 /* 把之前的这部分替换掉 */
