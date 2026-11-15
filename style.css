@@ -7041,6 +7041,112 @@ body.dark-mode details.thought-process {
     color: gray;
 }
 
+/* ★★★★★ 列表内搜索：世界书、角色记忆和心笺共用，输入框不随结果重绘。 ★★★★★ */
+.inline-list-search {
+    margin: 10px 0 14px;
+    min-width: 0;
+    flex-shrink: 0;
+}
+.inline-search-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+/* ★ 搜索图标放在输入区左侧，不拦截点击；文字留出图标位置。 */
+.inline-search-field {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+}
+.inline-search-field .inline-search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+.inline-search-row .preview-icon {
+    width: 0.92rem;
+    height: 0.92rem;
+    flex-shrink: 0;
+    margin: 0;
+}
+.inline-search-row input {
+    flex: 1;
+    min-width: 0;
+    width: 100%;
+    /* ★ 输入框收紧为 38px，与加高后的清空按钮对齐。 */
+    height: 38px;
+    padding: 5px 12px 5px calc(24px + 0.92rem);
+    box-sizing: border-box;
+    border: 1px solid rgba(120, 120, 120, 0.35);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.4);
+    color: inherit;
+    font: inherit;
+}
+/* 已有独立清空按钮，隐藏浏览器给 search 输入框附带的清除 X。 */
+.inline-search-row input::-webkit-search-cancel-button,
+.inline-search-row input::-webkit-search-decoration {
+    -webkit-appearance: none;
+    display: none;
+}
+.inline-search-row input::-ms-clear { display: none; }
+.inline-search-clear:not([hidden]) {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.inline-search-clear {
+    flex-shrink: 0;
+    height: 38px;
+    box-sizing: border-box;
+    padding: 8px 9px;
+    border: 1px solid rgba(120, 120, 120, 0.35);
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+}
+.inline-search-status {
+    margin-top: 6px;
+    font-size: 0.82rem;
+    opacity: 0.75;
+    overflow-wrap: anywhere;
+}
+.inline-search-detail summary {
+    display: block;
+    list-style: none;
+    cursor: pointer;
+}
+.inline-search-detail summary::-webkit-details-marker { display: none; }
+.inline-search-expand,
+.inline-search-collapse {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.82rem;
+    text-decoration: underline;
+    opacity: 0.8;
+}
+.inline-search-collapse,
+.inline-search-detail[open] .inline-search-preview,
+.inline-search-detail[open] .inline-search-expand { display: none; }
+.inline-search-detail[open] .inline-search-collapse { display: block; }
+.inline-search-full {
+    margin-top: 6px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+/* 侧栏已有 padding 和 gap，搜索区不再额外挤占窄屏输入宽度。 */
+.wi-sidebar > .inline-list-search { margin: 0; }
+/* 搜索中的名称和命中触发词都完整换行，避免侧栏省略号再次藏起匹配位置。 */
+.wi-list-item.wi-search-result { white-space: normal; overflow-wrap: anywhere; }
+.wi-search-keys { margin-top: 4px; font-size: 0.82em; opacity: 0.85; }
+body.dark-mode .inline-search-row input { background: rgba(0, 0, 0, 0.2); }
+body.dark-mode .inline-search-row input,
+body.dark-mode .inline-search-clear { border-color: rgba(245, 245, 245, 0.3); }
+/* ★★★★★ 列表内搜索 END ★★★★★ */
+
 /* 把之前的这部分替换掉 */
 @keyframes highlight-fade {
     /* 开始时，背景是黄色，外发光也是黄色，边框是黄色 */
@@ -9438,6 +9544,7 @@ body.dark-mode .character-memory-avatar {
 
 .character-memory-contact-info {
     min-width: 0;
+    margin-left: 8px;
 }
 
 .character-memory-contact-name {

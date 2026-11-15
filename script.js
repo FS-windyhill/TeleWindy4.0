@@ -3532,15 +3532,25 @@ const UI = {
         container.innerHTML = '';
 
         const currentBook = STATE.worldInfoBooks.find(b => b.id === STATE.currentBookId);
+        const keyword = App.getInlineSearch('wi', STATE.currentBookId, () => this.renderWorldInfoList());
+        App.setInlineSearchStatus('wi', keyword, '');
         if (!currentBook) return;
 
         const currentEditingUid = document.getElementById('wi-edit-uid') 
             ? document.getElementById('wi-edit-uid').value 
             : null;
 
+        let found = 0;
         currentBook.entries.forEach((entry) => {
+            const displayName = entry.comment ||
+                (Array.isArray(entry.keys) && entry.keys.length > 0 ? entry.keys[0] : '未命名条目');
+            const matchingKeys = keyword && Array.isArray(entry.keys)
+                ? entry.keys.filter(key => App.matchesSearch(key, keyword)) : [];
+            if (keyword && !App.matchesSearch(displayName, keyword) && !matchingKeys.length) return;
+            found++;
             const item = document.createElement('div');
             item.classList.add('wi-list-item');
+            item.classList.toggle('wi-search-result', !!keyword);
 
             // 高亮当前编辑中的条目
             if (entry.uid === currentEditingUid) {
@@ -3548,15 +3558,17 @@ const UI = {
             }
 
             // ★★★ 核心显示逻辑 ★★★
-            let displayName = entry.comment || 
-                (Array.isArray(entry.keys) && entry.keys.length > 0 ? entry.keys[0] : '未命名条目');
-
             const typeEmoji = entry.constant ? '📌' : '🔎';
-            item.textContent = `${typeEmoji} ${displayName}`;
+            item.innerHTML = `${typeEmoji} ${App.highlightSearchText(displayName, keyword)}`;
+            // 名称没有命中时也能看懂匹配原因；只展示匹配的触发词，不搜索设定正文。
+            if (matchingKeys.length) {
+                item.innerHTML += `<div class="wi-search-keys">触发词：${matchingKeys.map(key => App.highlightSearchText(key, keyword)).join('、')}</div>`;
+            }
 
             item.onclick = () => App.loadWorldInfoEntry(entry.uid);
             container.appendChild(item);
         });
+        App.setInlineSearchStatus('wi', keyword, found ? `找到 ${found} 个条目` : `没有找到包含“${keyword}”的条目`);
     },
 
 
@@ -6621,12 +6633,98 @@ const App = {
             .replace(/'/g, '&#039;');
     },
 
+    // ★★★★★ 列表搜索 START：仅保存临时筛选状态，不写入角色资料和备份。 ★★★★★
+    getInlineSearch(scope, ownerId, render) {
+        const root = document.getElementById(`${scope}-search`);
+        if (!root) return '';
+        const input = root.querySelector('input');
+        const clear = root.querySelector('button');
+        this.inlineSearchStates ||= {};
+        let state = this.inlineSearchStates[scope];
+        if (!state) {
+            state = this.inlineSearchStates[scope] = { keyword: '', ownerId, timer: null, composing: false };
+            // 中文候选字确认后再筛选；只重绘列表，不替换搜索框，保留焦点和输入位置。
+            const apply = () => {
+                clearTimeout(state.timer);
+                state.keyword = input.value.trim();
+                render();
+            };
+            const schedule = () => {
+                clear.hidden = !input.value;
+                clearTimeout(state.timer);
+                if (!state.composing) state.timer = setTimeout(apply, 150);
+            };
+            input.addEventListener('compositionstart', () => {
+                state.composing = true;
+                clearTimeout(state.timer);
+            });
+            input.addEventListener('compositionend', () => { state.composing = false; schedule(); });
+            input.addEventListener('input', schedule);
+            input.addEventListener('search', () => { if (!state.composing) apply(); });
+            clear.addEventListener('click', () => {
+                input.value = '';
+                state.composing = false;
+                apply();
+                input.focus();
+            });
+        }
+        // 换角色或换书即清空；同一角色切换“全部 / 注入”继续沿用筛选词。
+        if (state.ownerId !== ownerId) {
+            clearTimeout(state.timer);
+            state.ownerId = ownerId;
+            state.keyword = '';
+            state.composing = false;
+            input.value = '';
+        }
+        clear.hidden = !input.value;
+        return state.keyword;
+    },
+
+    setInlineSearchStatus(scope, keyword, message) {
+        const status = document.querySelector(`#${scope}-search .inline-search-status`);
+        if (!status) return;
+        status.hidden = !keyword;
+        status.textContent = keyword ? message : '';
+    },
+
+    // 普通文字匹配统一转义正则符号，英文不区分大小写；全文和摘要共用相同口径。
+    createSearchPattern(keyword) {
+        return new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
+    },
+
+    matchesSearch(text, keyword) {
+        return !keyword || this.createSearchPattern(keyword).test(String(text ?? ''));
+    },
+
+    highlightSearchText(text, keyword) {
+        const source = String(text ?? '');
+        if (!keyword) return this.escapeHtml(source);
+        let cursor = 0;
+        let html = '';
+        for (const match of source.matchAll(this.createSearchPattern(keyword))) {
+            html += this.escapeHtml(source.slice(cursor, match.index));
+            html += `<mark class="search-keyword-highlight">${this.escapeHtml(match[0])}</mark>`;
+            cursor = match.index + match[0].length;
+        }
+        return html + this.escapeHtml(source.slice(cursor));
+    },
+
+    renderSearchableText(text, keyword) {
+        if (!keyword) return this.escapeHtml(text);
+        const preview = this.buildSearchResultPreview(text, keyword);
+        const full = this.highlightSearchText(text, keyword);
+        // 短正文直接显示；长正文用原生 details 原地展开，键盘也能操作。
+        if (preview === `<div class="search-result-snippet">${full}</div>`) return full;
+        return `<details class="inline-search-detail"><summary><span class="inline-search-preview">${preview}</span><span class="inline-search-expand">展开全文</span><span class="inline-search-collapse">收起全文</span></summary><div class="inline-search-full">${full}</div></details>`;
+    },
+    // ★★★★★ 列表搜索 END ★★★★★
+
     // ★ 搜索摘要：围绕命中位置取约 35 字，最多三段；按字符截取，避免拆开 emoji。
     buildSearchResultPreview(text, keyword) {
         const chars = Array.from(String(text ?? ''));
         if (!keyword) return '';
         // 搜索词按普通文字处理，括号、星号等符号不能变成正则表达式。
-        const pattern = new RegExp(keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'giu');
+        const pattern = this.createSearchPattern(keyword);
         const source = chars.join('');
         const offsets = new Map();
         let offset = 0;
@@ -6660,15 +6758,8 @@ const App = {
 
         const snippets = windows.slice(0, 3).map(({ start, end }) => {
             const snippet = chars.slice(start, end).join('');
-            let cursor = 0;
-            let html = '';
-            // ★ 先分别转义正文和关键词，再拼高亮标签，聊天中的 HTML 只显示为文字。
-            for (const match of snippet.matchAll(pattern)) {
-                html += this.escapeHtml(snippet.slice(cursor, match.index));
-                html += `<mark class="search-keyword-highlight">${this.escapeHtml(match[0])}</mark>`;
-                cursor = match.index + match[0].length;
-            }
-            html += this.escapeHtml(snippet.slice(cursor));
+            // ★ 先转义再高亮，聊天搜索与管理列表使用同一套安全渲染。
+            const html = this.highlightSearchText(snippet, keyword);
             return `<div class="search-result-snippet">${start > 0 ? '…' : ''}${html}${end < chars.length ? '…' : ''}</div>`;
         }).join('');
         const count = windows.length > 3
@@ -7342,6 +7433,7 @@ const App = {
 
     renderHeartNoteDetail() {
         const contact = (STATE.contacts || []).find(item => item.id === STATE.currentHeartNoteContactId);
+        const keyword = this.getInlineSearch('heart-note', STATE.currentHeartNoteContactId, () => this.renderHeartNoteDetail());
         const title = document.getElementById('heart-note-detail-title');
         const input = document.getElementById('heart-note-inject-days');
         const status = document.getElementById('heart-note-status');
@@ -7361,7 +7453,10 @@ const App = {
         const mode = STATE.heartNoteViewMode === 'injected' ? 'injected' : 'all';
         const records = (mode === 'injected' ? injected : notebook.records)
             .filter(record => record && record.text)
+            .filter(record => this.matchesSearch(record.text, keyword))
             .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+        this.setInlineSearchStatus('heart-note', keyword, records.length
+            ? `找到 ${records.length} 条心笺` : `没有找到包含“${keyword}”的心笺`);
         if (title) title.textContent = contact.name || '心笺';
         if (input) input.value = notebook.injectDays;
         if (status) status.textContent = `${notebook.records.length}条心笺 · 注入${injected.length}条`;
@@ -7387,12 +7482,12 @@ const App = {
                         <button type="button" class="heart-note-icon-btn danger" data-action="delete-heart-note" title="删除"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
                     </div>
                 </div>
-                <div class="heart-note-text">${this.escapeHtml(record.text)}</div>
+                <div class="heart-note-text">${this.renderSearchableText(record.text, keyword)}</div>
 `;
             list.appendChild(card);
         });
         if (empty) {
-            empty.style.display = records.length ? 'none' : 'block';
+            empty.style.display = records.length || keyword ? 'none' : 'block';
             empty.textContent = mode === 'injected' ? '当前没有会注入上下文的心笺。' : '还没有心笺，点右上角加一条吧。';
         }
     },
@@ -9504,7 +9599,7 @@ const App = {
         if (!memory || memory.enabled !== true) return '未开启';
         if (memory.isGenerating) return '生成中';
         const records = (memory.records || []).filter(record => record && Array.isArray(record.memories) && record.memories.length);
-        if (records.length) return `${records.length} 天记忆 · 注入最近 ${memory.injectDays || CharacterMemory.defaultInjectDays} 个有记忆的日期`;
+        if (records.length) return `${records.length} 天记忆 · 注入 ${memory.injectDays || CharacterMemory.defaultInjectDays} 天`;
         if ((memory.records || []).some(record => record?.error)) return '有生成失败记录';
         return '待生成';
     },
@@ -9603,15 +9698,16 @@ const App = {
             .sort((a, b) => b.dateKey.localeCompare(a.dateKey));
     },
 
-    createCharacterMemoryCard(record) {
+    createCharacterMemoryCard(record, keyword = '') {
         const card = document.createElement('div');
         card.className = 'character-memory-card';
         card.dataset.dateKey = record.dateKey;
-        const items = (record.memories || []).map(item => {
+        // 只筛选展示副本，操作仍绑定原始 id，不能用筛选后的序号定位记忆。
+        const items = (record.memories || []).filter(item => this.matchesSearch(item.text, keyword)).map(item => {
             const alwaysInject = item && typeof item === 'object' && item.alwaysInject === true;
             return `
                 <div class="character-memory-item" data-id="${this.escapeHtml(item.id)}">
-                    <div class="character-memory-text">${this.escapeHtml(item.text || '')}</div>
+                    <div class="character-memory-text">${this.renderSearchableText(item.text || '', keyword)}</div>
                     <button type="button" class="character-memory-icon-btn character-memory-pin-btn${alwaysInject ? ' active' : ''}" data-action="toggle-memory-pin" title="${alwaysInject ? '取消长期记住' : '长期记住'}" aria-pressed="${alwaysInject ? 'true' : 'false'}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path class="character-memory-pin-shape" d="M12 17v5"></path>
@@ -9662,6 +9758,7 @@ const App = {
 
     renderCharacterMemoryDetail() {
         const contact = STATE.contacts.find(item => item.id === STATE.currentMemoryContactId);
+        const keyword = this.getInlineSearch('memory', STATE.currentMemoryContactId, () => this.renderCharacterMemoryDetail());
         const title = document.getElementById('character-memory-detail-title');
         const status = document.getElementById('character-memory-status');
         const input = document.getElementById('character-memory-inject-days');
@@ -9698,16 +9795,21 @@ const App = {
         }
 
         list.innerHTML = '';
-        const records = this.getCharacterMemoryDetailRecords(memory);
+        const records = this.getCharacterMemoryDetailRecords(memory).filter(record => !keyword
+            || (record.memories || []).some(item => this.matchesSearch(item.text, keyword)));
+        const matchCount = records.reduce((sum, record) => sum + (record.memories || [])
+            .filter(item => this.matchesSearch(item.text, keyword)).length, 0);
+        this.setInlineSearchStatus('memory', keyword, matchCount
+            ? `找到 ${matchCount} 条记忆，分布于 ${records.length} 天` : `没有找到包含“${keyword}”的记忆`);
         if (empty) {
             empty.textContent = mode === 'injected'
                 ? '当前没有会注入上下文的记忆。'
                 : '开启记忆后，会在这里显示每日总结。';
-            empty.style.display = records.length ? 'none' : 'block';
+            empty.style.display = records.length || keyword ? 'none' : 'block';
         }
 
         records.forEach(record => {
-            list.appendChild(this.createCharacterMemoryCard(record));
+            list.appendChild(this.createCharacterMemoryCard(record, keyword));
         });
     },
 
