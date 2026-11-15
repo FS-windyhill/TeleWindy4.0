@@ -125,7 +125,8 @@ const PhoneCall = {
         this.stopPreview();
         const source = contact.chatMode === 'offline' ? contact.offlineHistory : contact.history;
         this.session = { id: `phone_${Date.now()}_${Math.random().toString(36).slice(2)}`, contact,
-            messages: [], bridge: this.cleanMessages(OfflineChat.buildBridgeMessages(source)), phase: 'ready', controller: new AbortController() };
+            messages: [], bridge: this.cleanMessages(OfflineChat.buildBridgeMessages(source)), phase: 'ready',
+            originalAudioSessionType: this.getAudioSessionType(), controller: new AbortController() };
         const s = this.session;
         const avatar = document.getElementById('phone-avatar');
         // ★ 旧角色可能没有可用图片；回退到本地矢量头像，避免通话页出现破图。
@@ -175,13 +176,12 @@ const PhoneCall = {
                 if (!(window.SpeechRecognition || window.webkitSpeechRecognition)) throw new Error('当前浏览器不支持语音识别，请选择 DeepSeek');
             } else if (!s.audioSettings.PHONE_STT_KEY || !s.audioSettings.PHONE_STT_URL) throw new Error('请先填写 DeepSeek 识别地址和密钥');
             this.setPhase(s, 'dialing', '正在拨打中');
-            this.audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
-            await this.audioContext.resume();
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-            if (!this.alive(s)) { stream.getTracks().forEach(t => t.stop()); return; }
-            s.stream = stream;
-            // ★ 权限仅在拨打时申请；等待角色发声期间禁用音轨，不缓存用户说话。
-            stream.getAudioTracks().forEach(t => { t.enabled = false; });
+            // ★ 必须在「拨打」点击的同步调用栈解锁；等接口返回再 new Audio 会被 Safari 拦截。
+            await this.unlockAudio(s);
+            if (!this.alive(s) || !await this.acquireMicrophone(s)) return;
+            s.micApproved = true;
+            // ★ 首次只检查权限，立即彻底停止音轨；disabled 的活音轨仍可能占用 iOS 通话通道。
+            this.stopListening(s);
             await this.reply(s);
         } catch (error) { this.fail(s, error); }
     },
@@ -207,11 +207,15 @@ const PhoneCall = {
     async speak(s, message) {
         message.content = this.cleanText(message.content);
         if (!message.content) throw new Error('没有可播放的台词，请重试');
-        const blob = await this.synthesize(message.content, s.voice, s.audioSettings, s.controller.signal);
+        // ★ 播放受限后的重试复用同一份音频，不再次付费合成同一句台词。
+        const blob = s.pendingSpeech?.message === message ? s.pendingSpeech.blob
+            : await this.synthesize(message.content, s.voice, s.audioSettings, s.controller.signal);
         if (!this.alive(s)) return;
+        s.pendingSpeech = { message, blob };
         this.setPhase(s, 'speaking', '已接通 · 对方正在说话');
         await this.play(s, blob);
         if (!this.alive(s)) return;
+        s.pendingSpeech = null;
         message.heard = true;
         await this.listen(s);
     },
@@ -219,8 +223,11 @@ const PhoneCall = {
         const s = this.session;
         if (!s || s.phase !== 'error') return;
         try {
+            // ★ 重试点击也同步恢复同一个 AudioContext，不能在网络请求之后才申请播放。
+            await this.unlockAudio(s);
+            if (!this.alive(s)) return;
             const last = s.messages.at(-1);
-            if (!s.stream) { this.setPhase(s, 'ready', '准备拨打'); return; }
+            if (!s.micApproved) { this.setPhase(s, 'ready', '准备拨打'); return; }
             this.setPhase(s, 'thinking', '正在重试');
             if (last?.role === 'assistant' && !last.heard) await this.speak(s, last);
             else if (last?.role === 'assistant') await this.listen(s);
@@ -240,7 +247,8 @@ const PhoneCall = {
         s.controller.abort();
         this.stopListening(s);
         s.cancelPlayback?.();
-        s.stream?.getTracks().forEach(t => t.stop());
+        s.pendingSpeech = null;
+        this.setAudioSessionType(s.originalAudioSessionType || 'auto');
         document.getElementById('phone-page').hidden = true;
         if (document.getElementById('app-container')) document.getElementById('app-container').inert = false;
         s.previousFocus?.focus?.();
@@ -255,6 +263,8 @@ const PhoneCall = {
     // ================ 音频：每段播放结束/取消都释放 Blob URL ================
     reason(error) {
         const message = String(error?.message || error || '未知错误');
+        if (error?.phoneStage === 'playback') return 'Safari 暂停了音频播放，请点击「重试」恢复声音';
+        if (error?.phoneStage === 'microphone' && error?.name === 'NotAllowedError') return '麦克风权限未开启，请在 Safari 网站设置中允许麦克风';
         if (/NotAllowedError|权限|Permission denied/i.test(`${error?.name} ${message}`)) return '请允许麦克风或音频播放权限';
         if (/Failed to fetch|NetworkError|Load failed/i.test(message)) return '网络请求失败，请检查网络或接口跨域支持';
         if (error?.name === 'TimeoutError') return '语音接口响应超时，请稍后重试';
@@ -281,7 +291,98 @@ const PhoneCall = {
         if (typeof hex !== 'string' || !hex || hex.length % 2 || !/^[\da-f]+$/i.test(hex)) throw new Error('语音生成失败：接口未返回有效音频');
         return new Blob([Uint8Array.from(hex.match(/../g), pair => parseInt(pair, 16))], { type: 'audio/mpeg' });
     },
+    // ================ Safari 音频路由与用户手势解锁 ================
+    getAudioSessionType() {
+        return typeof navigator !== 'undefined' ? navigator.audioSession?.type : undefined;
+    },
+    setAudioSessionType(type) {
+        // ★ Audio Session API 并非所有浏览器都有；不支持时仍靠停止音轨释放录音路由。
+        try { if (typeof navigator !== 'undefined' && navigator.audioSession) navigator.audioSession.type = type; }
+        catch (error) { console.warn('[PhoneCall] 浏览器未接受音频会话切换'); }
+    },
+    waitForAudio(s, promise) {
+        // ★ Safari 被系统中断时 resume 可能一直不返回；允许挂断，也允许用户手动恢复。
+        return new Promise((resolve, reject) => {
+            let timer;
+            const finish = (error, value) => {
+                clearTimeout(timer); s.controller.signal.removeEventListener('abort', aborted);
+                error ? reject(error) : resolve(value);
+            };
+            const aborted = () => finish(new Error('通话已结束'));
+            timer = setTimeout(() => {
+                const error = new Error('音频播放等待恢复'); error.phoneStage = 'playback'; finish(error);
+            }, 5000);
+            s.controller.signal.addEventListener('abort', aborted, { once: true });
+            if (s.controller.signal.aborted) { aborted(); return; }
+            Promise.resolve(promise).then(value => finish(null, value), error => {
+                if (error.name === 'NotAllowedError') error.phoneStage = 'playback';
+                finish(error);
+            });
+        });
+    },
+    unlockAudio(s) {
+        this.audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+        const context = this.audioContext;
+        const resumed = context.resume();
+        // ★ 播一个单帧静音缓冲，建立与本次点击关联的播放通道；以后只换缓冲，不换播放器。
+        const source = context.createBufferSource();
+        source.buffer = context.createBuffer(1, 1, context.sampleRate);
+        source.connect(context.destination);
+        source.onended = () => { source.disconnect(); source.buffer = null; source.onended = null; };
+        source.start(0);
+        return this.waitForAudio(s, resumed);
+    },
+    async acquireMicrophone(s) {
+        // ★ playback 会与录音冲突，必须先回 auto，再请求录音权限。
+        this.setAudioSessionType('auto');
+        const generation = s.listenGeneration || 0;
+        let stream;
+        try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } }); }
+        catch (error) { error.phoneStage = 'microphone'; throw error; }
+        // ★ 等待系统权限时可能已挂断/退出收音；迟到的音轨必须立即停止。
+        if (!this.alive(s) || generation !== (s.listenGeneration || 0)) {
+            stream.getTracks().forEach(track => track.stop()); return false;
+        }
+        s.stream = stream;
+        return true;
+    },
+    async playCallAudio(s, blob) {
+        this.setAudioSessionType('playback');
+        const context = this.audioContext;
+        let buffer;
+        try {
+            buffer = await context.decodeAudioData(await blob.arrayBuffer());
+            if (!this.alive(s)) return;
+            await this.waitForAudio(s, context.resume());
+            if (context.state && context.state !== 'running') {
+                const error = new Error('音频通道已被系统暂停'); error.phoneStage = 'playback'; throw error;
+            }
+        } catch (error) {
+            if (error.name === 'NotAllowedError') error.phoneStage = 'playback';
+            throw error;
+        }
+        if (!this.alive(s)) return;
+        return new Promise((resolve, reject) => {
+            const source = context.createBufferSource();
+            let ended = false;
+            const finish = error => {
+                if (ended) return;
+                ended = true; source.onended = null;
+                try { source.stop(); } catch (_) { /* ★ 尚未启动或已经结束的音源无需再次停止。 */ }
+                source.disconnect(); source.buffer = null; buffer = null;
+                s.cancelPlayback = null;
+                error ? reject(error) : resolve();
+            };
+            s.cancelPlayback = () => finish();
+            source.buffer = buffer; source.connect(context.destination);
+            source.onended = () => finish();
+            try { source.start(0); }
+            catch (error) { if (error.name === 'NotAllowedError') error.phoneStage = 'playback'; finish(error); }
+        });
+    },
     play(owner, blob) {
+        // ★ 通话用已解锁的 Web Audio 通道；试听沿用原来可正常工作的媒体播放器。
+        if (owner === this.session) return this.playCallAudio(owner, blob);
         return new Promise((resolve, reject) => {
             const url = URL.createObjectURL(blob);
             const audio = new Audio(url);
@@ -341,21 +442,32 @@ const PhoneCall = {
     },
     // ================ 用户收音：只在 listening 阶段创建录音/识别器 ================
     stopListening(s) {
+        s.listenGeneration = (s.listenGeneration || 0) + 1;
         clearInterval(s.listenTimer); s.listenTimer = null;
         if (s.recognition) { s.recognition.onend = s.recognition.onerror = s.recognition.onresult = null; s.recognition.abort(); s.recognition = null; }
         if (s.processor) { s.processor.onaudioprocess = null; s.processor.disconnect(); s.processor = null; }
         s.source?.disconnect(); s.source = null;
         s.mute?.disconnect(); s.mute = null;
-        s.stream?.getAudioTracks().forEach(t => { t.enabled = false; });
+        s.stream?.getTracks().forEach(t => { t.enabled = false; t.stop(); });
+        s.stream = null;
+        // ★ 不只静音：彻底释放麦克风后再切回媒体播放音量和扬声器路由。
+        if (!this.session || this.session === s) this.setAudioSessionType('playback');
         s.chunks = [];
     },
     async listen(s) {
         if (!this.alive(s)) return;
-        this.setPhase(s, 'listening', '已接通 · 正在聆听');
-        if (s.audioSettings.PHONE_STT_PROVIDER === 'browser') { this.listenBrowser(s); return; }
-        await this.audioContext.resume();
+        this.stopListening(s);
+        // ★ 系统权限/路由尚未准备好时，不显示「说完了」，防止提交上一轮残留状态。
+        this.setPhase(s, 'preparing', '已接通 · 正在开启麦克风');
+        if (s.audioSettings.PHONE_STT_PROVIDER === 'browser') {
+            this.setAudioSessionType('auto');
+            this.setPhase(s, 'listening', '已接通 · 正在聆听');
+            this.listenBrowser(s); return;
+        }
+        if (!await this.acquireMicrophone(s)) return;
+        await this.waitForAudio(s, this.audioContext.resume());
         if (!this.alive(s)) return;
-        s.stream.getAudioTracks().forEach(t => { t.enabled = true; });
+        this.setPhase(s, 'listening', '已接通 · 正在聆听');
         s.chunks = []; s.sampleCount = 0; s.hasSpeech = false; s.listenStarted = performance.now(); s.lastVoice = s.listenStarted;
         // ★ 使用 PCM WAV，兼容 DeepSeek；不依赖各浏览器 MediaRecorder 的 WebM/AAC 默认格式。
         s.source = this.audioContext.createMediaStreamSource(s.stream);

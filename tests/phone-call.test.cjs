@@ -16,7 +16,7 @@ function harness() {
     const toasts = [], requests = [];
     let saves = 0;
     const context = { module: { exports: {} }, console, Blob, Uint8Array, Float32Array, ArrayBuffer, DataView,
-        AbortController, setInterval, clearInterval, performance,
+        AbortController, setInterval, clearInterval, setTimeout, clearTimeout, performance,
         STATE: state, formatTimestamp: () => '2026-11-15 12:00',
         Storage: { async saveContacts() { saves++; } },
         Toast: { show(message) { toasts.push(message); } },
@@ -28,6 +28,82 @@ function harness() {
     return { phone: context.module.exports, state, element, context, toasts, requests, get saves() { return saves; } };
 }
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; }
+
+test('停止收音真正停止音轨，再请求媒体播放路由，不只禁用麦克风', () => {
+    const h = harness(), events = [];
+    const audioSession = {};
+    Object.defineProperty(audioSession, 'type', { set(value) { events.push(value); } });
+    h.context.navigator = { audioSession };
+    const track = { enabled: true, stop() { events.push('track-stop'); } };
+    const s = { stream: { getTracks: () => [track] }, chunks: [new Float32Array(10)] };
+    h.phone.session = s;
+    h.phone.stopListening(s);
+    assert.deepEqual(events, ['track-stop', 'playback']);
+    assert.equal(s.stream, null); assert.equal(track.enabled, false); assert.equal(s.chunks.length, 0);
+});
+
+test('麦克风在auto路由重新申请，挂断后迟到的授权立即释放', async () => {
+    const h = harness(), pending = deferred(), events = [];
+    h.phone.open({ id: 'a' }); const s = h.phone.session;
+    const audioSession = {};
+    Object.defineProperty(audioSession, 'type', { set(value) { events.push(value); } });
+    h.context.navigator = { audioSession, mediaDevices: { getUserMedia() { events.push('capture'); return pending.promise; } } };
+    const work = h.phone.acquireMicrophone(s);
+    assert.deepEqual(events, ['auto', 'capture']);
+    await h.phone.hangup();
+    const track = { stop() { events.push('late-track-stop'); } };
+    pending.resolve({ getTracks: () => [track] });
+    assert.equal(await work, false); assert.ok(events.includes('late-track-stop'));
+    assert.equal(s.stream, null);
+});
+
+test('拨打手势同步解锁AudioContext，不等待模型或音频下载', async () => {
+    const h = harness(), resumed = deferred(), events = [];
+    const context = { sampleRate: 48000, destination: {}, resume() { events.push('resume'); return resumed.promise; },
+        createBuffer: () => ({}), createBufferSource: () => ({ connect() {}, disconnect() {}, start() { events.push('start'); } }) };
+    h.phone.audioContext = context; h.phone.open({ id: 'a' });
+    const work = h.phone.unlockAudio(h.phone.session);
+    assert.deepEqual(events, ['resume', 'start']);
+    resumed.resolve(); await work;
+});
+
+test('多轮通话播放复用已解锁的WebAudio，不再新建HTMLAudio，结束释放缓冲', async () => {
+    const h = harness(), nodes = [], route = { type: 'auto' };
+    h.context.navigator = { audioSession: route };
+    h.context.Audio = function() { throw Error('电话不应新建HTMLAudio'); };
+    h.phone.open({ id: 'a' }); const s = h.phone.session;
+    h.phone.audioContext = { state: 'running', destination: {},
+        async resume() {}, async decodeAudioData() { return {}; }, createBufferSource() {
+            const node = { connect() {}, disconnect() { this.disconnected = true; }, start() {}, stop() {} };
+            nodes.push(node); return node;
+        } };
+    for (let i = 0; i < 2; i++) {
+        const work = h.phone.play(s, new Blob(['audio']));
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(route.type, 'playback');
+        const node = nodes.at(-1); assert.ok(node.buffer);
+        node.onended(); await work;
+        assert.equal(node.buffer, null); assert.equal(node.disconnected, true); assert.equal(s.cancelPlayback, null);
+    }
+    assert.equal(nodes.length, 2);
+});
+
+test('播放受限重试复用音频、不再次合成，错误提示区分播放和麦克风', async () => {
+    const h = harness(); h.phone.open({ id: 'a' }); const s = h.phone.session;
+    s.micApproved = true; s.audioSettings = {}; s.messages = [{ role: 'assistant', content: '你好', heard: false }];
+    let synthesis = 0, playback = 0;
+    h.phone.synthesize = async () => { synthesis++; return new Blob(['audio']); };
+    h.phone.play = async () => {
+        if (!playback++) { const error = new Error('autoplay denied'); error.name = 'NotAllowedError'; error.phoneStage = 'playback'; throw error; }
+    };
+    h.phone.unlockAudio = async () => {}; h.phone.listen = async () => {};
+    try { await h.phone.speak(s, s.messages[0]); } catch (error) { h.phone.fail(s, error); }
+    assert.match(h.toasts[0], /暂停了音频播放/); assert.ok(!h.toasts[0].includes('权限'));
+    await h.phone.retry();
+    assert.equal(synthesis, 1); assert.equal(playback, 2); assert.equal(s.pendingSpeech, null);
+    assert.equal(s.messages[0].heard, true);
+    assert.match(h.phone.reason({ name: 'NotAllowedError', phoneStage: 'microphone', message: 'denied' }), /麦克风/);
+});
 
 test('通话专用预设完整复用参数，不改变普通聊天绑定，留空时沿用角色设置', () => {
     const h = harness(), contact = { id: 'a', linkedPresetName: '昂贵模型', phonePresetName: '快速模型' };
