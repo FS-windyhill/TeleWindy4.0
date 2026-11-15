@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 后台服务与切屏回复拆页后更新样式版本，避免 PWA 沿用旧卡片排版。 -->
-    <link rel="stylesheet" href="./style.css?v=20261104-selectring-1">
+    <link rel="stylesheet" href="./style.css?v=20261115-phone-1">
 </head>
 <body>
 
@@ -2021,8 +2021,9 @@
                     <div id="chat-mode-tabs" class="chat-mode-tabs" role="tablist">
                         <button type="button" data-mode="online" aria-selected="true">线上聊天</button>
                         <button type="button" data-mode="offline" aria-selected="false">线下见面</button>
+                        <button type="button" data-mode="phone" aria-selected="false">电话通讯</button>
                     </div>
-                    <p class="input-hint">线下见面：像写小说一样描述见面的场景，与线上聊天分开记录。切换在按「保存」后生效。</p>
+                    <p class="input-hint">按「保存」后生效。电话通讯仅本次进入，挂断后回到原来的线上／线下模式；切到后台会结束通话。</p>
                 </div>
 
                 <div class="input-group">
@@ -2093,6 +2094,16 @@
                 </div>
 
 
+
+                <!-- ★ 音色跟随角色保存；试听使用全局已保存的 MiniMax 国际版配置。 -->
+                <div class="input-group">
+                    <label for="edit-phone-voice">MiniMax 音色 ID（voice_id）</label>
+                    <div class="phone-voice-row">
+                        <input id="edit-phone-voice" type="text" placeholder="填写角色音色 ID" autocomplete="off">
+                        <button id="phone-audition" type="button" class="api-btn">试听</button>
+                    </div>
+                    <p class="input-hint">试听：你好呀，可以听到我的声音吗？</p>
+                </div>
 
                 <!-- 【改动1】：搜索入口按钮 - 让它独占一行 -->
                 <div id="search-history-section" class="input-group search-entry-section">
@@ -2622,6 +2633,63 @@
 
                     </div>
 
+                    <!-- ★ 通话配置独立于文字/视觉预设；音色 ID 在各角色聊天选项中填写。 -->
+                    <h3 class="section-title">通话模型</h3>
+                    <div class="main-options api-section phone-settings">
+                        <h4>角色语音生成 · MiniMax 国际版</h4>
+                        <div class="main-option api-input-card">
+                            <label for="phone-tts-key">密钥（API Key）</label>
+                            <!-- ★ 复用文字/视觉模型的通用小眼睛样式与事件，控制本框明文显示。 -->
+                            <div class="input-wrapper">
+                                <input id="phone-tts-key" class="setting-input has-eye-icon" type="password" autocomplete="off" placeholder="MiniMax 国际版 API Key">
+                                <span class="eye-icon" id="toggle-phone-tts-key" title="显示/隐藏密钥">
+                                    <span class="svg-eye-closed">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-off-icon lucide-eye-off"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                                    </span>
+                                    <span class="svg-eye-open" style="display: none;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-icon lucide-eye"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="main-option api-input-card">
+                            <label for="phone-tts-model">模型名称</label>
+                            <input id="phone-tts-model" class="setting-input" type="text" placeholder="例如 speech-2.8-turbo">
+                            <p class="input-hint">直接手填。当前国际版语音接口无需 Group ID。</p>
+                        </div>
+                        <h4>用户语音识别</h4>
+                        <div class="main-option api-input-card">
+                            <label for="phone-stt-provider">识别服务</label>
+                            <select id="phone-stt-provider" class="setting-input">
+                                <option value="deepseek">DeepSeek 语音识别</option>
+                                <option value="browser">浏览器／系统语音服务</option>
+                            </select>
+                        </div>
+                        <div id="phone-deepseek-fields">
+                            <div class="main-option api-input-card">
+                                <label for="phone-stt-url">语音识别 API 地址</label>
+                                <input id="phone-stt-url" class="setting-input" type="url" placeholder="https://api.deepseek.com/v1/tools/asr">
+                            </div>
+                            <div class="main-option api-input-card">
+                                <label for="phone-stt-key">密钥（API Key）</label>
+                                <!-- ★ 与语音生成密钥各自切换，沿用全局 .eye-icon 通用绑定。 -->
+                                <div class="input-wrapper">
+                                    <input id="phone-stt-key" class="setting-input has-eye-icon" type="password" autocomplete="off" placeholder="DeepSeek API Key">
+                                    <span class="eye-icon" id="toggle-phone-stt-key" title="显示/隐藏密钥">
+                                        <span class="svg-eye-closed">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-off-icon lucide-eye-off"><path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-1.444 2.49"/><path d="M14.084 14.158a3 3 0 0 1-4.242-4.242"/><path d="M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151 1 1 0 0 1 0-.696 10.75 10.75 0 0 1 4.446-5.143"/><path d="m2 2 20 20"/></svg>
+                                        </span>
+                                        <span class="svg-eye-open" style="display: none;">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eye-icon lucide-eye"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
+                                        </span>
+                                    </span>
+                                </div>
+                            </div>
+                            <p class="input-hint">停顿约 1.3 秒自动提交，也可以点击「说完了」。单段最长约 110 秒。</p>
+                        </div>
+                        <p id="phone-browser-hint" class="input-hint" hidden>依赖浏览器支持，可能使用联网服务，不保证离线可用。不支持时请选择 DeepSeek。</p>
+                        <p class="input-hint">电话使用角色当前对话模型生成台词；第一版需要该模型的 API 地址和密钥，音频播完即释放。</p>
+                    </div>
 
                 </div>
 
@@ -3115,6 +3183,25 @@
         </div>
     </div>
 
+    <!-- ★ 电话覆盖当前聊天页面；关闭仅移除覆盖层，原来的线上/线下页面保持原样。 -->
+    <section id="phone-page" class="phone-page" role="dialog" aria-modal="true" aria-label="电话通讯" hidden>
+        <div class="phone-shell">
+            <button id="phone-close" type="button" class="phone-close" aria-label="退出电话通讯">关闭</button>
+            <header class="phone-header">
+                <img id="phone-avatar" alt="角色头像">
+                <h2 id="phone-name"></h2>
+                <p id="phone-status" role="status" aria-live="polite">准备拨打</p>
+            </header>
+            <div id="phone-transcript" class="phone-transcript" role="log" aria-label="本次电话文字"></div>
+            <footer class="phone-controls">
+                <button id="phone-dial" type="button" class="phone-dial">拨打</button>
+                <button id="phone-done" type="button" hidden>说完了</button>
+                <button id="phone-retry" type="button" hidden>重试</button>
+                <button id="phone-hangup" type="button" class="phone-hangup">挂断</button>
+            </footer>
+        </div>
+    </section>
+
     <!-- 在这里，你的主脚本之前，引入这两个库 -->
     <script src="./vendor/marked.min.js"></script>
     <script src="./vendor/purify.min.js"></script>
@@ -3137,6 +3224,8 @@
     <script src="./js/cloud-sync.js"></script>
     <script src="./js/history-visibility.js?v=20261023-bubble-id-1"></script>
     <script src="./js/offline-chat.js?v=20261029-offline-1"></script>
+    <!-- ★ 电话独立管理临时会话与音频，不把电话模式写入角色持久化字段。 -->
+    <script src="./js/phone-call.js?v=20261115-phone-cot-2"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->
     <script src="./js/world-sense.js?v=20260829"></script>
     <script src="./js/todo-countdown-context.js"></script>
@@ -3150,7 +3239,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261114-reroll-preview-2"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261114-reroll-preview-2"></script>
+    <script src="./script.js?v=20261115-phone-cot-2"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

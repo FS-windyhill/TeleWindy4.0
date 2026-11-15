@@ -7055,11 +7055,15 @@ body.dark-mode details.thought-process {
 /* ★ 搜索图标放在输入区左侧，不拦截点击；文字留出图标位置。 */
 .inline-search-field {
     position: relative;
+    /* 层级限制在输入区内，避免图标浮到弹窗等其他界面上。 */
+    z-index: 0;
     flex: 1;
     min-width: 0;
 }
 .inline-search-field .inline-search-icon {
     position: absolute;
+    /* ★ backdrop-filter 会让 input 形成层叠上下文，图标显式放在其上方。 */
+    z-index: 1;
     left: 12px;
     top: 50%;
     transform: translateY(-50%);
@@ -7071,6 +7075,9 @@ body.dark-mode details.thought-process {
     flex-shrink: 0;
     margin: 0;
 }
+
+
+/* 三处搜索框 */
 .inline-search-row input {
     flex: 1;
     min-width: 0;
@@ -7084,12 +7091,18 @@ body.dark-mode details.thought-process {
     background: rgba(255, 255, 255, 0.4);
     color: inherit;
     font: inherit;
+    font-size: 0.85rem;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
+
+
 /* 已有独立清空按钮，隐藏浏览器给 search 输入框附带的清除 X。 */
 .inline-search-row input::-webkit-search-cancel-button,
 .inline-search-row input::-webkit-search-decoration {
     -webkit-appearance: none;
     display: none;
+    
 }
 .inline-search-row input::-ms-clear { display: none; }
 .inline-search-clear:not([hidden]) {
@@ -7107,6 +7120,8 @@ body.dark-mode details.thought-process {
     background: transparent;
     color: inherit;
     cursor: pointer;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
 }
 .inline-search-status {
     margin-top: 6px;
@@ -13204,7 +13219,7 @@ body.dark-mode .usage-page #usage-cost {
     content: '';
     position: absolute;
     left: 4px; top: 4px; bottom: 4px;
-    width: calc(50% - 4px);
+    width: calc((100% - 8px) / 3);
     border-radius: 11px;
     background: rgba(255, 255, 255, 0.85);
     box-shadow: 0 2px 8px #0001;
@@ -13214,9 +13229,10 @@ body.dark-mode .usage-page #usage-cost {
 .chat-mode-tabs.offline-mode::before {
     transform: translateX(100%);
 }
+.chat-mode-tabs.phone-mode::before { transform: translateX(200%); }
 .chat-mode-tabs button {
     z-index: 1;
-    width: 50%;
+    width: 33.333%;
     padding: 7px 10px;
     border: 0;
     background: none;
@@ -13635,3 +13651,49 @@ body.dark-mode .offline-card-avatar {
 }
 
 /* ★★★★★ 线下见面模式：header/footer 美化 + 暗色适配 END ★★★★★ */
+
+/* =========================================
+   电话通讯：独立覆盖层，原聊天页和模式仍留在下面
+   ★ 音频/麦克风状态由 PhoneCall 管理，CSS 只负责显示。
+   ========================================= */
+.phone-page[hidden], .phone-page [hidden], .phone-settings [hidden] { display: none !important; }
+.phone-page {
+    position: fixed; inset: 0; z-index: 10070;
+    display: flex; justify-content: center;
+    background: radial-gradient(ellipse at 18% 8%, #dcece9, transparent 60%),
+        radial-gradient(ellipse at 90% 65%, #dce2f1, transparent 65%), #f4f5f7;
+    color: #263b39;
+    overscroll-behavior: contain;
+}
+.phone-shell {
+    width: min(100%, 620px); height: 100%; height: 100dvh; box-sizing: border-box;
+    display: flex; flex-direction: column; position: relative;
+    padding: max(22px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+}
+.phone-close { align-self: flex-start; border: 0; background: #ffffff70; color: inherit; padding: 9px 16px; border-radius: 22px; cursor: pointer; }
+.phone-header { text-align: center; padding: 24px 0 16px; flex-shrink: 0; }
+.phone-header img { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; box-shadow: 0 8px 32px #294f4820; border: 4px solid #ffffff80; }
+.phone-header h2 { margin: 14px 0 7px; font-size: 25px; font-weight: 600; }
+.phone-header p { margin: 0; opacity: .65; font-size: 13px; min-height: 20px; }
+.phone-transcript { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 18px 0; }
+.phone-bubble { flex-shrink: 0; max-width: 85%; padding: 13px 17px; border-radius: 22px; line-height: 1.7; font-size: 15px; overflow-wrap: anywhere; white-space: pre-wrap; box-sizing: border-box; }
+.phone-bubble.assistant { align-self: flex-start; background: #ffffffb8; border: 1px solid #ffffffc0; box-shadow: 0 4px 18px #294f4807; }
+.phone-bubble.user { align-self: flex-end; background: #d0e8e0; }
+.phone-controls { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 14px; flex-shrink: 0; }
+.phone-controls button { border: 1px solid #ffffff80; border-radius: 40px; padding: 14px 30px; font: inherit; background: #ffffff80; color: inherit; cursor: pointer; min-width: 125px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.phone-controls .phone-dial { background: #36b575; color: #fff; font-weight: 600; min-width: 160px; }
+.phone-controls .phone-hangup { background: #e75b61; color: #fff; }
+/* ★ 尚未拨打时只显示绿色主按钮，红色挂断用于实际拨打后的阶段。 */
+.phone-controls:has(.phone-dial:not([hidden])) .phone-hangup { display: none; }
+.phone-voice-row { display: flex; align-items: center; gap: 10px; }
+.phone-voice-row input { flex: 1; min-width: 0; }
+.phone-voice-row button { flex-shrink: 0; }
+.phone-settings h4 { margin: 18px 0 12px; }
+body.dark-mode .phone-page { background: radial-gradient(ellipse at 15% 0%, #25473f, transparent 65%), #171f24; color: #edf3f0; }
+body.dark-mode .phone-bubble.assistant, body.dark-mode .phone-close { background: #ffffff16; border-color: #ffffff18; }
+body.dark-mode .phone-bubble.user { background: #355f50; }
+@media (max-height: 650px) {
+    .phone-header { padding: 8px 0; }
+    .phone-header img { width: 65px; height: 65px; }
+    .phone-header h2 { margin-top: 8px; font-size: 20px; }
+}

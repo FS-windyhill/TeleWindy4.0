@@ -42,6 +42,7 @@ function harness() {
     vm.runInContext(fs.readFileSync('js/chat-bubbles.js', 'utf8') + '\nthis.ChatBubbles = ChatBubbles;', context);
     vm.runInContext(fs.readFileSync('js/history-visibility.js', 'utf8') + '\nthis.HistoryVisibility = HistoryVisibility;', context);
     vm.runInContext(fs.readFileSync('js/offline-chat.js', 'utf8') + '\nthis.OfflineChat = OfflineChat;', context);
+    vm.runInContext(fs.readFileSync('js/phone-call.js', 'utf8') + '\nthis.PhoneCall = PhoneCall;', context);
     const signatures = ['async handleOfflineSend(isReroll = false) {', 'async handleSend(isReroll = false) {', 'ensureHistoryCacheMetadata(contact, historyKey = \'history\') {',
         'selectHistoryWindowRecords(contact, requestSettings, historyKey = \'history\') {', 'async resumePendingChatJobs() {',
         'rememberPendingJob(jobId, settings) {'];
@@ -78,6 +79,33 @@ test('成功后替换旧回复，上下文不包含旧正文，桥接只扣一�
     assert.equal(h.contact.offlineHistory.at(-1).content, '新回复');
     assert.equal(h.contact.offlineBridgeRoundsLeft, 1);
     assert.equal(h.removed.length, 1);
+});
+
+// ★ 执行真实线下组装/发送管线：验证缓存优化的三个位置以及成功/失败计数。
+test('电话回顾在线下按auto/user/system分流，重生成不重复消费', async () => {
+    for (const mode of ['auto', 'user', 'system']) {
+        const h = harness(); let messages;
+        h.contact.phoneRecaps = [{ id: 'call', timestamp: '今天', fallback: '电话约定明天见', roundsLeft: 2, consumed: [] }];
+        h.app.buildChatRequestSettings = () => ({ CONTEXT_LIMIT: 5, DYNAMIC_CONTEXT_INSERT_MODE: mode });
+        h.API.chat = async m => { messages = m; return '新回复'; };
+        await h.app.handleOfflineSend(true);
+        const containing = messages.filter(m => m.content.includes('电话约定明天见'));
+        assert.equal(containing.length, 1);
+        assert.equal(containing[0].role, mode === 'system' ? 'system' : 'user');
+        assert.equal(h.contact.phoneRecaps[0].roundsLeft, 1);
+        await h.app.handleOfflineSend(true);
+        assert.equal(h.contact.phoneRecaps[0].roundsLeft, 1);
+    }
+});
+
+test('旧请求恢复不消费新电话，恢复同一job不重复扣电话回顾', async () => {
+    const h = harness();
+    h.contact.phoneRecaps = ['old-call', 'new-call'].map(id => ({ id, roundsLeft: 2, consumed: [] }));
+    const pending = { jobId: 'job', contactId: 'a', userMessageId: 'user', chatHistoryKey: 'offlineHistory', phoneRecapIds: ['old-call'] };
+    h.API.loadPendingJobs = () => [pending]; h.API.getChatJob = async () => ({ status: 'done', result: '回复' });
+    await h.app.resumePendingChatJobs(); await h.app.resumePendingChatJobs();
+    assert.equal(h.contact.phoneRecaps[0].roundsLeft, 1);
+    assert.equal(h.contact.phoneRecaps[1].roundsLeft, 2);
 });
 test('数据库尚未保存完成时再次触发，仍只执行一轮请求', async () => {
     const h = harness(), gate = deferred(); h.Storage.saveContacts = () => gate.promise;
@@ -137,12 +165,14 @@ test('线上重生成准备失败保留原回复并释放请求槽', async () =>
 });
 test('新回复写库失败会回滚旧回复，恢复后可重新生成', async () => {
     const h = harness(); const save = h.Storage.saveContacts; let failNext = false;
+    h.contact.phoneRecaps = [{ id: 'call', roundsLeft: 2, consumed: [], fallback: '电话内容' }];
     h.API.chat = async () => { failNext = true; return '新回复'; };
     h.Storage.saveContacts = async () => { if (failNext) { failNext = false; throw Error('写库失败'); } await save(); };
     await h.app.handleOfflineSend(true);
     assert.ok(h.contact.offlineHistory.some(m => m.messageId === 'old'));
     assert.ok(!h.contact.offlineHistory.some(m => m.content === '新回复'));
     assert.equal(h.contact.offlineBridgeRoundsLeft, 2);
+    assert.equal(h.contact.phoneRecaps[0].roundsLeft, 2);
     assert.equal(h.state.chatRequestActive, false);
 });
 

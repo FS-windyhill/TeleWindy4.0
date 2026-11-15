@@ -875,7 +875,6 @@ const API = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         };
-
         // 构造一个极简的消息体，只为了测试通断
         const testMessage = "Ping"; 
 
@@ -1632,6 +1631,8 @@ const API = {
             rerollMessageIds: settings.CHAT_REROLL_MESSAGE_IDS || [],
             // ★ 番茄钟请求快照随 job 保存，避免恢复时聊天索引因删除/重生成发生偏移。
             pomodoroInjection: settings.POMODORO_INJECTION || null,
+            // ★ 电话回顾快照随请求保存，恢复旧 job 时不消费后来发生的新通话。
+            phoneRecapIds: settings.PHONE_RECAP_IDS || [],
             backendUrl: settings.ASYNC_BACKEND_URL.replace(/\/+$/, ''),
             token: settings.ASYNC_BACKEND_TOKEN,
             createdAt: Date.now(),
@@ -1925,6 +1926,27 @@ const API = {
     },
     // ★★★★★ 主模型多模态消息 END ★★★★★
 
+    // ★ 先把各供应商的独立推理块统一为 <think>；普通聊天仍可展示，电话再统一剔除。
+    //   Claude / Gemini 不能只取第一个 block，它可能恰好是 thinking。
+    normalizeModelReply(data, provider) {
+        const wrapThought = text => text ? `<think>\n${String(text).trim()}\n</think>` : '';
+        if (provider === 'claude') {
+            return (data.content || []).map(block => block.type === 'thinking'
+                ? wrapThought(block.thinking) : block.type === 'text' ? block.text || '' : '').filter(Boolean).join('\n\n').trim();
+        }
+        if (provider === 'gemini') {
+            return (data.candidates?.[0]?.content?.parts || []).map(part => part.thought === true
+                ? wrapThought(part.text) : part.text || '').filter(Boolean).join('\n\n').trim();
+        }
+        const message = data.choices?.[0]?.message || {};
+        const reasoning = message.reasoning_content || message.reasoningContent || message.reasoning || '';
+        const content = Array.isArray(message.content)
+            ? message.content.map(block => ['thinking', 'reasoning'].includes(block.type)
+                ? wrapThought(block.thinking || block.text) : block.type === 'text' ? block.text || '' : '').join('\n\n')
+            : message.content || '';
+        return [wrapThought(reasoning), content].filter(Boolean).join('\n\n').trim();
+    },
+
     async chat(messages, settings) {
         // ★ 后台任务去重标记只属于“本次 API.chat 调用”，每次开始前先清空旧结果。
         this.lastAsyncBackendResult = null;
@@ -1955,6 +1977,8 @@ const API = {
             headers: { 'Content-Type': 'application/json' }
         };
 
+        // ★ 电话挂断可中止直连请求；其它调用不提供 signal，保持原来的生命周期。
+        if (settings.REQUEST_SIGNAL) options.signal = settings.REQUEST_SIGNAL;
         const sysPrompts = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
         const requestedMessageIndex = Number.isInteger(settings.MULTIMODAL_MESSAGE_INDEX)
             ? settings.MULTIMODAL_MESSAGE_INDEX
@@ -2278,7 +2302,7 @@ const API = {
         }
                 
         if (provider === 'claude') {
-            return data.content[0].text.trim();
+            return this.normalizeModelReply(data, provider);
         }
         
         if (provider === 'gemini') {
@@ -2288,21 +2312,13 @@ const API = {
                 throw new Error("❌ 回复失败：内容触发了 Google Gemini 的安全审查过滤。");
             }
 
-            return candidate?.content?.parts?.[0]?.text?.trim() || "【API未返回有效文本】";
+            return this.normalizeModelReply(data, provider) || "【API未返回有效文本】";
         }
         
         // ==========================================
         // 统一推理模型的输出格式 把某些推理模型单独返回的 reasoning_content，整理成 <think>...</think> 格式，方便前端统一显示
         // ==========================================
-        const messageObj = data.choices[0].message;
-        let finalContent = messageObj.content || "";
-        
-        // DeepSeek-R1 / OpenAI o1 等推理字段
-        if (messageObj.reasoning_content) {
-            finalContent = `<think>\n${messageObj.reasoning_content.trim()}\n</think>\n\n${finalContent}`;
-        }
-        
-        return finalContent.trim();
+        return this.normalizeModelReply(data, provider);
     },
 
     
@@ -5127,7 +5143,8 @@ const App = {
                             offlineBridgeRoundsLeft: contact.offlineBridgeRoundsLeft,
                             offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId,
                             offlineRecapRoundsLeft: contact.offlineRecapRoundsLeft,
-                            offlineRecapConsumedRoundId: contact.offlineRecapConsumedRoundId
+                            offlineRecapConsumedRoundId: contact.offlineRecapConsumedRoundId,
+                            phoneRecaps: JSON.parse(JSON.stringify(contact.phoneRecaps || []))
                         };
                         const alreadySaved = targetHistory.some(msg => msg.asyncJobId === pending.jobId);
                         let assistantMessage = null;
@@ -5159,6 +5176,7 @@ const App = {
                             else OfflineChat.consumeRecapRound(contact, pending.userMessageId);
                         }
                         // ★ 番茄钟后台恢复沿用请求时保存的快照，不消费后来才完成的新番茄。
+                        if (typeof PhoneCall !== 'undefined') PhoneCall.consume(contact, pending.phoneRecapIds, pending.userMessageId);
                         const pomodoroSource = pending.userMessageId
                             ? targetHistory.find(item => item?.messageId === pending.userMessageId)
                             : targetHistory[pending.userMessageIndex];
@@ -11515,6 +11533,10 @@ const App = {
             const messagesToSend = [];
             const routineDynamicContextPrompts = [];
             const volatileDynamicContextPrompts = [];
+            // ★ 电话回顾与朋友圈/线下回顾同位置分流；只消费本次真正发送的快照。
+            requestSettings.PHONE_RECAP_IDS = typeof PhoneCall !== 'undefined' ? PhoneCall.capture(contact) : [];
+            const phoneRecapPrompt = typeof PhoneCall !== 'undefined' ? PhoneCall.buildRecapPrompt(contact, requestSettings.PHONE_RECAP_IDS) : '';
+            if (phoneRecapPrompt) volatileDynamicContextPrompts.push(phoneRecapPrompt);
             let triggeredWorldInfoPrompt = '';
             if ((systemPrompt || '').trim()) {
                 messagesToSend.push({ role: 'system', content: systemPrompt });
@@ -11858,7 +11880,8 @@ const App = {
                 const replaced = contact.history.filter(message => ids.has(message.messageId));
                 const originalHistory = contact.history;
                 const originalBridge = { offlineBridgeRoundsLeft: contact.offlineBridgeRoundsLeft,
-                    offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId };
+                    offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId,
+                    phoneRecaps: JSON.parse(JSON.stringify(contact.phoneRecaps || [])) };
                 replacementRollback = () => {
                     contact.history = originalHistory;
                     Object.assign(contact, originalBridge);
@@ -11933,6 +11956,7 @@ const App = {
             }
 
             // ★ 线下回顾只有正式回复成功才扣轮次；Reroll 复用同一条用户消息的 messageId，不会重复扣。
+            if (typeof PhoneCall !== 'undefined') PhoneCall.consume(contact, requestSettings.PHONE_RECAP_IDS, agentUserMessage?.messageId || '');
             if (typeof OfflineChat !== 'undefined') {
                 OfflineChat.consumeRecapRound(contact, agentUserMessage?.messageId || '');
             }
@@ -12073,6 +12097,8 @@ const App = {
     //   即使你是从联系人列表直进线下页的，也会落回聊天界面而不是退回列表。
     applyChatModeChange(contact, mode) {
         if (!contact) return;
+        // ★ 电话只覆盖当前页面，不修改持久化模式，也不触发线下退出回顾。
+        if (mode === 'phone') { PhoneCall.open(contact); return; }
         OfflineChat.ensureFields(contact);
         const currentMode = OfflineChat.isOffline(contact) ? 'offline' : 'online';
         if (mode === currentMode) return;
@@ -12191,6 +12217,9 @@ const App = {
             // ============================================================
             const messagesToSend = [];
             const routineDynamicContextPrompts = [];
+            // ★ 在线下挂断电话也能立即衔接，注入位置同样跟随缓存命中优化设置。
+            requestSettings.PHONE_RECAP_IDS = typeof PhoneCall !== 'undefined' ? PhoneCall.capture(contact) : [];
+            const phoneRecapPrompt = typeof PhoneCall !== 'undefined' ? PhoneCall.buildRecapPrompt(contact, requestSettings.PHONE_RECAP_IDS) : '';
             let triggeredWorldInfoPrompt = '';
 
             // ① 恒定的线下场景提示
@@ -12272,6 +12301,7 @@ const App = {
             if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && triggeredWorldInfoPrompt) {
                 worldInfoSystemBlocks.push(triggeredWorldInfoPrompt);
             }
+            if (requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'system' && phoneRecapPrompt) worldInfoSystemBlocks.push(phoneRecapPrompt);
             if (worldInfoSystemBlocks.length) {
                 messagesToSend.push({ role: 'system', content: worldInfoSystemBlocks.join('\n\n') });
             }
@@ -12286,11 +12316,11 @@ const App = {
             historyForPayload.forEach(h => messagesToSend.push(h));
 
             // 动态内容按用户选的缓存命中优化方式分流（与线上同构；线下没有其它易变项）
-            const allDynamicContextPrompts = [...routineDynamicContextPrompts, triggeredWorldInfoPrompt].filter(Boolean);
+            const allDynamicContextPrompts = [...routineDynamicContextPrompts, triggeredWorldInfoPrompt, phoneRecapPrompt].filter(Boolean);
             const userDynamicContextPrompts = requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'user'
                 ? allDynamicContextPrompts
                 : requestSettings.DYNAMIC_CONTEXT_INSERT_MODE === 'auto'
-                    ? [triggeredWorldInfoPrompt].filter(Boolean)
+                    ? [triggeredWorldInfoPrompt, phoneRecapPrompt].filter(Boolean)
                     : [];
 
             if (userDynamicContextPrompts.length && currentUserMessage) {
@@ -12357,7 +12387,8 @@ const App = {
                 const replaced = contact.offlineHistory.filter(message => ids.has(message.messageId));
                 const originalHistory = contact.offlineHistory;
                 const originalBridge = { offlineBridgeRoundsLeft: contact.offlineBridgeRoundsLeft,
-                    offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId };
+                    offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId,
+                    phoneRecaps: JSON.parse(JSON.stringify(contact.phoneRecaps || [])) };
                 replacementRollback = () => {
                     contact.offlineHistory = originalHistory;
                     Object.assign(contact, originalBridge);
@@ -12383,6 +12414,7 @@ const App = {
 
             // ★ 桥接轮次只有正式回复成功才扣；reroll 复用同一轮 messageId，不会重复扣。
             OfflineChat.consumeBridgeRound(contact, roundId);
+            if (typeof PhoneCall !== 'undefined') PhoneCall.consume(contact, requestSettings.PHONE_RECAP_IDS, roundId);
 
             await Storage.saveContacts();
             replacementRollback = null;
@@ -12774,6 +12806,7 @@ const App = {
         }
 
         UI.renderVisionPresetMenu(); 
+        PhoneCall.fillSettings(s);
 
         if (previewImg && previewDiv && s.WALLPAPER && s.WALLPAPER.startsWith('data:')) {
             previewImg.src = s.WALLPAPER;
@@ -13503,6 +13536,8 @@ const App = {
         if (UI.els.settingVisionKey) s.VISION_KEY = UI.els.settingVisionKey.value.trim();
         if (UI.els.settingVisionModel) s.VISION_MODEL = UI.els.settingVisionModel.value.trim();
         if (UI.els.settingVisionPrompt) s.VISION_PROMPT = UI.els.settingVisionPrompt.value.trim();
+        // ★ 通话密钥/模型单独保存，不混入文字和视觉模型预设。
+        PhoneCall.saveSettings(s);
 
         // 保存并应用
         await Storage.saveSettings();
@@ -18586,6 +18621,7 @@ const App = {
             title.innerText = '聊天选项'; 
             iName.value = c.name;
             iPrompt.value = c.prompt || "";
+            document.getElementById('edit-phone-voice').value = c.phoneVoiceId || '';
             
             preview.src = c.avatar || './assets/images/char.jpg';
             presetSelect.value = c.linkedPresetName || "";
@@ -18623,6 +18659,7 @@ const App = {
             title.innerText = '新建角色';
             iName.value = '';
             iPrompt.value = '你是一个...';
+            document.getElementById('edit-phone-voice').value = '';
             
             preview.src = './assets/images/char.jpg'; 
             presetSelect.value = "";
@@ -18669,6 +18706,8 @@ const App = {
         const tabs = document.getElementById('chat-mode-tabs');
         if (!tabs) return;
         tabs.classList.toggle('offline-mode', mode === 'offline');
+        tabs.classList.toggle('phone-mode', mode === 'phone');
+        tabs.dataset.mode = mode;
         tabs.querySelectorAll('button[data-mode]').forEach(btn => {
             btn.setAttribute('aria-selected', btn.dataset.mode === mode ? 'true' : 'false');
         });
@@ -18697,6 +18736,7 @@ const App = {
                 // 保存预设绑定
                 c.linkedPresetName = linkedPresetName; 
                 c.linkedSystemPromptPresetName = linkedSystemPromptPresetName;
+                c.phoneVoiceId = document.getElementById('edit-phone-voice').value.trim();
             }
         } else {
             // === 创建新角色 ===
@@ -18708,6 +18748,7 @@ const App = {
                 history: [],
                 presenceLastActiveAt: Date.now(),
                 linkedPresetName: linkedPresetName,
+                phoneVoiceId: document.getElementById('edit-phone-voice').value.trim(),
                 linkedSystemPromptPresetName: linkedSystemPromptPresetName
             });
         }
@@ -18727,7 +18768,7 @@ const App = {
         const chatModeSection = document.getElementById('chat-mode-section');
         if (this.editingId && chatModeSection && chatModeSection.style.display !== 'none') {
             const modeTabs = document.getElementById('chat-mode-tabs');
-            const pendingMode = modeTabs?.classList.contains('offline-mode') ? 'offline' : 'online';
+            const pendingMode = modeTabs?.dataset.mode || 'online';
             const contact = STATE.contacts.find(x => x.id === this.editingId);
             this.applyChatModeChange(contact, pendingMode);
         }
