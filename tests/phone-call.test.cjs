@@ -29,6 +29,51 @@ function harness() {
 }
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; }
 
+test('通话专用预设完整复用参数，不改变普通聊天绑定，留空时沿用角色设置', () => {
+    const h = harness(), contact = { id: 'a', linkedPresetName: '昂贵模型', phonePresetName: '快速模型' };
+    h.state.settings.API_PRESETS = [{ name: '快速模型' }];
+    let received;
+    h.context.App = { buildChatRequestSettings(c) {
+        received = c;
+        return { API_URL: 'https://example.test', API_KEY: 'test', MODEL: c.linkedPresetName,
+            TEMPERATURE: 0.6, CUSTOM_REQUEST_BODY_JSON: '{"thinking":false}', ASYNC_BACKEND_ENABLED: true };
+    } };
+    const settings = h.phone.buildModelSettings(contact, contact.phonePresetName);
+    assert.equal(settings.MODEL, '快速模型'); assert.equal(settings.TEMPERATURE, 0.6);
+    assert.equal(settings.CUSTOM_REQUEST_BODY_JSON, '{"thinking":false}');
+    assert.equal(settings.ASYNC_BACKEND_ENABLED, false);
+    assert.equal(contact.linkedPresetName, '昂贵模型'); assert.notEqual(received, contact);
+    assert.equal(h.phone.buildModelSettings(contact, '').MODEL, '昂贵模型');
+    assert.throws(() => h.phone.buildModelSettings(contact, '已删除模型'), /已删除/);
+});
+
+test('总结使用单独预设且仍清洗CoT，留空时沿用本通电话模型', async () => {
+    const h = harness(), contact = {};
+    h.state.contacts.push(contact);
+    h.state.settings.API_PRESETS = [{ name: '便宜总结' }];
+    h.context.App = { buildChatRequestSettings: c => ({ API_URL: 'https://example.test', API_KEY: 'test', MODEL: c.linkedPresetName }) };
+    let requested;
+    h.context.API.chat = async (_messages, settings) => { requested = settings; return '<think>总结推理</think>双方约好明天见'; };
+    const session = { id: 'call', summaryPresetName: '便宜总结', settings: { MODEL: '快速通话' }, messages: [{ role: 'user', content: '明天见' }] };
+    const recap = h.phone.armRecap(contact, session);
+    await h.phone.summarize(contact, session, recap);
+    assert.equal(requested.MODEL, '便宜总结'); assert.equal(requested.COUNT_AS_INTERACTION, false);
+    assert.equal(recap.summary, '双方约好明天见'); assert.equal(recap.roundsLeft, 2);
+    session.summaryPresetName = '';
+    await h.phone.summarize(contact, session, recap);
+    assert.equal(requested.MODEL, '快速通话');
+    assert.equal(session.settings.MODEL, '快速通话');
+});
+
+test('总结预设删除或调用失败时仍保留即时原文，不偷偷切回昂贵模型', async () => {
+    const h = harness(), contact = {}; h.state.contacts.push(contact);
+    const session = { id: 'call', summaryPresetName: '已删除', settings: { MODEL: '昂贵' }, messages: [{ role: 'user', content: '重要约定' }] };
+    const recap = h.phone.armRecap(contact, session);
+    await h.phone.summarize(contact, session, recap);
+    assert.equal(h.requests.length, 0); assert.equal(recap.summary, '');
+    assert.match(h.phone.buildRecapPrompt(contact), /重要约定/);
+});
+
 test('电话剔除各种推理标签，包含多个、嵌套、属性、未闭合和截断闭合块', () => {
     const { phone } = harness();
     for (const tag of ['think', 'thinking', 'thought', 'reasoning', 'analysis']) {

@@ -4786,6 +4786,9 @@ const UI = {
 
     // ★★★ API 预设菜单 UI (逻辑修正版) ★★★
     renderPresetMenu() {
+        // ★ 文字预设新增/删除后，同步刷新通话总结下拉框，保留尚未应用的选择。
+        if (typeof PhoneCall !== 'undefined') PhoneCall.fillPresetSelect('phone-summary-preset',
+            document.getElementById('phone-summary-preset')?.value || '', '-- 跟随通话对话模型 --');
         const containerId = 'api-preset-container';
         let container = document.getElementById(containerId);
 
@@ -18622,6 +18625,7 @@ const App = {
             iName.value = c.name;
             iPrompt.value = c.prompt || "";
             document.getElementById('edit-phone-voice').value = c.phoneVoiceId || '';
+            PhoneCall.fillPresetSelect('edit-phone-preset', c.phonePresetName || '', '-- 跟随角色当前对话模型 --');
             
             preview.src = c.avatar || './assets/images/char.jpg';
             presetSelect.value = c.linkedPresetName || "";
@@ -18660,6 +18664,7 @@ const App = {
             iName.value = '';
             iPrompt.value = '你是一个...';
             document.getElementById('edit-phone-voice').value = '';
+            PhoneCall.fillPresetSelect('edit-phone-preset', '', '-- 跟随角色当前对话模型 --');
             
             preview.src = './assets/images/char.jpg'; 
             presetSelect.value = "";
@@ -18737,6 +18742,7 @@ const App = {
                 c.linkedPresetName = linkedPresetName; 
                 c.linkedSystemPromptPresetName = linkedSystemPromptPresetName;
                 c.phoneVoiceId = document.getElementById('edit-phone-voice').value.trim();
+                c.phonePresetName = document.getElementById('edit-phone-preset').value;
             }
         } else {
             // === 创建新角色 ===
@@ -18749,6 +18755,7 @@ const App = {
                 presenceLastActiveAt: Date.now(),
                 linkedPresetName: linkedPresetName,
                 phoneVoiceId: document.getElementById('edit-phone-voice').value.trim(),
+                phonePresetName: document.getElementById('edit-phone-preset').value,
                 linkedSystemPromptPresetName: linkedSystemPromptPresetName
             });
         }

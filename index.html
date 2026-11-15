@@ -2082,6 +2082,15 @@
                     </p>
                 </div>
 
+                <!-- ★ 通话台词独立选用文字预设，不修改角色平时聊天的模型绑定。 -->
+                <div class="input-group">
+                    <label for="edit-phone-preset">通话对话模型（来自设置-API预设）</label>
+                    <select id="edit-phone-preset" class="setting-input">
+                        <option value="">-- 跟随角色当前对话模型 --</option>
+                    </select>
+                    <p class="input-hint">仅用于打电话时生成角色台词，可选择响应更快的模型。</p>
+                </div>
+
                 <!-- 角色专属 System Prompt 选择：空值时跟随主设置里的当前全局提示词 -->
                 <div class="input-group">
                     <label>System Prompt</label>
@@ -2688,7 +2697,15 @@
                             <p class="input-hint">停顿约 1.3 秒自动提交，也可以点击「说完了」。单段最长约 110 秒。</p>
                         </div>
                         <p id="phone-browser-hint" class="input-hint" hidden>依赖浏览器支持，可能使用联网服务，不保证离线可用。不支持时请选择 DeepSeek。</p>
-                        <p class="input-hint">电话使用角色当前对话模型生成台词；第一版需要该模型的 API 地址和密钥，音频播完即释放。</p>
+                        <p class="input-hint">电话使用角色聊天选项中的通话对话模型生成台词；需要该模型的 API 地址和密钥，音频播完即释放。</p>
+                        <!-- ★ 总结独立选择文字模型预设，留空沿用本通电话的台词模型。 -->
+                        <div class="main-option api-input-card">
+                            <label for="phone-summary-preset">通话总结模型（文字模型预设）</label>
+                            <select id="phone-summary-preset" class="setting-input">
+                                <option value="">-- 跟随通话对话模型 --</option>
+                            </select>
+                            <p class="input-hint">挂断后归纳通话内容，可选择便宜、快速的模型。总结等待期间先注入最近 6 条通话原文。</p>
+                        </div>
                     </div>
 
                 </div>
@@ -3225,7 +3242,7 @@
     <script src="./js/history-visibility.js?v=20261023-bubble-id-1"></script>
     <script src="./js/offline-chat.js?v=20261029-offline-1"></script>
     <!-- ★ 电话独立管理临时会话与音频，不把电话模式写入角色持久化字段。 -->
-    <script src="./js/phone-call.js?v=20261115-phone-cot-2"></script>
+    <script src="./js/phone-call.js?v=20261115-phone-models-3"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->
     <script src="./js/world-sense.js?v=20260829"></script>
     <script src="./js/todo-countdown-context.js"></script>
@@ -3239,7 +3256,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261114-reroll-preview-2"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261115-phone-cot-2"></script>
+    <script src="./script.js?v=20261115-phone-models-3"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });
