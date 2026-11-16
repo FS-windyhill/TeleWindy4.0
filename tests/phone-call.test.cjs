@@ -29,6 +29,74 @@ function harness() {
 }
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; }
 
+test('服务商切换保留各自的表单草稿和角色音色，旧国际版配置继续可用', () => {
+    const h = harness(), { phone, element } = h;
+    const settings = h.state.settings = { PHONE_TTS_KEY: 'old-key', PHONE_TTS_MODEL: 'old-model' };
+    const contact = { phoneVoiceId: 'old-voice' };
+    phone.fillSettings(settings);
+    phone.fillVoice(contact);
+    assert.equal(element('phone-tts-key').value, 'old-key');
+    assert.equal(element('edit-phone-voice').value, 'old-voice');
+    phone.readTtsDraft();
+    phone.showTtsConfig('minimax-cn');
+    assert.equal(element('phone-tts-group-fields').hidden, false);
+    element('phone-tts-key').value = 'cn-key';
+    element('phone-tts-group-id').value = '1234';
+    phone.readTtsDraft();
+    phone.showTtsConfig('fish-audio');
+    assert.equal(element('phone-tts-group-fields').hidden, true);
+    assert.equal(element('phone-tts-key').value, '');
+    element('phone-tts-key').value = 'fish-key';
+    phone.saveSettings(settings);
+    phone.fillVoice(contact);
+    assert.match(element('edit-phone-voice-label').textContent, /reference_id/);
+    assert.equal(element('edit-phone-voice').value, '');
+    element('edit-phone-voice').value = 'fish-voice';
+    phone.saveVoice(contact);
+    assert.equal(phone.voiceFor(contact, 'fish-audio'), 'fish-voice');
+    assert.equal(phone.voiceFor(contact, 'minimax-global'), 'old-voice');
+    assert.equal(phone.ttsConfig(settings, 'minimax-cn').groupId, '1234');
+    assert.equal(phone.ttsConfig(settings).key, 'fish-key');
+    assert.equal(settings.PHONE_TTS_KEY, 'old-key');
+});
+
+test('四家语音接口各用自己的鉴权、模型和音色参数，统一返回可播放的音频', async () => {
+    const h = harness(), { phone, context } = h;
+    for (const [provider, host] of [
+        ['minimax-global', 'api.minimax.io'], ['minimax-cn', 'api.minimaxi.com'],
+        ['elevenlabs', 'api.elevenlabs.io'], ['fish-audio', 'api.fish.audio']
+    ]) {
+        const isMiniMax = provider.startsWith('minimax');
+        context.fetch = async (url, options) => {
+            const endpoint = new URL(url);
+            const body = JSON.parse(options.body);
+            assert.equal(endpoint.hostname, host);
+            assert.equal(body.text, '你好');
+            if (isMiniMax) {
+                assert.equal(endpoint.searchParams.get('GroupId'), provider === 'minimax-cn' ? 'group+id' : null);
+                assert.equal(body.voice_setting.voice_id, 'voice/id');
+                assert.equal(body.model, 'model-for-' + provider);
+                assert.equal(options.headers.Authorization, 'Bearer key-for-' + provider);
+            } else if (provider === 'elevenlabs') {
+                assert.match(endpoint.pathname, /voice%2Fid$/);
+                assert.equal(body.model_id, 'model-for-' + provider);
+                assert.equal(options.headers['xi-api-key'], 'key-for-' + provider);
+            } else {
+                assert.equal(body.reference_id, 'voice/id');
+                assert.equal(options.headers.model, 'model-for-' + provider);
+                assert.equal(options.headers.Authorization, 'Bearer key-for-' + provider);
+            }
+            return { ok: true, json: async () => ({ data: { audio: '494433' } }), blob: async () => new Blob(['ID3']) };
+        };
+        const result = await phone.synthesize('<think>不朗读</think>你好', 'voice/id', {
+            PHONE_TTS_PROVIDER: provider,
+            PHONE_TTS_CONFIGS: { [provider]: { key: 'key-for-' + provider, model: 'model-for-' + provider, groupId: 'group+id' } }
+        });
+        assert.equal(result.type, 'audio/mpeg');
+        assert.equal(await result.text(), 'ID3');
+    }
+});
+
 test('停止收音真正停止音轨，再请求媒体播放路由，不只禁用麦克风', () => {
     const h = harness(), events = [];
     const audioSession = {};

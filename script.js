@@ -18624,7 +18624,7 @@ const App = {
             title.innerText = '聊天选项'; 
             iName.value = c.name;
             iPrompt.value = c.prompt || "";
-            document.getElementById('edit-phone-voice').value = c.phoneVoiceId || '';
+            PhoneCall.fillVoice(c);
             PhoneCall.fillPresetSelect('edit-phone-preset', c.phonePresetName || '', '-- 跟随角色当前对话模型 --');
             
             preview.src = c.avatar || './assets/images/char.jpg';
@@ -18663,7 +18663,7 @@ const App = {
             title.innerText = '新建角色';
             iName.value = '';
             iPrompt.value = '你是一个...';
-            document.getElementById('edit-phone-voice').value = '';
+            PhoneCall.fillVoice();
             PhoneCall.fillPresetSelect('edit-phone-preset', '', '-- 跟随角色当前对话模型 --');
             
             preview.src = './assets/images/char.jpg'; 
@@ -18741,12 +18741,12 @@ const App = {
                 // 保存预设绑定
                 c.linkedPresetName = linkedPresetName; 
                 c.linkedSystemPromptPresetName = linkedSystemPromptPresetName;
-                c.phoneVoiceId = document.getElementById('edit-phone-voice').value.trim();
+                PhoneCall.saveVoice(c);
                 c.phonePresetName = document.getElementById('edit-phone-preset').value;
             }
         } else {
             // === 创建新角色 ===
-            STATE.contacts.push({ 
+            const contact = {
                 id: Date.now().toString(), 
                 name, 
                 avatar, 
@@ -18754,10 +18754,11 @@ const App = {
                 history: [],
                 presenceLastActiveAt: Date.now(),
                 linkedPresetName: linkedPresetName,
-                phoneVoiceId: document.getElementById('edit-phone-voice').value.trim(),
                 phonePresetName: document.getElementById('edit-phone-preset').value,
                 linkedSystemPromptPresetName: linkedSystemPromptPresetName
-            });
+            };
+            PhoneCall.saveVoice(contact);
+            STATE.contacts.push(contact);
         }
 
         // 保存到数据库

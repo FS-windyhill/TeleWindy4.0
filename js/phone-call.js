@@ -7,11 +7,62 @@ const PhoneCall = {
     session: null,
     preview: null,
     fields: {
-        PHONE_TTS_KEY: 'phone-tts-key', PHONE_TTS_MODEL: 'phone-tts-model',
         PHONE_STT_PROVIDER: 'phone-stt-provider', PHONE_STT_URL: 'phone-stt-url', PHONE_STT_KEY: 'phone-stt-key'
     },
     defaults: { PHONE_TTS_KEY: '', PHONE_TTS_MODEL: 'speech-2.8-turbo', PHONE_STT_PROVIDER: 'deepseek',
         PHONE_STT_URL: 'https://api.deepseek.com/v1/tools/asr', PHONE_STT_KEY: '' },
+    ttsProviders: {
+        'minimax-cn': { name: 'MiniMax 国内版', model: 'speech-2.8-turbo', voiceParam: 'voice_id' },
+        'minimax-global': { name: 'MiniMax 国际版', model: 'speech-2.8-turbo', voiceParam: 'voice_id' },
+        elevenlabs: { name: 'ElevenLabs', model: 'eleven_flash_v2_5', voiceParam: 'voice_id' },
+        'fish-audio': { name: 'Fish Audio', model: 's2.1-pro', voiceParam: 'reference_id' }
+    },
+    // ★ 旧版只存国际版密钥、模型和音色，读旧档时按国际版取值。
+    ttsProvider(settings) {
+        return Object.hasOwn(this.ttsProviders, settings.PHONE_TTS_PROVIDER) ? settings.PHONE_TTS_PROVIDER : 'minimax-global';
+    },
+    ttsConfig(settings, provider = this.ttsProvider(settings)) {
+        const legacy = provider === 'minimax-global' ? { key: settings.PHONE_TTS_KEY, model: settings.PHONE_TTS_MODEL } : {};
+        const saved = settings.PHONE_TTS_CONFIGS?.[provider] || legacy;
+        return { key: saved.key ?? '', model: saved.model ?? this.ttsProviders[provider].model, groupId: saved.groupId ?? '' };
+    },
+    // ★ 设置页草稿与已保存配置分开。来回切换服务商时保留尚未保存的填写内容。
+    showTtsConfig(provider) {
+        const definition = this.ttsProviders[provider];
+        const config = this.ttsDrafts[provider];
+        const key = document.getElementById('phone-tts-key');
+        if (key.type === 'text') document.getElementById('toggle-phone-tts-key').click();
+        key.value = config.key;
+        key.placeholder = `${definition.name} API Key`;
+        const model = document.getElementById('phone-tts-model');
+        model.value = config.model;
+        model.placeholder = `例如 ${definition.model}`;
+        document.getElementById('phone-tts-group-fields').hidden = provider !== 'minimax-cn';
+        document.getElementById('phone-tts-group-id').value = config.groupId;
+        this.ttsDraftProvider = provider;
+    },
+    readTtsDraft() {
+        this.ttsDrafts[this.ttsDraftProvider] = {
+            key: document.getElementById('phone-tts-key').value.trim(),
+            model: document.getElementById('phone-tts-model').value.trim(),
+            groupId: document.getElementById('phone-tts-group-id').value.trim()
+        };
+    },
+    voiceFor(contact, provider) {
+        return contact?.phoneVoiceIds?.[provider] ?? (provider === 'minimax-global' ? contact?.phoneVoiceId : '') ?? '';
+    },
+    fillVoice(contact) {
+        const provider = this.ttsProvider(STATE.settings);
+        const definition = this.ttsProviders[provider];
+        document.getElementById('edit-phone-voice-label').textContent = `${definition.name} 音色 ID（${definition.voiceParam}）`;
+        document.getElementById('edit-phone-voice').value = this.voiceFor(contact, provider);
+    },
+    saveVoice(contact) {
+        const provider = this.ttsProvider(STATE.settings);
+        const voice = document.getElementById('edit-phone-voice').value.trim();
+        contact.phoneVoiceIds = { ...contact.phoneVoiceIds, [provider]: voice };
+        if (provider === 'minimax-global') contact.phoneVoiceId = voice;
+    },
     // ★ 沿用聊天的 think/thinking/thought 口径，额外兼容 reasoning/analysis 标签。
     //   先统一标签再按层级剔除；未闭合推理块直接丢弃到末尾，不能作为台词兜底。
     cleanText(content) {
@@ -35,11 +86,21 @@ const PhoneCall = {
     },
     fillSettings(settings) {
         for (const [key, id] of Object.entries(this.fields)) document.getElementById(id).value = settings[key] ?? this.defaults[key];
+        const provider = this.ttsProvider(settings);
+        this.ttsDrafts = Object.fromEntries(Object.keys(this.ttsProviders).map(id => [id, this.ttsConfig(settings, id)]));
+        document.getElementById('phone-tts-provider').value = provider;
+        this.showTtsConfig(provider);
         this.fillPresetSelect('phone-summary-preset', settings.PHONE_SUMMARY_PRESET || '', '-- 跟随通话对话模型 --');
         this.syncProvider();
     },
     saveSettings(settings) {
         for (const [key, id] of Object.entries(this.fields)) settings[key] = document.getElementById(id).value.trim();
+        this.readTtsDraft();
+        settings.PHONE_TTS_PROVIDER = this.ttsDraftProvider;
+        settings.PHONE_TTS_CONFIGS = { ...this.ttsDrafts };
+        // ★ 同步国际版旧字段，既有备份和旧版仍可读取。
+        settings.PHONE_TTS_KEY = this.ttsDrafts['minimax-global'].key;
+        settings.PHONE_TTS_MODEL = this.ttsDrafts['minimax-global'].model;
         settings.PHONE_SUMMARY_PRESET = document.getElementById('phone-summary-preset').value;
     },
     // ================ 独立文字模型：按预设名称绑定，列表重排不会选错模型 ================
@@ -169,9 +230,9 @@ const PhoneCall = {
             s.settings = { ...settings, ASYNC_BACKEND_ENABLED: false };
             // ★ 本通电话记录总结选择，挂断等待时继续聊天不改变其模型路由。
             s.summaryPresetName = STATE.settings.PHONE_SUMMARY_PRESET || '';
-            s.voice = s.contact.phoneVoiceId || '';
+            s.voice = this.voiceFor(s.contact, this.ttsProvider(STATE.settings));
             s.audioSettings = { ...this.defaults, ...STATE.settings };
-            if (!s.audioSettings.PHONE_TTS_KEY || !s.audioSettings.PHONE_TTS_MODEL || !s.voice) throw new Error('请先填写通话模型密钥、模型名称和角色音色 ID');
+            this.validateTts(s.voice, s.audioSettings);
             if (s.audioSettings.PHONE_STT_PROVIDER === 'browser') {
                 if (!(window.SpeechRecognition || window.webkitSpeechRecognition)) throw new Error('当前浏览器不支持语音识别，请选择 DeepSeek');
             } else if (!s.audioSettings.PHONE_STT_KEY || !s.audioSettings.PHONE_STT_URL) throw new Error('请先填写 DeepSeek 识别地址和密钥');
@@ -271,21 +332,59 @@ const PhoneCall = {
         // ★ 服务端原文可能含密钥或整段请求，不在 toast 中照搬。
         return message.replace(/Bearer\s+\S+|sk-[\w-]+/gi, '[已隐藏]').slice(0, 95);
     },
+    validateTts(voice, settings) {
+        const provider = this.ttsProvider(settings);
+        const config = this.ttsConfig(settings, provider);
+        const name = this.ttsProviders[provider].name;
+        if (!config.key || !config.model) throw new Error(`请先在通话模型设置中保存 ${name} 的密钥和模型名称`);
+        if (!voice) throw new Error(`请先在聊天选项填写 ${name} 音色 ID`);
+        return config;
+    },
     async synthesize(text, voice, settings, signal) {
         // ★ 最后一道防线：任何调用入口（包括重试）都不能把推理发给语音供应商。
         text = this.cleanText(text);
         if (!text) throw new Error('没有可播放的台词，请重试');
-        const response = await fetch('https://api.minimax.io/v1/t2a_v2', {
-            method: 'POST', signal: this.requestSignal(signal),
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.PHONE_TTS_KEY}` },
-            body: JSON.stringify({ model: settings.PHONE_TTS_MODEL, text, stream: false, output_format: 'hex',
-                voice_setting: { voice_id: voice }, audio_setting: { format: 'mp3', sample_rate: 24000, channel: 1 } })
-        });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok || Number(data.base_resp?.status_code || 0) !== 0) {
+        const provider = this.ttsProvider(settings);
+        const { key, model, groupId } = this.validateTts(voice, settings);
+        const headers = { 'Content-Type': 'application/json' };
+        let url, body;
+        // ★ 两个 MiniMax 地区返回 hex；ElevenLabs/Fish Audio 直接返回 MP3 字节。
+        const isMiniMax = provider === 'minimax-cn' || provider === 'minimax-global';
+        if (provider === 'elevenlabs') {
+            url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=mp3_44100_128`;
+            headers['xi-api-key'] = key;
+            body = { text, model_id: model };
+        } else {
+            headers.Authorization = `Bearer ${key}`;
+            if (isMiniMax) {
+                url = provider === 'minimax-cn' ? 'https://api.minimaxi.com/v1/t2a_v2' : 'https://api.minimax.io/v1/t2a_v2';
+                if (provider === 'minimax-cn' && groupId) url += `?GroupId=${encodeURIComponent(groupId)}`;
+                body = { model, text, stream: false, output_format: 'hex',
+                    voice_setting: { voice_id: voice }, audio_setting: { format: 'mp3', sample_rate: 24000, channel: 1 } };
+            } else {
+                url = 'https://api.fish.audio/v1/tts';
+                headers.model = model;
+                body = { text, reference_id: voice, format: 'mp3' };
+            }
+        }
+        const response = await fetch(url, { method: 'POST', signal: this.requestSignal(signal), headers, body: JSON.stringify(body) });
+        if (!response.ok) {
             if (response.status === 401 || response.status === 403) throw new Error('语音生成失败：密钥无效或无权限');
-            if (response.status === 429) throw new Error('语音生成失败：请求过多或余额不足');
-            throw new Error(`语音生成失败：${data.base_resp?.status_msg || `接口错误 ${response.status}`}`);
+            if (response.status === 402) throw new Error('语音生成失败：请检查账户余额或套餐');
+            if (response.status === 429) throw new Error('语音生成失败：请求过多或达到额度上限');
+            if (response.status === 400 || response.status === 404 || response.status === 422) throw new Error(`语音生成失败：请检查模型名称和音色 ID（HTTP ${response.status}）`);
+            throw new Error(`语音生成失败：接口错误 ${response.status}`);
+        }
+        if (!isMiniMax) {
+            const audio = await response.blob();
+            if (!audio.size || /json|text\//i.test(audio.type)) throw new Error('语音生成失败：接口未返回有效音频');
+            return audio.slice(0, audio.size, 'audio/mpeg');
+        }
+        const data = await response.json().catch(() => ({}));
+        if (Number(data.base_resp?.status_code || 0) !== 0) {
+            // ★ 部分鉴权错误会回显请求密钥；通话和试听共用这条错误路径。
+            const detail = String(data.base_resp.status_msg || `接口错误 ${data.base_resp.status_code}`);
+            throw new Error(`语音生成失败：${detail.split(key).join('[已隐藏]')}`);
         }
         const hex = data.data?.audio;
         if (typeof hex !== 'string' || !hex || hex.length % 2 || !/^[\da-f]+$/i.test(hex)) throw new Error('语音生成失败：接口未返回有效音频');
@@ -408,7 +507,8 @@ const PhoneCall = {
         this.preview.cancelPlayback?.();
         this.preview = null;
         const button = document.getElementById('phone-audition');
-        button.disabled = false; button.textContent = '试听';
+        button.disabled = false;
+        document.getElementById('phone-audition-label').textContent = '试听';
     },
     // ★ 短语音超过一分钟仍无响应就允许重试，挂断信号始终保留。
     requestSignal(signal) {
@@ -421,22 +521,26 @@ const PhoneCall = {
         const owner = { controller: new AbortController() };
         this.preview = owner;
         const button = document.getElementById('phone-audition');
-        button.disabled = true; button.textContent = '生成中…';
+        // ★ 试听只替换文字，耳机图标在生成和播放时继续保留。
+        const label = document.getElementById('phone-audition-label');
+        button.disabled = true;
+        label.textContent = '生成中…';
         try {
             const voice = document.getElementById('edit-phone-voice').value.trim();
             if (!voice) throw new Error('请先填写音色 ID');
             const settings = { ...this.defaults, ...STATE.settings };
-            if (!settings.PHONE_TTS_KEY || !settings.PHONE_TTS_MODEL) throw new Error('请先在模型设置保存语音密钥和模型名称');
+            this.validateTts(voice, settings);
             const blob = await this.synthesize('你好呀，可以听到我的声音吗？', voice, settings, owner.controller.signal);
             if (this.preview !== owner) return;
-            button.textContent = '播放中…';
+            label.textContent = '播放中…';
             await this.play(owner, blob);
         } catch (error) {
             if (this.preview === owner && !owner.controller.signal.aborted) Toast.show(this.reason(error));
         } finally {
             if (this.preview === owner) {
                 this.preview = null;
-                button.disabled = false; button.textContent = '试听';
+                button.disabled = false;
+                label.textContent = '试听';
             }
         }
     },
@@ -567,6 +671,10 @@ const PhoneCall = {
         } catch (error) { this.fail(s, error); }
     },
     init() {
+        document.getElementById('phone-tts-provider').addEventListener('change', event => {
+            this.readTtsDraft();
+            this.showTtsConfig(event.target.value);
+        });
         document.getElementById('phone-stt-provider').addEventListener('change', () => this.syncProvider());
         document.getElementById('phone-audition').addEventListener('click', () => void this.audition());
         document.getElementById('phone-dial').addEventListener('click', () => void this.dial());

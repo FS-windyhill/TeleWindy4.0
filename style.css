@@ -13685,10 +13685,30 @@ body.dark-mode .offline-card-avatar {
 .phone-controls .phone-hangup { background: #e75b61; color: #fff; }
 /* ★ 尚未拨打时只显示绿色主按钮，红色挂断用于实际拨打后的阶段。 */
 .phone-controls:has(.phone-dial:not([hidden])) .phone-hangup { display: none; }
-.phone-voice-row { display: flex; align-items: center; gap: 10px; }
-.phone-voice-row input { flex: 1; min-width: 0; }
-.phone-voice-row button { flex-shrink: 0; }
-.phone-settings h4 { margin: 18px 0 12px; }
+/* ★ 试听固定为短列，音色输入框占满剩余宽度，播放状态切换时也不挤动输入框。 */
+.phone-voice-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 5.75rem;
+    align-items: stretch;
+    gap: 8px;
+}
+#edit-phone-voice { min-width: 0; }
+#phone-audition {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding-inline: 6px;
+    white-space: nowrap;
+}
+/* ★ 通话设置同类字段共用外层卡片，卡内只保留表单间距。 */
+.phone-settings-title { margin: 0 0 2px; font-size: 0.875rem; font-weight: 600; }
+.phone-settings-field,
+.phone-settings-fields { display: grid; gap: 8px; min-width: 0; }
+.phone-settings-fields { gap: 10px; }
 body.dark-mode .phone-page { background: radial-gradient(ellipse at 15% 0%, #25473f, transparent 65%), #171f24; color: #edf3f0; }
 body.dark-mode .phone-bubble.assistant, body.dark-mode .phone-close { background: #ffffff16; border-color: #ffffff18; }
 body.dark-mode .phone-bubble.user { background: #355f50; }
