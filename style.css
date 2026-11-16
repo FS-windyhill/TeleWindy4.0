@@ -244,6 +244,73 @@ body.dark-mode .chat-header-avatar {
     border-radius: 0;
 }
 
+/* ★ 线上/线下共用的语音入口贴在输入框右下角；预留右内边距，文字不会压到按钮。 */
+.chat-voice-composer {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    align-self: flex-end;
+}
+
+.chat-voice-composer #task-input,
+.chat-voice-composer #offline-task-input {
+    display: block;
+    width: 100%;
+    padding-inline-end: calc(1.3rem + 0px);
+}
+
+.chat-voice-button {
+    position: absolute;
+    inset-inline-end: 4px;
+    bottom: 5.5px;
+    display: grid;
+    place-items: center;
+    width: calc(1.3rem + 3px);
+    height: calc(1.3rem + 3px);
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: #34343c;
+    cursor: pointer;
+}
+
+body.dark-mode .chat-voice-button {
+    color: #e2e2eb;
+}
+
+.chat-voice-composer .chat-voice-button[aria-pressed="true"] {
+    background: var(--primary-btn-text);
+    color: #fff;
+}
+
+.chat-voice-button[aria-busy="true"] {
+    color: var(--primary-btn-text);
+}
+
+/* ★ 打开麦克风或等转写时显示细环，录音成功才切换为主题色圆底。 */
+.chat-voice-button[aria-busy="true"]::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    border: 1px solid currentColor;
+    border-inline-end-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .chat-voice-button[aria-busy="true"]::after {
+        animation: none;
+    }
+}
+
+.chat-voice-button:focus-visible {
+    outline: 2px solid var(--primary-btn-text);
+    outline-offset: 1px;
+}
+
 #task-input {
     flex-grow: 1;
     /* 调整内边距，使其文字垂直居中看起来像 input */

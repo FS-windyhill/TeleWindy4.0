@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 后台服务与切屏回复拆页后更新样式版本，避免 PWA 沿用旧卡片排版。 -->
-    <link rel="stylesheet" href="./style.css?v=20261116-phone-audition-4">
+    <link rel="stylesheet" href="./style.css?v=20261116-chat-voice-toast-2">
 </head>
 <body>
 
@@ -1896,7 +1896,13 @@
                     </svg>
                 </button>
 
-                <textarea type="text" id="task-input" rows="1" placeholder="说点什么..."></textarea>
+                <div class="chat-voice-composer">
+                    <textarea type="text" id="task-input" rows="1" placeholder="说点什么..."></textarea>
+                    <!-- ★ 单击开始/结束语音输入，和文本框的选字、粘贴手势分开。 -->
+                    <button type="button" class="chat-voice-button" data-voice-input="task-input" aria-label="语音输入" aria-pressed="false" title="语音输入">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="0.92rem" height="0.92rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-mic preview-icon" aria-hidden="true"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></svg>
+                    </button>
+                </div>
 
                 <!-- Upload: 把 '+' 换成了 圆角加号图标 -->
                 <button id="upload-image-btn" class="footer-btn" title="上传图片">
@@ -1962,7 +1968,12 @@
                     </svg>
                 </button>
 
-                <textarea type="text" id="offline-task-input" rows="1" placeholder="说点什么..."></textarea>
+                <div class="chat-voice-composer">
+                    <textarea type="text" id="offline-task-input" rows="1" placeholder="说点什么..."></textarea>
+                    <button type="button" class="chat-voice-button" data-voice-input="offline-task-input" aria-label="语音输入" aria-pressed="false" title="语音输入">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="0.92rem" height="0.92rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-mic preview-icon" aria-hidden="true"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></svg>
+                    </button>
+                </div>
 
                 <!-- 发送 -->
                 <button id="offline-send-btn" title="发送">
@@ -3264,7 +3275,8 @@
     <script src="./js/history-visibility.js?v=20261023-bubble-id-1"></script>
     <script src="./js/offline-chat.js?v=20261029-offline-1"></script>
     <!-- ★ 电话独立管理临时会话与音频，不把电话模式写入角色持久化字段。 -->
-    <script src="./js/phone-call.js?v=20261116-tts-audition-8"></script>
+    <script src="./js/phone-call.js?v=20261116-chat-voice-1"></script>
+    <script src="./js/chat-voice-input.js?v=20261116-chat-voice-toast-3"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->
     <script src="./js/world-sense.js?v=20260829"></script>
     <script src="./js/todo-countdown-context.js"></script>
@@ -3278,7 +3290,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261114-reroll-preview-2"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261116-tts-providers-5"></script>
+    <script src="./script.js?v=20261116-chat-voice-toast-3"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

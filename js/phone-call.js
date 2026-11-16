@@ -190,6 +190,7 @@ const PhoneCall = {
     // ================ 页面和会话生命周期 ================
     open(contact) {
         if (this.session || STATE.chatRequestActive || STATE.typingContactId) { Toast.show('请先结束当前通话或等待回复完成'); return; }
+        globalThis.ChatVoiceInput?.cancel();
         this.stopPreview();
         const source = contact.chatMode === 'offline' ? contact.offlineHistory : contact.history;
         this.session = { id: `phone_${Date.now()}_${Math.random().toString(36).slice(2)}`, contact,
@@ -651,6 +652,20 @@ const PhoneCall = {
             if (s.browserText.trim() && performance.now() - s.browserLast > 1300) void this.done();
         }, 100);
     },
+    // ★ 通话和聊天语音输入共用同一个识别请求，沿用设置里的地址和密钥。
+    async transcribeWav(blob, settings, signal) {
+        const form = new FormData();
+        form.append('file', blob, 'speech.wav');
+        const response = await fetch(settings.PHONE_STT_URL, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${settings.PHONE_STT_KEY}` },
+            body: form,
+            signal: this.requestSignal(signal)
+        });
+        if (!response.ok) throw new Error(`语音识别失败：${response.status === 401 ? '密钥无效' : response.status === 429 ? '额度不足或请求过多' : `接口错误 ${response.status}`}`);
+        const data = await response.json();
+        return data.text;
+    },
     async done() {
         const s = this.session;
         if (!s || s.phase !== 'listening') return;
@@ -665,11 +680,7 @@ const PhoneCall = {
                 const blob = hasSpeech ? this.wav(s.chunks, this.audioContext.sampleRate) : null;
                 this.stopListening(s);
                 if (!hasSpeech) { await this.listen(s); return; }
-                const form = new FormData(); form.append('file', blob, 'speech.wav');
-                const response = await fetch(s.audioSettings.PHONE_STT_URL, { method: 'POST',
-                    headers: { Authorization: `Bearer ${s.audioSettings.PHONE_STT_KEY}` }, body: form, signal: this.requestSignal(s.controller.signal) });
-                if (!response.ok) throw new Error(`语音识别失败：${response.status === 401 ? '密钥无效' : response.status === 429 ? '额度不足或请求过多' : `接口错误 ${response.status}`}`);
-                const data = await response.json(); text = data.text;
+                text = await this.transcribeWav(blob, s.audioSettings, s.controller.signal);
             }
             if (!this.alive(s)) return;
             if (!String(text || '').trim()) { Toast.show('未识别到说话内容，请再说一次'); await this.listen(s); return; }

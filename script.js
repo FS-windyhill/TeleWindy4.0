@@ -2389,7 +2389,8 @@ const Toast = {
         const item = {
             message: String(message || ''),
             duration: Number.isFinite(options.duration) ? Math.max(0, options.duration) : 1500,
-            icon: ['check', 'settings', 'warning'].includes(options.icon) ? options.icon : 'check'
+            icon: ['check', 'settings', 'warning', 'loader', 'triangle-exclamation-point'].includes(options.icon)
+                ? options.icon : 'check'
         };
 
         if (!item.message) return;
@@ -2429,6 +2430,12 @@ const Toast = {
             const gear = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             gear.setAttribute('d', 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.12.6.6 1.04 1.21 1H21a2 2 0 0 1 0 4h-.09c-.61-.04-1.09.4-1.51 1z');
             icon.append(circle, gear);
+        } else if (item.icon === 'loader' || item.icon === 'triangle-exclamation-point') {
+            // ★ 聊天语音 Toast 换图形，尺寸和线宽沿用通用设置。
+            icon.setAttribute('class', `lucide lucide-${item.icon} preview-icon`);
+            icon.innerHTML = item.icon === 'loader'
+                ? '<path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/>'
+                : '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>';
         } else {
             const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             path.setAttribute('d', item.icon === 'warning' ? 'M12 9v4m0 4h.01M10.3 3.6 2.2 18a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z' : 'M20 6 9 17l-5-5');
@@ -2809,6 +2816,8 @@ const UI = {
 
     // 切换窗口+朋友圈版
     switchView(viewName) {
+        // ★ 页面切走时立即停麦，避免识别结果回填到后来打开的聊天。
+        globalThis.ChatVoiceInput?.cancel();
         const appContainer = document.getElementById('app-container');
         
         // 安全获取其他三个主要视图和底栏（找不到也不会报错）
@@ -10729,6 +10738,7 @@ const App = {
     enterChat(id) {
         const contact = STATE.contacts.find(c => c.id === id);
         if (!contact) return;
+        globalThis.ChatVoiceInput?.cancel();
         this.clearTransientChatErrors(contact);
 
         // ★ 用户的模式选择是持久的：线下角色点进来直接进入见面页，线上角色照旧。
@@ -12060,6 +12070,7 @@ const App = {
     // 每次进入见面页 = 一场新的见面会话，重新开始 2 轮的线上桥接注入。
     openOfflineChat(contact) {
         if (!contact) return;
+        globalThis.ChatVoiceInput?.cancel();
         OfflineChat.ensureFields(contact);
         contact.chatMode = 'offline';
         OfflineChat.armBridge(contact);
@@ -12084,6 +12095,7 @@ const App = {
 
     // 收起线下页面：只改视图显隐，绝不动用户的模式选择。
     hideOfflineChat() {
+        globalThis.ChatVoiceInput?.cancel();
         this.exitOfflineSelectMode();
         document.getElementById('app-container')?.classList.remove('in-offline-mode');
         if (UI.els.viewOfflineChat) UI.els.viewOfflineChat.style.display = 'none';
