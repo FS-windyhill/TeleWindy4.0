@@ -11311,7 +11311,9 @@ const App = {
                 if (!lastUserMsg) return;
                 agentUserMessage = lastUserMsg;
                 // ★ 重 roll 图片时同样绑定原用户消息 ID，主动消息插入历史后也不会把描述回填到错误位置。
-                requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = lastUserMsg.messageId || null;
+                //   旧消息补齐 ID，电话回顾也用这个 ID 识别同一轮。
+                if (!lastUserMsg.messageId) lastUserMsg.messageId = ProactiveMessages.makeId('user');
+                requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = lastUserMsg.messageId;
                 // 朋友圈按“用户消息轮次”消费；重 roll 复用同一个 turnId，不再额外扣次数。
                 if (!lastUserMsg.momentInjectionTurnId) {
                     lastUserMsg.momentInjectionTurnId = `moment_turn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -11545,7 +11547,7 @@ const App = {
             const routineDynamicContextPrompts = [];
             const volatileDynamicContextPrompts = [];
             // ★ 电话回顾与朋友圈/线下回顾同位置分流；只消费本次真正发送的快照。
-            requestSettings.PHONE_RECAP_IDS = typeof PhoneCall !== 'undefined' ? PhoneCall.capture(contact) : [];
+            requestSettings.PHONE_RECAP_IDS = typeof PhoneCall !== 'undefined' ? PhoneCall.capture(contact, agentUserMessage?.messageId) : [];
             const phoneRecapPrompt = typeof PhoneCall !== 'undefined' ? PhoneCall.buildRecapPrompt(contact, requestSettings.PHONE_RECAP_IDS) : '';
             if (phoneRecapPrompt) volatileDynamicContextPrompts.push(phoneRecapPrompt);
             let triggeredWorldInfoPrompt = '';
@@ -11672,8 +11674,8 @@ const App = {
 
             // ★★★ 线下见面回顾：切回线上的前几轮请求附带线下最后一条消息 START ★★★
             // 与朋友圈一样属于本轮易变背景：auto/user 模式并入当前 user，system 模式并入本轮即时系统信息。
-            if (typeof OfflineChat !== 'undefined' && OfflineChat.shouldInjectRecap(contact)) {
-                const offlineRecapPrompt = OfflineChat.buildRecapPrompt(contact);
+            if (typeof OfflineChat !== 'undefined') {
+                const offlineRecapPrompt = OfflineChat.buildRecapPrompt(contact, agentUserMessage?.messageId);
                 if (offlineRecapPrompt) {
                     console.log('[Chat] 注入线下见面回顾');
                     volatileDynamicContextPrompts.push(offlineRecapPrompt);
@@ -12213,6 +12215,8 @@ const App = {
                 if (window.innerWidth < 800 && inputEl) inputEl.blur();
             } else {
                 agentUserMessage = [...contact.offlineHistory].reverse().find(m => m.role === 'user') || null;
+                // ★ 兼容没有消息 ID 的旧历史，让同一条消息的电话回顾可重复注入。
+                if (agentUserMessage && !agentUserMessage.messageId) agentUserMessage.messageId = ProactiveMessages.makeId('user');
                 requestSettings.ASYNC_BACKEND_USER_MESSAGE_ID = agentUserMessage?.messageId || null;
             }
             // 轮次 id：reroll 复用同一条用户消息的 messageId，桥接轮次不会重复扣。
@@ -12229,7 +12233,7 @@ const App = {
             const messagesToSend = [];
             const routineDynamicContextPrompts = [];
             // ★ 在线下挂断电话也能立即衔接，注入位置同样跟随缓存命中优化设置。
-            requestSettings.PHONE_RECAP_IDS = typeof PhoneCall !== 'undefined' ? PhoneCall.capture(contact) : [];
+            requestSettings.PHONE_RECAP_IDS = typeof PhoneCall !== 'undefined' ? PhoneCall.capture(contact, roundId) : [];
             const phoneRecapPrompt = typeof PhoneCall !== 'undefined' ? PhoneCall.buildRecapPrompt(contact, requestSettings.PHONE_RECAP_IDS) : '';
             let triggeredWorldInfoPrompt = '';
 
@@ -12318,7 +12322,7 @@ const App = {
             }
 
             // ⑦ 桥接：切到线下的前 2 轮请求，固定附带线上最后 6 条（3 轮）聊天记录
-            if (OfflineChat.shouldInjectBridge(contact)) {
+            if (OfflineChat.shouldInjectBridge(contact, roundId)) {
                 const bridgeMessages = OfflineChat.buildBridgeMessages(contact.history);
                 bridgeMessages.forEach(m => messagesToSend.push(m));
             }

@@ -53,8 +53,10 @@ const OfflineChat = {
         contact.offlineBridgeConsumedRoundId = '';
     },
 
-    shouldInjectBridge(contact) {
-        return (Number(contact?.offlineBridgeRoundsLeft) || 0) > 0;
+    shouldInjectBridge(contact, roundId) {
+        // ★ 第二轮扣完后仍保留本轮的桥接，直到下一条用户消息。
+        return (Number(contact?.offlineBridgeRoundsLeft) || 0) > 0
+            || !!(roundId && contact?.offlineBridgeConsumedRoundId === roundId);
     },
 
     // 线上最后 6 条可见消息（倒序取、正序返回）。
@@ -108,13 +110,15 @@ const OfflineChat = {
         contact.offlineRecapConsumedRoundId = '';
     },
 
-    shouldInjectRecap(contact) {
-        return !!contact?.offlineRecap && (Number(contact.offlineRecapRoundsLeft) || 0) > 0;
+    shouldInjectRecap(contact, roundId) {
+        // ★ 回到线上也按用户消息轮次保留回顾，第二轮重生成仍会带上。
+        return !!contact?.offlineRecap && ((Number(contact.offlineRecapRoundsLeft) || 0) > 0
+            || !!(roundId && contact.offlineRecapConsumedRoundId === roundId));
     },
 
     // 回顾文本：前后打标记；时间戳直接读存储里的消息时间。
-    buildRecapPrompt(contact) {
-        if (!this.shouldInjectRecap(contact)) return '';
+    buildRecapPrompt(contact, roundId) {
+        if (!this.shouldInjectRecap(contact, roundId)) return '';
         const recap = contact.offlineRecap;
         return [
             `[你们${String(recap.timestamp || '').trim()}线下见面时的场景]`,

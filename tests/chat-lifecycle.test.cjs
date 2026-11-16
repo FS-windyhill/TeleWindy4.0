@@ -82,7 +82,7 @@ test('成功后替换旧回复，上下文不包含旧正文，桥接只扣一�
 });
 
 // ★ 执行真实线下组装/发送管线：验证缓存优化的三个位置以及成功/失败计数。
-test('电话回顾在线下按auto/user/system分流，重生成不重复消费', async () => {
+test('电话回顾在线下按auto/user/system分流，第二轮重生成仍注入，第三轮停止', async () => {
     for (const mode of ['auto', 'user', 'system']) {
         const h = harness(); let messages;
         h.contact.phoneRecaps = [{ id: 'call', timestamp: '今天', fallback: '电话约定明天见', roundsLeft: 2, consumed: [] }];
@@ -95,6 +95,17 @@ test('电话回顾在线下按auto/user/system分流，重生成不重复消费'
         assert.equal(h.contact.phoneRecaps[0].roundsLeft, 1);
         await h.app.handleOfflineSend(true);
         assert.equal(h.contact.phoneRecaps[0].roundsLeft, 1);
+
+        // ★ 第二条用户消息用完剩余轮次，重生成仍要把回顾送到模型。
+        h.input.value = '刚刚那个电话';
+        await h.app.handleOfflineSend();
+        assert.equal(h.contact.phoneRecaps[0].roundsLeft, 0);
+        await h.app.handleOfflineSend(true);
+        assert.equal(messages.find(m => m.content.includes('电话约定明天见'))?.role, mode === 'system' ? 'system' : 'user');
+
+        h.input.value = '谢谢你';
+        await h.app.handleOfflineSend();
+        assert.ok(!messages.some(m => m.content.includes('电话约定明天见')));
     }
 });
 

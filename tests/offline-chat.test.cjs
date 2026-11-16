@@ -103,6 +103,9 @@ test('桥接轮次：前 2 轮注入；reroll 同轮不重复扣；第 3 轮停�
     assert.equal(OfflineChat.consumeBridgeRound(contact, 'u2'), true);
     assert.equal(contact.offlineBridgeRoundsLeft, 0);
     assert.ok(!OfflineChat.shouldInjectBridge(contact));
+    assert.ok(OfflineChat.shouldInjectBridge(contact, 'u2')); // ★ 第二轮 reroll 仍注入。
+    assert.equal(OfflineChat.consumeBridgeRound(contact, 'u2'), false);
+    assert.ok(!OfflineChat.shouldInjectBridge(contact, 'u3'));
     assert.equal(OfflineChat.consumeBridgeRound(contact, 'u3'), false);
 });
 
@@ -134,6 +137,9 @@ test('recap 消费：2 轮后停止，reroll 不重复扣；空会话不武装�
     assert.equal(OfflineChat.consumeRecapRound(contact, 'r2'), true);
     assert.equal(contact.offlineRecapRoundsLeft, 0);
     assert.equal(OfflineChat.buildRecapPrompt(contact), '');
+    assert.ok(OfflineChat.buildRecapPrompt(contact, 'r2')); // ★ 第二轮扣完后，同轮仍带见面回顾。
+    assert.equal(OfflineChat.consumeRecapRound(contact, 'r2'), false);
+    assert.equal(OfflineChat.buildRecapPrompt(contact, 'r3'), '');
 
     const empty = {};
     OfflineChat.ensureFields(empty);

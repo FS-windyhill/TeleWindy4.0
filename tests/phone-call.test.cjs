@@ -274,12 +274,15 @@ test('推理不进电话显示、TTS、后续上下文，只有思考时不显�
 test('回顾原文、总结输入输出和旧回顾注入都不携带推理', async () => {
     const h = harness(), contact = {}; h.state.contacts.push(contact);
     const session = { id: 'call', settings: {}, messages: [
-        { role: 'assistant', content: '<think>秘密推理</think>明天见', heard: true }
+        { role: 'assistant', content: '<think>秘密推理</think>明天见', heard: false },
+        { role: 'user', content: '后天吧' }
     ] };
     const recap = h.phone.armRecap(contact, session);
-    assert.ok(!recap.fallback.includes('秘密'));
+    assert.equal(recap.fallback, '角色：明天见（未完整播放）\n用户：后天吧');
     h.context.API.chat = async messages => {
         assert.ok(!JSON.stringify(messages).includes('秘密推理'));
+        assert.equal(messages[1].role, 'user');
+        assert.equal(messages[1].content, 'char：明天见（未完整播放）\nuser：后天吧');
         return '<thinking>总结秘密</thinking>双方约定明天见';
     };
     await h.phone.summarize(contact, session, recap);
@@ -305,21 +308,53 @@ test('电话是临时覆盖层，线上/线下原模式都不变化，空会话�
     }
 });
 
-test('回顾只取最近6条；成功两轮后停注入，旧轮重生成和旧请求不消费新电话', () => {
+test('只有接通首轮发送开场指令，后续回复沿用通话记录', async () => {
+    const h = harness(), contact = { id: 'a', name: '角色' };
+    h.phone.open(contact);
+    const s = h.phone.session;
+    s.settings = {};
+    const requests = [];
+    h.context.API.chat = async messages => { requests.push(messages); return '喂，你好'; };
+    h.phone.speak = async () => {};
+
+    await h.phone.reply(s);
+    s.messages.push({ role: 'user', content: '你方便说话吗？' });
+    await h.phone.reply(s);
+
+    assert.doesNotMatch(requests[0][0].content, /第一句话/);
+    assert.equal(requests[0].at(-1).role, 'user');
+    assert.equal(requests[0].at(-1).content, '【电话已拨出，请接听并先说第一句话】');
+    assert.equal(requests[1].at(-1).content, '你方便说话吗？');
+    assert.ok(!requests[1].some(message => message.content.includes('第一句话')));
+});
+
+test('回顾只取最近6条；前两轮反复重生成仍注入，第三轮停止注入', () => {
     const h = harness(), c = {};
     const messages = Array.from({ length: 10 }, (_, i) => ({ role: i % 2 ? 'user' : 'assistant', content: `发言${i}`, heard: true }));
     h.phone.armRecap(c, { id: 'first', messages });
-    const snapshot = h.phone.capture(c);
     assert.ok(!h.phone.buildRecapPrompt(c).includes('发言3'));
     assert.ok(h.phone.buildRecapPrompt(c).includes('发言4'));
-    h.phone.consume(c, snapshot, 'u1');
+    for (const [roundId, roundsLeft] of [['u1', 1], ['u2', 0]]) {
+        // ★ 同一条用户消息反复 reroll，每次重新构建 API 上下文。
+        for (let request = 0; request < 3; request++) {
+            const snapshot = h.phone.capture(c, roundId);
+            assert.ok(h.phone.buildRecapPrompt(c, snapshot).includes('发言9'));
+            h.phone.consume(c, snapshot, roundId);
+            assert.equal(c.phoneRecaps[0].roundsLeft, roundsLeft);
+        }
+    }
+    assert.equal(h.phone.buildRecapPrompt(c, h.phone.capture(c, 'u3')), '');
+});
+
+test('旧请求的回顾快照不消费后来挂断的电话', () => {
+    const h = harness(), c = {};
+    const messages = [{ role: 'user', content: '你好' }];
+    h.phone.armRecap(c, { id: 'first', messages });
+    const snapshot = h.phone.capture(c, 'u1');
+    h.phone.armRecap(c, { id: 'second', messages });
     h.phone.consume(c, snapshot, 'u1');
     assert.equal(c.phoneRecaps[0].roundsLeft, 1);
-    h.phone.armRecap(c, { id: 'second', messages });
-    h.phone.consume(c, snapshot, 'u2');
-    assert.equal(c.phoneRecaps[0].roundsLeft, 0);
     assert.equal(c.phoneRecaps[1].roundsLeft, 2);
-    assert.ok(!h.phone.buildRecapPrompt(c).includes('first'));
 });
 
 test('后台总结晚返回只替换自己的正文，不重置轮数，也不覆盖下一通电话', async () => {
