@@ -438,7 +438,7 @@
 //   - initWorldInfoTab(): 初始化世界书编辑 Tab，包括角色下拉框、书列表和条目列表
 //   - buildAgentMessageParts(text): 按原文位置生成正文、分割线和 Agent 调用渲染项
 //   - createAgentCallPanel(markedIntents, contactName, shouldAnimate = false): 创建脱离头像布局的 Agent 调用折叠面板
-//   - createSingleBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex, shouldAnimate = true, partIndex = 0, imageUrl = null, isThought = false): 创建单个聊天气泡，支持文本、图片、时间、头像、思考内容和动画
+//   - createSingleBubble(text, sender, senderAvatar, timestampRaw, historyIndex, shouldAnimate = true, partIndex = 0, imageUrl = null, isThought = false): 创建单个聊天气泡，支持文本、图片、时间、头像、思考内容和动画
 //   - openImageLightbox(src): 打开图片大图预览遮罩，点击后关闭
 //   - showEditModal(oldText, onConfirmCallback): 显示消息编辑弹窗，确认后通过回调返回新文本
 //   - removeLatestAiBubbles(): 删除聊天窗口中最后一组 AI 消息气泡，用于重生成前清理旧回复
@@ -3727,7 +3727,12 @@ const UI = {
         return details;
     },
 
-    createSingleBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex, shouldAnimate = true, partIndex = 0, imageUrl = null, isThought = false, isTransient = false, messageRecord = null) {
+    // ★ 用户头像优先用当前角色的专属设置，旧角色直接沿用全局默认。
+    getUserAvatar(contact) {
+        return contact?.userAvatar || STATE.settings.USER_AVATAR || CONFIG.DEFAULT.USER_AVATAR;
+    },
+
+    createSingleBubble(text, sender, senderAvatar, timestampRaw, historyIndex, shouldAnimate = true, partIndex = 0, imageUrl = null, isThought = false, isTransient = false, messageRecord = null) {
         const template = document.getElementById('msg-template');
         const clone = template.content.cloneNode(true);
         
@@ -3852,7 +3857,7 @@ const UI = {
         timeSpan.innerText = timeStr;
 
         // 6. 头像
-        let currentAvatar = sender === 'user' ? (STATE.settings.USER_AVATAR || CONFIG.DEFAULT.USER_AVATAR) : (aiAvatarUrl || '🌸');
+        const currentAvatar = senderAvatar || (sender === 'user' ? this.getUserAvatar() : '🌸');
         // ★ 本地 HTML 的头像可能是 file: 或 assets 相对路径，不能当成文字头像。
         const isImage = /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(currentAvatar);
         if (isImage) {
@@ -4059,6 +4064,7 @@ const UI = {
             ChatBubbles.ensure(msg);
             
             const sender = msg.role === 'assistant' ? 'ai' : 'user';
+            const senderAvatar = sender === 'user' ? this.getUserAvatar(contact) : contact.avatar;
             let cleanText = typeof msg === 'string' ? msg : msg.content || '';
 
             // ★ 主动消息的正文时间戳只给角色上下文和编辑功能使用；气泡本身继续使用 timestamp 字段展示时间。
@@ -4127,7 +4133,7 @@ const UI = {
             if (thoughtContent && STATE.settings.HIDE_THOUGHT_PROCESS !== true) {
                  const formattedThought = parseCustomMarkdown(thoughtContent);
                  const thoughtBubble = this.createSingleBubble(
-                     formattedThought, sender, contact.avatar, msgTime, historyIndex, false, 'thought', null, true
+                     formattedThought, sender, senderAvatar, msgTime, historyIndex, false, 'thought', null, true
                  );
                  if (msg.isHidden || hiddenKeys.has(msg.thoughtBubbleKey)) {
                      thoughtBubble.querySelector('.message-bubble').classList.add('is-hidden-bubble');
@@ -4148,7 +4154,7 @@ const UI = {
                     } else {
                         const formattedContent = parseCustomMarkdown(part.text.trim());
                         const bubbleClone = this.createSingleBubble(
-                            formattedContent, sender, contact.avatar, msgTime, historyIndex, false, part.partIndex, null
+                            formattedContent, sender, senderAvatar, msgTime, historyIndex, false, part.partIndex, null
                         );
 
                         if (hiddenKeys.has(ChatBubbles.keyAt(msg, part.partIndex))) {
@@ -4159,7 +4165,7 @@ const UI = {
                 });
             } else if (!displayImage && !thoughtContent) {
                 const formattedContent = parseCustomMarkdown(cleanText.trim());
-                const bubbleClone = this.createSingleBubble(formattedContent, sender, contact.avatar, msgTime, historyIndex, false, 0, null);
+                const bubbleClone = this.createSingleBubble(formattedContent, sender, senderAvatar, msgTime, historyIndex, false, 0, null);
                 group.appendChild(bubbleClone);
             }
 
@@ -4167,7 +4173,7 @@ const UI = {
             if (displayImage) {
                 const imgPartIndex = messageLayout.sourcePartCount;
                 const imgBubble = this.createSingleBubble(
-                    "", sender, contact.avatar, msgTime, historyIndex, false, imgPartIndex, displayImage
+                    "", sender, senderAvatar, msgTime, historyIndex, false, imgPartIndex, displayImage
                 );
                 if (hiddenKeys.has(msg.imageBubbleKey) || msg.isHidden) {
                     imgBubble.querySelector('.message-bubble').classList.add('is-hidden-bubble');
@@ -4327,7 +4333,7 @@ const UI = {
         const avatarBox = document.createElement('div');
         avatarBox.className = 'offline-card-avatar';
         const avatarSrc = sender === 'user'
-            ? (STATE.settings.USER_AVATAR || CONFIG.DEFAULT.USER_AVATAR)
+            ? this.getUserAvatar(contact)
             : String(contact.avatar || '🌸');
         if (/^(data:image\/|https?:\/\/|file:|blob:|\.\/|assets\/)/i.test(avatarSrc)) {
             const img = document.createElement('img');
@@ -4473,8 +4479,8 @@ const UI = {
 
 /* 1212 - Fixed */
     appendMessageBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex = null) {
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (historyIndex === null || historyIndex === undefined) {
-            const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
             if (contact && contact.history.length > 0) {
                 historyIndex = contact.history.length - 1; 
             } else {
@@ -4483,7 +4489,8 @@ const UI = {
         }
 
         // ★★★ 修改：最后一个参数传 true，表示新消息需要动画 ★★★
-        const clone = this.createSingleBubble(text, sender, aiAvatarUrl, timestampRaw, historyIndex, true, 0, null, false, true);
+        const senderAvatar = sender === 'user' ? this.getUserAvatar(contact) : aiAvatarUrl;
+        const clone = this.createSingleBubble(text, sender, senderAvatar, timestampRaw, historyIndex, true, 0, null, false, true);
 
         // ★ 失败提示是独立的临时组，不和上一条真实历史消息共享组身份。
         const group = document.createElement('div');
@@ -11364,6 +11371,7 @@ const App = {
 
                 // 2. 立即在 UI 显示用户消息
                 const paragraphs = splitMessageIntoBubbleParts(userText);
+                const userAvatar = UI.getUserAvatar(contact);
             
                 const group = document.createElement('div');
                 group.className = 'message-group';
@@ -11386,7 +11394,7 @@ const App = {
                         } else {
                             // ★ 纯文本气泡，传 null (不带图)
                             const bubble = UI.createSingleBubble(
-                                parseCustomMarkdown(p.trim()), 'user', null, timestamp, currentMsgIndex, true, index, null,
+                                parseCustomMarkdown(p.trim()), 'user', userAvatar, timestamp, currentMsgIndex, true, index, null,
                                 false, false, newUserMsg
                             );
                             group.appendChild(bubble);
@@ -11402,7 +11410,7 @@ const App = {
                     // 这是一个只有图的气泡
                     // 注意：index 使用 paragraphs.length，这样如果上面有文本，图片的 index 就是接在文本后面的
                     const imgBubble = UI.createSingleBubble(
-                        "", 'user', null, timestamp, currentMsgIndex, true, paragraphs.length, currentImageBase64,
+                        "", 'user', userAvatar, timestamp, currentMsgIndex, true, paragraphs.length, currentImageBase64,
                         false, false, newUserMsg
                     );
                     group.appendChild(imgBubble);
@@ -16127,14 +16135,24 @@ const App = {
 
         // 头像上传
         this.bindImageUpload('edit-avatar-file', 'edit-avatar-preview', 'edit-avatar'); 
-        this.bindImageUpload('user-avatar-file', 'user-avatar-preview', null, async (base64) => {
-            STATE.settings.USER_AVATAR = base64;
-            await Storage.saveSettings();
-            if(STATE.currentContactId) {
-                const c = STATE.contacts.find(x => x.id === STATE.currentContactId);
-                if(c) UI.renderChatHistory(c);
+        const userAvatarFile = document.getElementById('user-avatar-file');
+        if (userAvatarFile) userAvatarFile.onchange = async () => {
+            const file = userAvatarFile.files[0];
+            if (!file) return;
+
+            // ★ 选择图片只更新预览。读取完成后才允许保存，重新打开弹窗会清空上次选择。
+            if (modalSave) modalSave.disabled = true;
+            try {
+                const avatar = await this.readFile(file);
+                if (userAvatarFile.files[0] !== file) return;
+                this.pendingUserAvatar = avatar;
+                document.getElementById('user-avatar-preview').src = avatar;
+            } catch (error) {
+                console.warn('[Chat] 读取用户头像失败:', error);
+            } finally {
+                if (modalSave && userAvatarFile.files[0] === file) modalSave.disabled = false;
             }
-        });
+        };
         const editUpBtn = document.getElementById('edit-avatar-upload-btn');
         if(editUpBtn) editUpBtn.onclick = () => document.getElementById('edit-avatar-file').click();
         const userUpBtn = document.getElementById('user-avatar-upload-btn');
@@ -18586,8 +18604,14 @@ const App = {
         // 【新增】：聊天记录管理区域 (记得在 HTML 里加上 id="history-manager-section")
         const historySection = document.getElementById('history-manager-section');
 
-        // 用户头像预览
-        if(userPreview) userPreview.src = STATE.settings.USER_AVATAR || CONFIG.DEFAULT.USER_AVATAR;
+        // ★ 每次打开都重新读取该角色的用户头像，取消时丢弃未保存的图片。
+        const c = STATE.contacts.find(x => x.id === id);
+        this.pendingUserAvatar = null;
+        const userAvatarFile = document.getElementById('user-avatar-file');
+        const modalSave = document.getElementById('modal-save');
+        if (userAvatarFile) userAvatarFile.value = '';
+        if (modalSave) modalSave.disabled = false;
+        if (userPreview) userPreview.src = UI.getUserAvatar(c);
 
         // === 预设下拉框填充 (保留原逻辑) ===
         presetSelect.innerHTML = '<option value="">-- 跟随全局默认设置 --</option>';
@@ -18619,9 +18643,7 @@ const App = {
             // ===========================
             //  编辑模式 (修改现有角色)
             // ===========================
-            const c = STATE.contacts.find(x => x.id === id);
-            
-            title.innerText = '聊天选项'; 
+            title.innerText = '聊天选项';
             iName.value = c.name;
             iPrompt.value = c.prompt || "";
             PhoneCall.fillVoice(c);
@@ -18730,23 +18752,23 @@ const App = {
         const linkedPresetName = document.getElementById('edit-char-preset').value;
         const linkedSystemPromptPresetName = document.getElementById('edit-char-system-preset')?.value || "";
 
+        let contact;
         if (this.editingId) {
             // === 更新现有角色 ===
-            const c = STATE.contacts.find(x => x.id === this.editingId);
-            if (c) { 
-                c.name = name; 
-                c.avatar = avatar; 
-                c.prompt = prompt; 
-                
-                // 保存预设绑定
-                c.linkedPresetName = linkedPresetName; 
-                c.linkedSystemPromptPresetName = linkedSystemPromptPresetName;
-                PhoneCall.saveVoice(c);
-                c.phonePresetName = document.getElementById('edit-phone-preset').value;
-            }
+            contact = STATE.contacts.find(x => x.id === this.editingId);
+            if (!contact) return;
+            contact.name = name;
+            contact.avatar = avatar;
+            contact.prompt = prompt;
+
+            // 保存预设绑定
+            contact.linkedPresetName = linkedPresetName;
+            contact.linkedSystemPromptPresetName = linkedSystemPromptPresetName;
+            PhoneCall.saveVoice(contact);
+            contact.phonePresetName = document.getElementById('edit-phone-preset').value;
         } else {
             // === 创建新角色 ===
-            const contact = {
+            contact = {
                 id: Date.now().toString(), 
                 name, 
                 avatar, 
@@ -18761,15 +18783,30 @@ const App = {
             STATE.contacts.push(contact);
         }
 
+        // ★ 首次上传设为全局默认；之后只保存当前角色的专属用户头像。
+        const userAvatar = this.pendingUserAvatar;
+        this.pendingUserAvatar = null;
+        if (userAvatar) {
+            const defaultAvatar = STATE.settings.USER_AVATAR;
+            if (!defaultAvatar || defaultAvatar === CONFIG.DEFAULT.USER_AVATAR) {
+                STATE.settings.USER_AVATAR = userAvatar;
+                await Storage.saveSettings();
+            } else {
+                contact.userAvatar = userAvatar;
+            }
+        }
+
         // 保存到数据库
         await Storage.saveContacts();
         UI.renderContacts();
         
-        // 如果当前正好在聊这个角色，刷新一下界面
-        if (STATE.currentContactId === this.editingId) {
-            const c = STATE.contacts.find(x => x.id === this.editingId);
-            UI.updateChatHeader(c);
-            UI.renderChatHistory(c);
+        // 如果当前正好在聊这个角色，刷新头像和聊天记录。
+        if (STATE.currentContactId === contact.id) {
+            UI.updateChatHeader(contact);
+            UI.renderChatHistory(contact);
+            if (userAvatar && this.isOfflineChatOpen(contact.id)) {
+                UI.renderOfflineChatHistory(contact, false, true);
+            }
         }
 
         // ★ 线上/线下模式：tab 里的选择要按「保存」才生效，取消不生效
@@ -18777,7 +18814,6 @@ const App = {
         if (this.editingId && chatModeSection && chatModeSection.style.display !== 'none') {
             const modeTabs = document.getElementById('chat-mode-tabs');
             const pendingMode = modeTabs?.dataset.mode || 'online';
-            const contact = STATE.contacts.find(x => x.id === this.editingId);
             this.applyChatModeChange(contact, pendingMode);
         }
 
