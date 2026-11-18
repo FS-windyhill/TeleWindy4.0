@@ -199,7 +199,7 @@ const PhoneCall = {
         const s = this.session;
         const avatar = document.getElementById('phone-avatar');
         // ★ 旧角色可能没有可用图片；回退到本地矢量头像，避免通话页出现破图。
-        const fallbackAvatar = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" rx="50" fill="#a6c7bb"/><circle cx="50" cy="38" r="17" fill="#edf5f1"/><path d="M18 95c0-38 64-38 64 0" fill="#edf5f1"/></svg>');
+        const fallbackAvatar = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect width="100" height="100" rx="50" fill="#666666"/><circle cx="50" cy="38" r="17" fill="#eeeeee"/><path d="M18 95c0-38 64-38 64 0" fill="#eeeeee"/></svg>');
         avatar.onerror = () => { avatar.onerror = null; avatar.src = fallbackAvatar; };
         avatar.src = contact.avatar || fallbackAvatar;
         document.getElementById('phone-name').textContent = contact.name;
@@ -224,8 +224,14 @@ const PhoneCall = {
         const bubble = document.createElement('div');
         bubble.className = `phone-bubble ${message.role}`;
         bubble.textContent = this.cleanText(message.content);
-        document.getElementById('phone-transcript').append(bubble);
-        bubble.scrollIntoView({ block: 'nearest' });
+        const transcript = document.getElementById('phone-transcript');
+        transcript.append(bubble);
+        // ★ 直接滚动文字列表到底部，长气泡也展示末尾；不让外层聊天页跟着滚动。
+        transcript.scrollTop = transcript.scrollHeight;
+        // ★ 等本轮状态按钮切换完成后再对齐一次，避免底部操作区改变列表高度。
+        requestAnimationFrame(() => {
+            if (this.alive(s)) transcript.scrollTop = transcript.scrollHeight;
+        });
     },
     async dial() {
         const s = this.session;

@@ -17,6 +17,7 @@ function harness() {
     let saves = 0;
     const context = { module: { exports: {} }, console, Blob, Uint8Array, Float32Array, ArrayBuffer, DataView,
         AbortController, setInterval, clearInterval, setTimeout, clearTimeout, performance,
+        requestAnimationFrame: callback => callback(),
         STATE: state, formatTimestamp: () => '2026-11-15 12:00',
         Storage: { async saveContacts() { saves++; } },
         Toast: { show(message) { toasts.push(message); } },
@@ -426,4 +427,27 @@ test('角色语音播放结束才打开麦克风；挂断时的未播完内容�
     assert.equal(listening, false); assert.match(h.phone.transcript([message]), /未完整播放/);
     playback.resolve(); await work;
     assert.equal(listening, true); assert.equal(message.heard, true);
+});
+
+// ★ 新气泡和状态按钮同一轮更新：下一帧按最新高度滚底，旧通话不能影响新页面。
+test('电话新气泡滚到底部，按钮布局变化后重新对齐，挂断后的回调不再滚动', () => {
+    const { phone, element, context } = harness();
+    const frames = [];
+    context.requestAnimationFrame = callback => frames.push(callback);
+    const session = { controller: new AbortController() };
+    phone.session = session;
+    const transcript = element('phone-transcript');
+    transcript.scrollHeight = 800;
+    transcript.scrollTop = 100;
+    phone.addText(session, { role: 'assistant', content: '新回复' });
+    assert.equal(transcript.children[0].textContent, '新回复');
+    assert.equal(transcript.scrollTop, 800);
+    transcript.scrollHeight = 900;
+    frames.shift()();
+    assert.equal(transcript.scrollTop, 900);
+    phone.addText(session, { role: 'user', content: '我的回答' });
+    phone.session = null;
+    transcript.scrollTop = 0;
+    frames.shift()();
+    assert.equal(transcript.scrollTop, 0);
 });

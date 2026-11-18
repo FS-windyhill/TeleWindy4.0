@@ -13727,9 +13727,10 @@ body.dark-mode .offline-card-avatar {
 .phone-page {
     position: fixed; inset: 0; z-index: 10070;
     display: flex; justify-content: center;
-    background: radial-gradient(ellipse at 18% 8%, #dcece9, transparent 60%),
-        radial-gradient(ellipse at 90% 65%, #dce2f1, transparent 65%), #f4f5f7;
-    color: #263b39;
+    /* ★ 复用当前壁纸并叠加半透明黑色渐变，避免透出下面聊天页的文字。 */
+    background: linear-gradient(180deg, #00000099, #00000059 45%, #000000b3),
+        var(--app-wallpaper-image, url('assets/images/wallpaper.jpg')) center/cover no-repeat;
+    color: #f5f5f5;
     overscroll-behavior: contain;
 }
 .phone-shell {
@@ -13737,17 +13738,83 @@ body.dark-mode .offline-card-avatar {
     display: flex; flex-direction: column; position: relative;
     padding: max(22px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
 }
-.phone-close { align-self: flex-start; border: 0; background: #ffffff70; color: inherit; padding: 9px 16px; border-radius: 22px; cursor: pointer; }
+.phone-close { align-self: flex-start; border: 0; background: #ffffff26; color: inherit; padding: 9px 16px; border-radius: 22px; cursor: pointer; }
 .phone-header { text-align: center; padding: 24px 0 16px; flex-shrink: 0; }
-.phone-header img { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; box-shadow: 0 8px 32px #294f4820; border: 4px solid #ffffff80; }
-.phone-header h2 { margin: 14px 0 7px; font-size: 25px; font-weight: 600; }
-.phone-header p { margin: 0; opacity: .65; font-size: 13px; min-height: 20px; }
+.phone-header img { width: 100px; height: 100px; border-radius: 50%; object-fit: cover; box-shadow: 0 8px 32px #00000033; border: 4px solid #ffffff80; }
+
+.phone-header h2 {
+    margin: 14px 0 7px;
+    font-size: 1.35rem;
+    font-weight: 600;
+}
+
+.phone-header p {
+    margin: 0;
+    opacity: 0.65;
+    font-size: 0.8rem;
+    min-height: 20px;
+}
+
 .phone-transcript { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 18px 0; }
-.phone-bubble { flex-shrink: 0; max-width: 85%; padding: 13px 17px; border-radius: 22px; line-height: 1.7; font-size: 15px; overflow-wrap: anywhere; white-space: pre-wrap; box-sizing: border-box; }
-.phone-bubble.assistant { align-self: flex-start; background: #ffffffb8; border: 1px solid #ffffffc0; box-shadow: 0 4px 18px #294f4807; }
-.phone-bubble.user { align-self: flex-end; background: #d0e8e0; }
-.phone-controls { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 14px; flex-shrink: 0; }
-.phone-controls button { border: 1px solid #ffffff80; border-radius: 40px; padding: 14px 30px; font: inherit; background: #ffffff80; color: inherit; cursor: pointer; min-width: 125px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+
+
+.phone-bubble { 
+    flex-shrink: 0; 
+    max-width: 85%; 
+    padding: 13px 17px; 
+    border-radius: 22px; 
+    line-height: 1.3; 
+    font-size: 0.95rem; 
+    overflow-wrap: anywhere; 
+    white-space: pre-wrap; 
+    box-sizing: border-box; 
+
+}
+
+
+.phone-bubble.assistant { 
+    align-self: flex-start;
+    background: #ffffff4f;
+    color: #ffffff;
+    border: 1px solid #ffffff85;
+    box-shadow: 0 4px 18px #00000015;
+}
+
+
+.phone-bubble.user { 
+        align-self: flex-end;
+    background: #ffffff24;
+    color: #f5f5f5;
+    border: 1px solid #ffffff80;
+}
+
+
+
+.phone-controls { 
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding-top: 14px;
+    padding-bottom: 14px;
+    flex-shrink: 0;
+
+}
+
+.phone-controls button {
+    border: 1px solid #ffffff80;
+    border-radius: 40px;
+    padding: 10px 30px;
+    font: inherit;
+    background: #ffffff26;
+    color: inherit;
+    cursor: pointer;
+    min-width: 125px;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+
+
 .phone-controls .phone-dial { background: #36b575; color: #fff; font-weight: 600; min-width: 160px; }
 .phone-controls .phone-hangup { background: #e75b61; color: #fff; }
 /* ★ 尚未拨打时只显示绿色主按钮，红色挂断用于实际拨打后的阶段。 */
@@ -13776,9 +13843,7 @@ body.dark-mode .offline-card-avatar {
 .phone-settings-field,
 .phone-settings-fields { display: grid; gap: 8px; min-width: 0; }
 .phone-settings-fields { gap: 10px; }
-body.dark-mode .phone-page { background: radial-gradient(ellipse at 15% 0%, #25473f, transparent 65%), #171f24; color: #edf3f0; }
-body.dark-mode .phone-bubble.assistant, body.dark-mode .phone-close { background: #ffffff16; border-color: #ffffff18; }
-body.dark-mode .phone-bubble.user { background: #355f50; }
+/* ★ 通话页在浅色/深色模式下共用黑白灰配色，与任意壁纸保持协调。 */
 @media (max-height: 650px) {
     .phone-header { padding: 8px 0; }
     .phone-header img { width: 65px; height: 65px; }
