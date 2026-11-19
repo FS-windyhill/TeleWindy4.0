@@ -1949,6 +1949,15 @@ function sanitizeProactiveCapsule(raw) {
     characterName: String(source.characterName || "角色").slice(0, 120),
     characterPrompt: String(source.characterPrompt || "").slice(0, 20000),
     contextPrompt: String(source.contextPrompt || "").slice(0, 30000),
+    // ★ 日程独立保存为有界数据，避免把同步时的“当前活动”一直沿用到后续 Alarm。
+    characterSchedule: source.characterSchedule && typeof source.characterSchedule === "object" ? {
+      enabled: source.characterSchedule.enabled === true,
+      dateKey: String(source.characterSchedule.dateKey || "").slice(0, 10),
+      entries: Array.isArray(source.characterSchedule.entries) ? source.characterSchedule.entries.slice(0, 32).map(entry => ({
+        start: String(entry?.start || "").slice(0, 5), end: String(entry?.end || "").slice(0, 5),
+        text: String(entry?.text || "").slice(0, 4000)
+      })) : []
+    } : null,
     messages,
     acknowledgedMessageIds: Array.isArray(source.acknowledgedMessageIds)
       ? source.acknowledgedMessageIds.slice(-100).map((id) => String(id || "").slice(0, 120)).filter(Boolean)
@@ -2095,6 +2104,22 @@ function formatProactiveLocalTime(timestamp, capsule) {
   return shifted.toISOString().slice(0, 16).replace("T", " ");
 }
 
+// ★ 按浏览器当地日期和时刻重新定位，只注入当天当前段及前后各一段；昨天的日程不能冒充今天。
+function buildProactiveSchedulePrompt(capsule, now) {
+  const schedule = capsule.characterSchedule;
+  const localTime = formatProactiveLocalTime(now, capsule);
+  if (!schedule?.enabled || schedule.dateKey !== localTime.slice(0, 10)) return "";
+  const clock = localTime.slice(11, 16);
+  const entries = schedule.entries || [];
+  const index = entries.findIndex(entry => entry.start <= clock && clock < entry.end);
+  if (index < 0) return "";
+  const describe = entry => `${entry.start}-${entry.end} ${entry.text}`;
+  return ["# 角色当前日程", `当前时间：${clock}`, `当前：${describe(entries[index])}`,
+    index > 0 ? `上一段：${describe(entries[index - 1])}` : "",
+    index + 1 < entries.length ? `下一段：${describe(entries[index + 1])}` : ""
+  ].filter(Boolean).join("\n");
+}
+
 function buildProactiveDecisionMessages(capsule, runtime, now, manual = false) {
   const history = capsule.messages.map((message) => {
     const time = message.eventAt ? formatProactiveLocalTime(message.eventAt, capsule) : "未知时间";
@@ -2102,7 +2127,7 @@ function buildProactiveDecisionMessages(capsule, runtime, now, manual = false) {
     return `[${time}] ${speaker}：${message.content}`;
   }).join("\n");
   // ★ 模型只选间隔，不再计算绝对时间；发送时刻由 Worker 自己记录。
-  const maxCheckMinutes = getHeartbeatMs(capsule.policy) / 60000;
+  const nextCheckDeadline = formatProactiveLocalTime(now + getHeartbeatMs(capsule.policy), capsule);
   const system = [
     manual
       ? `你就是 ${capsule.characterName}。离你们上次对话已经过去了一会儿，想给对方发一条消息吗？还是先不发？你可以自由决定。`
@@ -2111,13 +2136,14 @@ function buildProactiveDecisionMessages(capsule, runtime, now, manual = false) {
     "只输出一个严格 JSON 对象，不要输出 Markdown：",
     '{"decision":"silent或send","content":"send时填写消息正文，silent时为空字符串","next_check_in_minutes":"下次判断距离现在的分钟数或null"}',
     `当前真实时间：${formatProactiveLocalTime(now, capsule)}`,
-    `下次判断请选在 ${maxCheckMinutes} 分钟内；是否实际发送由程序按设置检查。`,
+    `下一次判断最晚时间：${nextCheckDeadline}；是否实际发送由程序按设置检查。`,
     `连续主动未回复数：${Number(runtime.unansweredCount || 0)}`,
     "消息的实际发送时间由程序记录，不要输出时间戳。"
   ].join("\n");
   const context = [
     capsule.characterPrompt ? `【角色设定】\n${capsule.characterPrompt}` : "",
     capsule.contextPrompt ? `【背景与记忆】\n${capsule.contextPrompt}` : "",
+    buildProactiveSchedulePrompt(capsule, now),
     history ? `【最近聊天】\n${history}` : "【最近聊天】\n暂无聊天记录"
   ].filter(Boolean).join("\n\n");
   return [

@@ -68,6 +68,9 @@ test('浏览器主动判断统一使用当地时间，返回协议不要求时�
         assert.ok(prompt.includes(`[${ProactiveMessages.formatChatTime(eventAt)}] 对方：早上好`));
         assert.match(prompt, /当前时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
         assert.doesNotMatch(prompt, /2026-09-23T02:15:00\.000Z/);
+        // ★ 16 小时这类长间隔直接展示截止日期，仍保留原分钟数返回协议。
+        assert.ok(prompt.includes(`下一次判断最晚时间：${ProactiveMessages.formatChatTime(eventAt + 60000 + 12 * 3600000)}`));
+        assert.doesNotMatch(prompt, /下次判断请选在 .* 分钟内/);
         assert.match(prompt, /next_check_in_minutes/);
         assert.match(prompt, /sent_at_local/);
         assert.doesNotMatch(prompt, /当前偏移|带时区偏移|next_wake_at/);

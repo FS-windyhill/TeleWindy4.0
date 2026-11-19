@@ -342,7 +342,7 @@ const ProactiveMessages = {
         return messages.reduce((latest, message) => Math.max(latest, Number(message?.eventAt) || this.parseChatTime(message?.timestamp)), 0);
     },
 
-    buildContextPrompt(contact) {
+    buildContextPrompt(contact, includeSchedule = true) {
         const blocks = [];
         try {
             const memory = typeof CharacterMemory !== 'undefined' ? CharacterMemory.buildChatPrompt(contact.id, new Date()) : '';
@@ -353,7 +353,7 @@ const ProactiveMessages = {
             if (note) blocks.push(note);
         } catch (error) { console.warn('[主动消息] 读取心笺失败:', error); }
         try {
-            const schedule = typeof CharacterSchedule !== 'undefined' ? CharacterSchedule.buildChatPrompt(contact.id, new Date()) : '';
+            const schedule = includeSchedule && typeof CharacterSchedule !== 'undefined' ? CharacterSchedule.buildChatPrompt(contact.id, new Date()) : '';
             if (schedule) blocks.push(schedule);
         } catch (error) { console.warn('[主动消息] 读取角色日程失败:', error); }
         try {
@@ -363,7 +363,7 @@ const ProactiveMessages = {
         return blocks.join('\n\n').slice(0, 30000);
     },
 
-    buildCapsule(contact) {
+    buildCapsule(contact, forWorker = false) {
         const requestSettings = this.getRequestSettings(contact);
         let requestBodyExtra = {};
         try {
@@ -393,7 +393,9 @@ const ProactiveMessages = {
             characterId: String(contact.id),
             characterName: contact.name || '角色',
             characterPrompt: contact.prompt || '',
-            contextPrompt: this.buildContextPrompt(contact),
+            // ★ 后台只保存完整日程，唤醒时再选当前段；浏览器请求仍复用普通聊天的即时日程。
+            contextPrompt: this.buildContextPrompt(contact, !forWorker),
+            characterSchedule: typeof CharacterSchedule !== 'undefined' ? CharacterSchedule.getSchedule(contact.id) : null,
             messages,
             // ★ 即使某条后台回复被隐藏，也要告诉 Worker 已在前端落库，清掉服务端暂存的原文。
             acknowledgedMessageIds: history.slice(-100).filter(message => message?.asyncJobId || message?.proactiveSource)
@@ -1076,7 +1078,7 @@ const ProactiveMessages = {
     },
 
     async syncWorkerState(contact, enabledOverride = null) {
-        const capsule = this.buildCapsule(contact);
+        const capsule = this.buildCapsule(contact, true);
         if (enabledOverride !== null) capsule.enabled = enabledOverride === true;
         const response = await fetch(`${this.workerBaseUrl(contact.id)}/sync`, {
             method: 'PUT', headers: this.workerHeaders(), body: JSON.stringify(capsule)
@@ -1181,7 +1183,7 @@ const ProactiveMessages = {
         const capsule = this.buildCapsule(contact);
         const history = capsule.messages.map(message => `[${this.formatChatTime(message.eventAt || windowStart)}] ${message.role === 'assistant' ? capsule.characterName : '对方'}：${message.content}`).join('\n');
         // ★ 模型只选判断间隔；绝对唤醒时刻由程序计算，避免把时区换算交给模型。
-        const maxCheckMinutes = this.getPolicy().heartbeatHours * 60;
+        const nextCheckDeadline = this.formatChatTime(windowEnd + this.getPolicy().heartbeatHours * 3600000);
         return [
             { role: 'system', content: `${capsule.characterPrompt}\n\n${capsule.contextPrompt}`.trim() },
             { role: 'system', content: [
@@ -1191,7 +1193,7 @@ const ProactiveMessages = {
                 '不要解释，不要提到补发、系统、PWA、JSON 或 AI。',
                 `当前时间：${this.formatChatTime(windowEnd)}。`,
                 manual ? '发送时刻由程序记录。' : `如果决定发送，可在 ${this.formatChatTime(windowStart)} 至 ${this.formatChatTime(windowEnd)} 之间选一个本地展示时间。`,
-                `下次判断请选在 ${maxCheckMinutes} 分钟内；是否实际发送由程序按设置检查。`,
+                `下一次判断最晚时间：${nextCheckDeadline}；是否实际发送由程序按设置检查。`,
                 // ★ 离线补发才允许模型选本地展示时间；唤醒间隔由程序换算成绝对时间。
                 manual
                     ? '只输出严格 JSON：{"decision":"silent或send","content":"send时的正文，silent时为空","next_check_in_minutes":"下次判断距离现在的分钟数或null"}'
@@ -1398,7 +1400,7 @@ const ProactiveMessages = {
             settings.ASYNC_BACKEND_KEY_MODE = mode === 'server_secret' ? 'server_secret' : 'client_key';
             settings.ASYNC_BACKEND_PROACTIVE_REROLL = {
                 objectName: `${this.installationId()}:${String(contact.id)}`,
-                messageId: message.messageId, revision, capsule: this.buildCapsule(contact)
+                messageId: message.messageId, revision, capsule: this.buildCapsule(contact, true)
             };
         }
         this.rerollingContacts.add(String(contact.id));
@@ -1474,7 +1476,7 @@ const ProactiveMessages = {
             // ★ 手动判断沿用已保存的运行方式，但不改变“参与角色”和自动定时安排。
             if (this.workerModeAvailable()) {
                 const response = await fetch(`${this.workerBaseUrl(contact.id)}/run`, {
-                    method: 'POST', headers: this.workerHeaders(), body: JSON.stringify(this.buildCapsule(contact))
+                    method: 'POST', headers: this.workerHeaders(), body: JSON.stringify(this.buildCapsule(contact, true))
                 });
                 if (!response.ok) throw new Error(`测试失败：HTTP ${response.status}`);
                 const result = await response.json();

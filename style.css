@@ -9373,6 +9373,16 @@ body.dark-mode .character-schedule-entry {
     border: 1px solid rgba(245, 245, 245, 0.3);
 }
 
+/* ★ 当前日程用金框定位；仅淡化其它日程正文，时间、按钮和容器保持原样。 */
+.character-schedule-entry.is-current,
+body.dark-mode .character-schedule-entry.is-current {
+    border-color: #d4af37;
+}
+
+.character-schedule-entry:not(.is-current) .character-schedule-entry-text {
+    opacity: 0.8;
+}
+
 .character-schedule-avatar {
     width: 42px;
     height: 42px;

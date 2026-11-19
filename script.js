@@ -10265,6 +10265,18 @@ const App = {
             `;
             list.appendChild(item);
         });
+        this.updateCharacterScheduleHighlight();
+    },
+
+    // ★ 只更新当前状态，不重建列表，避免分钟检查打断编辑或滚动。
+    updateCharacterScheduleHighlight() {
+        const schedule = CharacterSchedule.getSchedule(STATE.currentScheduleContactId);
+        const now = new Date();
+        const index = CharacterSchedule.isFresh(schedule, now)
+            ? CharacterSchedule.findEntryIndex(schedule.entries, now) : -1;
+        document.querySelectorAll('#character-schedule-detail-list .character-schedule-entry').forEach((item, entryIndex) => {
+            item.classList.toggle('is-current', entryIndex === index);
+        });
     },
 
     buildScheduleRequestSettings(contact) {
@@ -10296,6 +10308,14 @@ const App = {
         }
 
         return settings;
+    },
+
+    // ★ 生成、开关或编辑日程后立即同步后台，不必等下一轮聊天；网络失败不影响本地保存。
+    async syncCharacterScheduleToWorker(contactId) {
+        if (typeof ProactiveMessages === 'undefined') return;
+        const contact = STATE.contacts.find(item => item.id === contactId);
+        try { await ProactiveMessages.onAssistantMessage(contact); }
+        catch (error) { console.warn('[角色日程] 后台日程同步失败:', error); }
     },
 
     async generateCharacterSchedule(contactId, options = {}) {
@@ -10334,6 +10354,7 @@ const App = {
                 await Storage.saveCharacterSchedules();
                 this.renderCharacterScheduleList();
                 this.renderCharacterScheduleDetail();
+                await this.syncCharacterScheduleToWorker(contactId);
                 return true;
             } catch (error) {
                 console.warn('[CharacterSchedule] generate failed:', error);
@@ -10354,6 +10375,7 @@ const App = {
         schedule.updatedAt = Date.now();
         await Storage.saveCharacterSchedules();
         this.renderCharacterScheduleList();
+        await this.syncCharacterScheduleToWorker(contactId);
         if (enabled) this.ensureCharacterScheduleReady(contactId, { priority: true, silent: true });
     },
 
@@ -10391,6 +10413,7 @@ const App = {
 
         // ★ 前端开着跨过 0 点时，下一轮分钟检查会排队刷新已开启角色。
         STATE.scheduleDateTimer = setInterval(() => {
+            this.updateCharacterScheduleHighlight();
             const todayKey = CharacterSchedule.getTodayKey();
             if (todayKey === STATE.scheduleLastDateKey) return;
             STATE.scheduleLastDateKey = todayKey;
@@ -10438,6 +10461,7 @@ const App = {
         await Storage.saveCharacterSchedules();
         this.closeScheduleEntryModal();
         this.renderCharacterScheduleDetail();
+        await this.syncCharacterScheduleToWorker(schedule.charId);
     },
     // ★★★★★ 角色日程 END：页面逻辑层 ★★★★★
 
@@ -15842,10 +15866,12 @@ const App = {
         // 切回页面时主动查一次 pending job，避免回复已经生成但聊天页还停在旧状态。
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
+                this.updateCharacterScheduleHighlight();
                 this.scheduleAsyncBackendResumeCheck(300);
             }
         });
         window.addEventListener('pageshow', () => {
+            this.updateCharacterScheduleHighlight();
             this.scheduleAsyncBackendResumeCheck(300);
             this.maybeGenerateCharacterMoment('pageshow');
         });
