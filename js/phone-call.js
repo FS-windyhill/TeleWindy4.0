@@ -187,6 +187,27 @@ const PhoneCall = {
             await Storage.saveContacts();
         } catch (error) { console.warn('[PhoneCall] 总结失败，继续使用电话原文回顾'); }
     },
+    // ================ 完整文字记录：独立于供模型使用的短期回顾 ================
+    saveRecord(s, ended = false) {
+        // ★ 不保存音频、密钥和运行态；空电话不生成历史，删除过的角色也不重新落库。
+        if (!s.messages?.length || !STATE.contacts.includes(s.contact)) return Promise.resolve();
+        const now = Date.now();
+        const records = s.contact.phoneRecords ||= [];
+        let record = records.find(item => item.id === s.id);
+        if (!record) {
+            record = { id: s.id, startedAt: s.startedAt || now };
+            records.push(record);
+        }
+        Object.assign(record, { updatedAt: now, endedAt: ended ? now : null,
+            messages: this.cleanMessages(s.messages).map(m => ({ role: m.role, content: m.content,
+                timestamp: m.timestamp || now, ...(m.role === 'assistant' ? { heard: !!m.heard } : {}) })) });
+        // ★ 逐句写入串行执行，避免较早的异步写入覆盖挂断后的最终记录；失败后下一句仍可重试。
+        this.recordSaveQueue = (this.recordSaveQueue || Promise.resolve()).catch(() => {}).then(() => Storage.saveContacts());
+        return this.recordSaveQueue.catch(error => {
+            console.warn('[PhoneCall] 通话记录保存失败', error);
+            Toast.show('通话记录保存失败，请勿刷新页面');
+        });
+    },
     // ================ 页面和会话生命周期 ================
     open(contact) {
         if (this.session || STATE.chatRequestActive || STATE.typingContactId) { Toast.show('请先结束当前通话或等待回复完成'); return; }
@@ -221,6 +242,8 @@ const PhoneCall = {
         document.getElementById('phone-retry').hidden = phase !== 'error';
     },
     addText(s, message) {
+        message.timestamp ||= Date.now();
+        void this.saveRecord(s);
         const bubble = document.createElement('div');
         bubble.className = `phone-bubble ${message.role}`;
         bubble.textContent = this.cleanText(message.content);
@@ -255,6 +278,7 @@ const PhoneCall = {
             await this.unlockAudio(s);
             if (!this.alive(s) || !await this.acquireMicrophone(s)) return;
             s.micApproved = true;
+            s.startedAt ||= Date.now();
             // ★ 首次只检查权限，立即彻底停止音轨；disabled 的活音轨仍可能占用 iOS 通话通道。
             this.stopListening(s);
             await this.reply(s);
@@ -293,6 +317,7 @@ const PhoneCall = {
         if (!this.alive(s)) return;
         s.pendingSpeech = null;
         message.heard = true;
+        void this.saveRecord(s);
         await this.listen(s);
     },
     async retry() {
@@ -328,7 +353,9 @@ const PhoneCall = {
         document.getElementById('phone-page').hidden = true;
         if (document.getElementById('app-container')) document.getElementById('app-container').inert = false;
         s.previousFocus?.focus?.();
+        const recordSave = this.saveRecord(s, true);
         const recap = this.armRecap(s.contact, s);
+        await recordSave;
         if (recap) {
             try { await Storage.saveContacts(); }
             catch (error) { Toast.show('电话回顾保存失败，请勿刷新页面'); }

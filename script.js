@@ -2851,6 +2851,10 @@ const UI = {
         // ★ 角色记忆也是探索子页，先统一隐藏，再在对应分支打开。
         if (viewCharacterMemory && viewName !== 'character-memory') viewCharacterMemory.style.display = 'none';
         if (viewCharacterMemoryDetail && viewName !== 'character-memory-detail') viewCharacterMemoryDetail.style.display = 'none';
+        // ★ 通话历史三个页面统一收起，避免返回探索或聊天时叠在下面。
+        ['phone-history', 'phone-history-calls', 'phone-history-detail'].forEach(page => {
+            if (viewName !== page) document.getElementById(`view-${page}`).style.display = 'none';
+        });
         // ★ 心笺也是探索子页，与角色记忆保持相同的显隐收口。
         if (viewHeartNote && viewName !== 'heart-note') viewHeartNote.style.display = 'none';
         if (viewHeartNoteDetail && viewName !== 'heart-note-detail') viewHeartNoteDetail.style.display = 'none';
@@ -2864,7 +2868,16 @@ const UI = {
         // 先清除底栏的全部高亮状态
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-        if (viewName === 'storage-space') {
+        if (['phone-history', 'phone-history-calls', 'phone-history-detail'].includes(viewName)) {
+            appContainer.classList.remove('in-chat-mode');
+            // ★ 聊天页保留常驻布局，与心笺等探索子页使用同一规则。
+            document.querySelectorAll('.page-view').forEach(view => {
+                if (view !== this.els.viewChat) view.style.display = 'none';
+            });
+            document.getElementById(`view-${viewName}`).style.display = 'flex';
+            if (bottomTabBar) bottomTabBar.style.display = 'none';
+            PhoneHistory.render(viewName);
+        } else if (viewName === 'storage-space') {
             App.rememberReturnView('storage-space', STATE.currentMainView || 'explore');
             appContainer.classList.remove('in-chat-mode');
             document.querySelectorAll('.page-view').forEach(view => { view.style.display = 'none'; });
@@ -5971,6 +5984,9 @@ const App = {
             ['character-schedule-detail', 'view-character-schedule-detail'],
             ['character-memory', 'view-character-memory'],
             ['character-memory-detail', 'view-character-memory-detail'],
+            ['phone-history', 'view-phone-history'],
+            ['phone-history-calls', 'view-phone-history-calls'],
+            ['phone-history-detail', 'view-phone-history-detail'],
             ['heart-note', 'view-heart-note'],
             ['heart-note-detail', 'view-heart-note-detail'],
             ['proactive-messages', 'view-proactive-messages'],
@@ -6025,6 +6041,9 @@ const App = {
             'character-schedule-detail': 'character-schedule-detail-back-btn',
             'character-memory': 'character-memory-back-btn',
             'character-memory-detail': 'character-memory-detail-back-btn',
+            'phone-history': 'phone-history-back-btn',
+            'phone-history-calls': 'phone-history-calls-back-btn',
+            'phone-history-detail': 'phone-history-detail-back-btn',
             'heart-note': 'heart-note-back-btn',
             'heart-note-detail': 'heart-note-detail-back-btn',
             'proactive-messages': 'proactive-messages-back-btn',

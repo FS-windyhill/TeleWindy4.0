@@ -451,3 +451,51 @@ test('电话新气泡滚到底部，按钮布局变化后重新对齐，挂断�
     frames.shift()();
     assert.equal(transcript.scrollTop, 0);
 });
+
+// ★ 完整历史不受回顾裁剪影响；落库只包含文本字段，不携带音频或密钥。
+test('完整通话逐句保存且同一通不重复，挂断补齐时间，不受回顾裁剪影响', async () => {
+    const { phone, state } = harness();
+    const contact = { id: 'history-contact' };
+    state.contacts.push(contact);
+    const s = { id: 'call-1', contact, startedAt: Date.now() - 9000, messages: [], audioSettings: { key: 'secret' } };
+    await phone.saveRecord(s);
+    assert.equal(contact.phoneRecords, undefined);
+    for (let i = 0; i < 10; i++) {
+        s.messages.push({ role: i % 2 ? 'user' : 'assistant', content: `台词${i}`, timestamp: Date.now(), heard: false, blob: new Blob(['audio']) });
+        await phone.saveRecord(s);
+    }
+    assert.equal(contact.phoneRecords.length, 1);
+    assert.equal(contact.phoneRecords[0].messages.length, 10);
+    assert.equal(contact.phoneRecords[0].endedAt, null);
+    s.messages[0].heard = true;
+    await phone.saveRecord(s, true);
+    const record = contact.phoneRecords[0];
+    assert.ok(record.endedAt >= record.startedAt);
+    assert.equal(record.messages[0].heard, true);
+    assert.equal(record.messages[0].blob, undefined);
+    assert.equal(record.audioSettings, undefined);
+    const recap = phone.armRecap(contact, s);
+    assert.ok(!recap.fallback.includes('台词0'));
+    assert.equal(record.messages[0].content, '台词0');
+    // ★ 保存对象是台词快照，后续内存修改不会悄悄篡改旧记录。
+    s.messages[0].content = '修改';
+    assert.equal(record.messages[0].content, '台词0');
+});
+
+test('保存失败提示且下一句可重试，删除角色后不恢复其通话记录', async () => {
+    const h = harness(), { phone, state, context } = h;
+    const contact = { id: 'retry-contact' };
+    state.contacts.push(contact);
+    const s = { id: 'call-retry', contact, messages: [{ role: 'user', content: '你好' }] };
+    context.Storage.saveContacts = async () => { throw new Error('disk full'); };
+    await phone.saveRecord(s);
+    assert.ok(h.toasts.includes('通话记录保存失败，请勿刷新页面'));
+    let saved = false;
+    context.Storage.saveContacts = async () => { saved = true; };
+    await phone.saveRecord(s, true);
+    assert.equal(saved, true);
+    state.contacts = [];
+    saved = false;
+    await phone.saveRecord(s, true);
+    assert.equal(saved, false);
+});
