@@ -10072,6 +10072,203 @@ body.dark-mode .character-memory-date {
         padding: 8px;
     }
 }
+/* ★★★★★ 记忆印象 START：独立毛玻璃样式，正文、菜单和操作区保持同一层次。 ★★★★★ */
+.memory-impression-entry {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 11px 14px;
+    margin: 0 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.75);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.42);
+    box-shadow: 0 6px 20px rgba(70, 83, 105, 0.06);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #697384;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+/* ★ 遮罩只做轻模糊，面板自身再磨砂，让原来的壁纸色彩仍能透进来。 */
+.memory-impression-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.16);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+.memory-impression-sheet {
+    display: flex;
+    flex-direction: column;
+    width: min(93%, 520px);
+    max-height: 88vh;
+    max-height: 88dvh;
+    box-sizing: border-box;
+    padding: 22px 20px max(22px, env(safe-area-inset-bottom));
+    border: 1px solid rgba(255, 255, 255, 0.75);
+    border-bottom: 0;
+    border-radius: 22px 22px 0 0;
+    background: rgba(245, 245, 249, 0.64);
+    box-shadow: 0 -10px 40px rgba(39, 42, 55, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.45);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    color: #2f3440;
+}
+.memory-impression-header { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.memory-impression-header h3 { flex: 1; margin: 0; font-size: 1.06rem; font-weight: 600; }
+.memory-impression-more { position: relative; }
+.memory-impression-more summary,
+.memory-impression-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.68);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.24);
+    color: #697384;
+    font: inherit;
+    cursor: pointer;
+    list-style: none;
+}
+.memory-impression-icon-btn { font-size: 1.2rem; }
+.memory-impression-more summary svg { display: block; width: 1rem; height: 1rem; flex-shrink: 0; }
+.memory-impression-more summary::-webkit-details-marker { display: none; }
+/* ★ 收起时明确移出布局，防止磨砂菜单残留合成层，也不让隐藏操作进入 Tab 焦点顺序。 */
+.memory-impression-more:not([open]) .memory-impression-menu { display: none; }
+.memory-impression-menu {
+    position: absolute;
+    z-index: 2;
+    top: calc(100% + 8px);
+    right: 0;
+    width: min(258px, 74vw);
+    box-sizing: border-box;
+    padding: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.78);
+    border-radius: 14px;
+    background: rgba(245, 245, 249, 0.78);
+    box-shadow: 0 10px 28px rgba(39, 42, 55, 0.13), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+}
+.memory-impression-menu button {
+    display: block;
+    width: 100%;
+    min-height: 38px;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    font: inherit;
+    font-size: 0.84rem;
+    cursor: pointer;
+}
+.memory-impression-menu p {
+    margin: 0 12px 4px;
+    padding: 0 0 12px;
+    border-bottom: 1px solid rgba(120, 120, 120, 0.15);
+    color: #7a8391;
+    font-size: 0.73rem;
+    line-height: 1.7;
+}
+.memory-impression-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-top: 18px; }
+.memory-impression-setting {
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.26);
+}
+.memory-impression-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 0.84rem; }
+.memory-impression-switch { position: relative; display: inline-flex; flex-shrink: 0; width: 40px; height: 23px; }
+.memory-impression-switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; }
+.memory-impression-switch-slider { position: absolute; inset: 0; border-radius: 999px; background: rgba(120, 120, 120, 0.25); cursor: pointer; }
+.memory-impression-switch-slider::before { content: ""; position: absolute; width: 17px; height: 17px; top: 3px; left: 3px; border-radius: 50%; background: #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14); }
+.memory-impression-switch input:checked + .memory-impression-switch-slider { background: var(--primary-btn-text, rgb(135, 110, 255)); }
+.memory-impression-switch input:checked + .memory-impression-switch-slider::before { transform: translateX(17px); }
+.memory-impression-note { color: #7a8391; font-size: 0.73rem; line-height: 1.8; overflow-wrap: anywhere; }
+.memory-impression-setting .memory-impression-note { margin: 7px 0 0; }
+.memory-impression-body,
+.memory-impression-editor {
+    width: 100%;
+    box-sizing: border-box;
+    margin: 16px 0;
+    padding: 18px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.65);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.3);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    color: inherit;
+    font: inherit;
+    font-size: 0.93rem;
+    line-height: 2;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.memory-impression-editor { display: block; min-height: 220px; resize: vertical; outline: none; }
+.memory-impression-editor:focus { border-color: rgba(120, 120, 120, 0.4); }
+.memory-impression-actions { display: flex; flex-shrink: 0; flex-wrap: wrap; gap: 10px; padding-top: 14px; border-top: 1px solid rgba(255, 255, 255, 0.5); }
+.memory-impression-button {
+    flex: 1;
+    min-width: 100px;
+    min-height: 42px;
+    padding: 10px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.75);
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.26);
+    box-shadow: 0 3px 10px rgba(70, 83, 105, 0.04);
+    color: #697384;
+    font: inherit;
+    font-size: 0.86rem;
+    cursor: pointer;
+}
+.memory-impression-button-primary { background: rgba(255, 255, 255, 0.58); color: #2f3440; }
+.memory-impression-sheet [hidden] { display: none !important; }
+.memory-impression-sheet button:disabled { opacity: 0.42; cursor: default; box-shadow: none; }
+/* ★ 点击不额外绘制白色焦点框、触摸高亮或变色反馈，保留原来的静态毛玻璃边框。 */
+.memory-impression-entry,
+.memory-impression-sheet button,
+.memory-impression-more summary,
+.memory-impression-switch input { outline: none; -webkit-tap-highlight-color: transparent; }
+
+/* ★ 只保留底部面板的上滑：遮罩和菜单即时显示，不做透明度、缩放或交互过渡。 */
+.memory-impression-overlay:not(.hidden) .memory-impression-sheet { animation: memory-impression-sheet-in 0.36s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes memory-impression-sheet-in { from { transform: translateY(56px); } to { transform: translateY(0); } }
+/* ★ 深色玻璃仍透出壁纸，使用浅白细边和中性灰，不另加高饱和底色。 */
+body.dark-mode .memory-impression-entry { background: rgba(0, 0, 0, 0.24); color: #ccc; border-color: rgba(245, 245, 245, 0.3); }
+body.dark-mode .memory-impression-overlay { background: rgba(0, 0, 0, 0.22); }
+body.dark-mode .memory-impression-sheet { background: rgba(28, 28, 32, 0.64); color: #eee; border-color: rgba(245, 245, 245, 0.3); box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.08); }
+body.dark-mode .memory-impression-menu { background: rgba(38, 38, 43, 0.8); border-color: rgba(245, 245, 245, 0.3); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2); }
+body.dark-mode .memory-impression-setting,
+body.dark-mode .memory-impression-body,
+body.dark-mode .memory-impression-editor,
+body.dark-mode .memory-impression-button,
+body.dark-mode .memory-impression-more summary,
+body.dark-mode .memory-impression-icon-btn { background: rgba(255, 255, 255, 0.08); color: #ddd; border-color: rgba(245, 245, 245, 0.24); box-shadow: none; }
+body.dark-mode .memory-impression-button-primary { background: rgba(255, 255, 255, 0.16); color: #f4f4f4; }
+body.dark-mode .memory-impression-note,
+body.dark-mode .memory-impression-menu p { color: #bcbcbc; }
+body.dark-mode .memory-impression-menu p { border-color: rgba(245, 245, 245, 0.16); }
+body.dark-mode .memory-impression-actions { border-color: rgba(245, 245, 245, 0.16); }
+/* ★ 系统要求减少动态效果时，连唯一保留的面板上滑也停用。 */
+@media (prefers-reduced-motion: reduce) {
+    .memory-impression-overlay .memory-impression-sheet { animation: none; }
+}
+/* ★★★★★ 记忆印象 END ★★★★★ */
 /* ★★★★★ 角色记忆 END：探索页总控 + 单角色详情 ★★★★★ */
 
 /* ★★★★★ Agent START：探索页工具路由设置 ★★★★★ */

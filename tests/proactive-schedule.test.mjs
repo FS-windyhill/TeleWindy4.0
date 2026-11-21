@@ -20,8 +20,8 @@ test('后台按唤醒时当地时间选取日程，并把16小时上限展示为
     assert.match(messages[1].content, /当前：08:00-12:00 工作/);
     assert.match(messages[1].content, /上一段：00:00-08:00 睡觉/);
     assert.match(messages[1].content, /下一段：12:00-24:00 休息/);
-    assert.match(messages[0].content, /下一次判断最晚时间：2026-11-20 00:00/);
-    assert.match(messages[0].content, /next_check_in_minutes/);
+    assert.match(messages[0].content, /下一次检查最晚安排到：2026-11-20 00:00/);
+    assert.match(messages[0].content, /next_wake_at_local/);
     const later = worker.buildProactiveDecisionMessages(capsule, {}, Date.parse('2026-11-19T12:00:00+08:00'));
     assert.match(later[1].content, /当前：12:00-24:00 休息/);
     const tomorrow = worker.buildProactiveDecisionMessages(capsule, {}, Date.parse('2026-11-20T08:00:00+08:00'));

@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 后台服务与切屏回复拆页后更新样式版本，避免 PWA 沿用旧卡片排版。 -->
-    <link rel="stylesheet" href="./style.css?v=20261119-phone-history-3">
+    <link rel="stylesheet" href="./style.css?v=20261121-memory-impression-slide-3">
 </head>
 <body>
 
@@ -819,6 +819,11 @@
                     </div>
                     <div id="character-memory-status" class="character-memory-status"></div>
                 </div>
+                <!-- ★ 记忆印象独立查看和编辑，入口在普通记忆搜索框上方。 -->
+                <button type="button" id="memory-impression-open" class="memory-impression-entry">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="0.92rem" height="0.92rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-heart-pulse preview-icon" aria-hidden="true"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/><path d="M3.22 13H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/></svg>
+                    <span>查看长期记忆</span>
+                </button>
                 <!-- ★ 当前角色内直接搜索；清空后恢复当前标签的完整列表。 -->
                 <div class="inline-list-search" id="memory-search">
                     <div class="inline-search-row"><span class="inline-search-field"><svg xmlns="http://www.w3.org/2000/svg" width="0.92rem" height="0.92rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-search preview-icon inline-search-icon" aria-hidden="true" focusable="false"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg><input id="memory-search-input" type="search" placeholder="搜索当前角色的记忆…" aria-label="搜索当前角色的记忆" autocomplete="off"></span><button type="button" class="inline-search-clear" hidden><svg xmlns="http://www.w3.org/2000/svg" width="0.92rem" height="0.92rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eraser preview-icon" aria-hidden="true" focusable="false"><path d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21"/><path d="m5.082 11.09 8.828 8.828"/></svg><span>清空</span></button></div>
@@ -1812,6 +1817,48 @@
             </div>
         </div>
         <!-- ★★★★★ 角色记忆：API 设置弹窗 END ★★★★★ -->
+
+        <!-- ★★★★★ 记忆印象 START：独立毛玻璃底部面板，样式不与其它记忆弹窗共用。 ★★★★★ -->
+        <div id="modal-memory-impression" class="memory-impression-overlay hidden">
+            <section class="memory-impression-sheet" role="dialog" aria-modal="true" aria-labelledby="memory-impression-title" aria-describedby="memory-impression-meta">
+                <header class="memory-impression-header">
+                    <h3 id="memory-impression-title">记忆印象</h3>
+                    <details id="memory-impression-more" class="memory-impression-more">
+                        <summary aria-label="更多记忆印象操作">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="1rem" height="1rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-ellipsis preview-icon" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+                        </summary>
+                        <div class="memory-impression-menu">
+                            <button type="button" id="memory-impression-regenerate">从全部记忆重新生成</button>
+                            <p>根据截至目前的全部每日记忆重新归纳，不沿用当前印象。</p>
+                            <button type="button" id="memory-impression-restore">恢复上一版</button>
+                        </div>
+                    </details>
+                    <button type="button" id="memory-impression-close" class="memory-impression-icon-btn" aria-label="关闭记忆印象">×</button>
+                </header>
+                <div class="memory-impression-scroll">
+                    <div class="memory-impression-setting">
+                        <div class="memory-impression-toggle-row">
+                            <span id="memory-impression-toggle-label">聊天时注入记忆印象</span>
+                            <label class="memory-impression-switch">
+                                <input type="checkbox" id="memory-impression-enabled" aria-labelledby="memory-impression-toggle-label">
+                                <span class="memory-impression-switch-slider"></span>
+                            </label>
+                        </div>
+                        <p class="memory-impression-note">关闭后保留正文，暂停注入和自动更新，仍可手动整理。</p>
+                    </div>
+                    <p id="memory-impression-body" class="memory-impression-body"></p>
+                    <textarea id="memory-impression-editor" class="memory-impression-editor" aria-label="编辑记忆印象" rows="8" hidden></textarea>
+                    <p id="memory-impression-meta" class="memory-impression-note" role="status" aria-live="polite"></p>
+                </div>
+                <footer class="memory-impression-actions">
+                    <button type="button" id="memory-impression-edit" class="memory-impression-button">编辑</button>
+                    <button type="button" id="memory-impression-cancel" class="memory-impression-button" hidden>取消编辑</button>
+                    <button type="button" id="memory-impression-save" class="memory-impression-button memory-impression-button-primary" hidden>保存</button>
+                    <button type="button" id="memory-impression-update" class="memory-impression-button memory-impression-button-primary">生成记忆印象</button>
+                </footer>
+            </section>
+        </div>
+        <!-- ★★★★★ 记忆印象 END ★★★★★ -->
 
         <!-- ★★★★★ Agent：模型设置弹窗 START ★★★★★ -->
         <div id="modal-agent-settings" class="modal-overlay agent-modal-bg hidden">
@@ -3349,7 +3396,9 @@
     <script src="./js/world-sense.js?v=20260829"></script>
     <script src="./js/todo-countdown-context.js"></script>
     <script src="./js/character-schedule.js"></script>
-    <script src="./js/character-memory.js"></script>
+    <script src="./js/character-memory.js?v=20261121-memory-impression-1"></script>
+    <!-- ★ 印象服务先加载定义，运行时复用 App 的角色记忆 API 预设与存储。 -->
+    <script src="./js/memory-impression.js?v=20261121-memory-impression-controls-5"></script>
     <script src="./js/agent-skill-router.js?v=20260907-agent-panel-2"></script>
     <script src="./js/agent-runtime.js"></script>
     <script src="./js/agent-todo-manager.js"></script>
@@ -3358,7 +3407,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261119-schedule-current-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261119-phone-history-1"></script>
+    <script src="./script.js?v=20261121-memory-impression-1"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

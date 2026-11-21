@@ -18,7 +18,7 @@
 //   - parseAiMemory(rawText): 解析并校验 AI 记忆
 //   - buildGenerationMessages(contact, dateKey): 生成请求 AI 总结记忆的 messages
 //   - getInjectRecords(memory, now): 读取最近 N 个有记忆的日期 + 手动长期记住的可注入记录
-//   - buildChatPrompt(contactId, now): 生成聊天注入的长期记忆
+//   - buildChatPrompt(contactId, now): 在同一位置注入记忆印象，再接普通日期记忆
 // =========================================
 
 // ★★★★★ 角色记忆 START：独立工具层 ★★★★★
@@ -284,15 +284,18 @@ const CharacterMemory = {
     buildChatPrompt(contactId, now = new Date()) {
         const memory = this.getMemory(contactId);
         const records = this.getInjectRecords(memory, now);
-        if (!records.length) return '';
+        const impression = typeof MemoryImpression !== 'undefined' ? MemoryImpression.buildChatText(memory) : '';
+        if (!records.length && !impression) return '';
 
         const lines = [
             '# 过往记忆',
-            `以下是你近期的记忆内容。`
+            '以下是你留下的记忆。'
         ];
 
+        // ★ 长期印象使用原来的注入位置，排在带日期的普通记忆前面；没有近期条目也可单独注入。
+        if (impression) lines.push('', `[记忆印象]${impression}`);
         records.forEach(record => {
-            lines.push('', record.dateKey);
+            lines.push('', `[${record.dateKey}]`);
             record.memories.forEach(item => {
                 const text = typeof item === 'string' ? item : item?.text;
                 if (text) lines.push(`- ${text}`);

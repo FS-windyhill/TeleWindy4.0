@@ -35,20 +35,20 @@ global.HistoryVisibility = vm.runInNewContext(`${fs.readFileSync(require.resolve
 
 const ProactiveMessages = require('../js/proactive-messages.js');
 
-test('浏览器补发接受本地展示时间，并把唤醒间隔留给程序计算', () => {
+test('浏览器补发分别解析本条显示时间与下一次具体唤醒时间', () => {
     const start = new Date(2026, 8, 23, 9, 0).getTime();
     const end = new Date(2026, 8, 23, 12, 0).getTime();
     const result = ProactiveMessages.parseDecision(JSON.stringify({
         decision: 'send',
         content: '早上好',
         sent_at_local: '2026-09-23 10:15',
-        next_check_in_minutes: 45
+        next_wake_at_local: '2026-09-23 12:45'
     }), start, end);
 
     assert.equal(result.decision, 'send');
     assert.equal(result.content, '早上好');
     assert.equal(result.sentAt, new Date(2026, 8, 23, 10, 15).getTime());
-    assert.equal(result.nextCheckMinutes, 45);
+    assert.equal(result.nextWakeAt, new Date(2026, 8, 23, 12, 45).getTime());
 });
 
 test('浏览器主动判断统一使用当地时间，返回协议不要求时区偏移', () => {
@@ -68,12 +68,12 @@ test('浏览器主动判断统一使用当地时间，返回协议不要求时�
         assert.ok(prompt.includes(`[${ProactiveMessages.formatChatTime(eventAt)}] 对方：早上好`));
         assert.match(prompt, /当前时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
         assert.doesNotMatch(prompt, /2026-09-23T02:15:00\.000Z/);
-        // ★ 16 小时这类长间隔直接展示截止日期，仍保留原分钟数返回协议。
-        assert.ok(prompt.includes(`下一次判断最晚时间：${ProactiveMessages.formatChatTime(eventAt + 60000 + 12 * 3600000)}`));
+        // ★ 长间隔展示完整截止日期，模型直接填写当地的具体唤醒时间。
+        assert.ok(prompt.includes(`下一次再唤醒你最晚安排到：${ProactiveMessages.formatChatTime(eventAt + 60000 + 12 * 3600000)}`));
         assert.doesNotMatch(prompt, /下次判断请选在 .* 分钟内/);
-        assert.match(prompt, /next_check_in_minutes/);
+        assert.match(prompt, /next_wake_at_local/);
         assert.match(prompt, /sent_at_local/);
-        assert.doesNotMatch(prompt, /当前偏移|带时区偏移|next_wake_at/);
+        assert.doesNotMatch(prompt, /当前偏移|带时区偏移|next_check_in_minutes/);
     } finally {
         ProactiveMessages.buildContextPrompt = originalBuildContextPrompt;
     }
@@ -81,9 +81,35 @@ test('浏览器主动判断统一使用当地时间，返回协议不要求时�
 
 test('发送正文为空时安全降级为沉默', () => {
     const start = Date.now() - 3600000;
-    const result = ProactiveMessages.parseDecision('{"decision":"send","content":"","sent_at_local":null,"next_check_in_minutes":null}', start, Date.now());
+    const result = ProactiveMessages.parseDecision('{"decision":"send","content":"","sent_at_local":null,"next_wake_at_local":null}', start, Date.now());
     assert.equal(result.decision, 'silent');
     assert.equal(result.content, '');
+});
+
+test('浏览器拒绝错误的唤醒日期，并对过去、越界和空值随机兜底', () => {
+    STATE.settings.PROACTIVE_MESSAGES = JSON.parse(JSON.stringify(CONFIG.DEFAULT.PROACTIVE_MESSAGES));
+    const now = new Date(2026, 10, 21, 23, 0).getTime();
+    const deadline = now + 2 * 3600000;
+    const originalRandom = Math.random;
+    try {
+        Math.random = () => 0.5;
+        const parse = value => ProactiveMessages.parseDecision(JSON.stringify({ decision: 'silent', next_wake_at_local: value }), now, now);
+        const valid = parse('2026-11-22 00:30').nextWakeAt;
+        assert.equal(ProactiveMessages.resolveNextWakeAt(valid, now, deadline), new Date(2026, 10, 22, 0, 30).getTime());
+        assert.equal(ProactiveMessages.resolveNextWakeAt(deadline, now, deadline), deadline);
+        for (const value of [null, undefined, '', 30, '2026-02-30 12:00', '2026-11-22 24:00', '2026-11-21 22:00', '2026-11-22 01:01']) {
+            const wake = ProactiveMessages.resolveNextWakeAt(parse(value).nextWakeAt, now, deadline);
+            assert.ok(wake > now && wake < deadline, String(value));
+        }
+        // ★ 模型选择有效但返回时已过期，同样需要重新随机选择。
+        const completedAt = valid + 60000;
+        const wake = ProactiveMessages.resolveNextWakeAt(valid, completedAt, deadline);
+        assert.ok(wake > completedAt && wake < deadline);
+        const expiredWindowWake = ProactiveMessages.resolveNextWakeAt(valid, deadline + 1, deadline);
+        assert.ok(expiredWindowWake > deadline + 1 && expiredWindowWake <= deadline + 1 + 12 * 3600000);
+    } finally {
+        Math.random = originalRandom;
+    }
 });
 
 test('主动消息所有角色共用最近 40 条日志，旧角色状态不再重复保存事件', () => {
@@ -111,7 +137,7 @@ test('浏览器主动判断给模型请求标记独立上下文日志和角色',
     global.API = {
         chat: async (_messages, settings) => {
             sentSettings = settings;
-            return '{"decision":"silent","content":"","next_check_in_minutes":null}';
+            return '{"decision":"silent","content":"","next_wake_at_local":null}';
         }
     };
     try {
@@ -223,7 +249,7 @@ test('纯前端冷却跳过后在冷却结束时重查，而不是等待最长�
     }
 });
 
-test('浏览器按模型给的分钟数安排下一次判断', async () => {
+test('浏览器按模型给的具体时间安排下一次判断', async () => {
     const contact = { id: 'relative-wake', name: '测试角色', prompt: '', history: [] };
     STATE.settings.PROACTIVE_MESSAGES = {
         ...JSON.parse(JSON.stringify(CONFIG.DEFAULT.PROACTIVE_MESSAGES)),
@@ -233,15 +259,13 @@ test('浏览器按模型给的分钟数安排下一次判断', async () => {
     const previousApi = global.API;
     const previousWindow = global.window;
     global.window = { crypto: { randomUUID: () => 'relative-wake-test' } };
-    global.API = { chat: async () => '{"decision":"silent","content":"","next_check_in_minutes":30}' };
+    const wakeText = ProactiveMessages.formatChatTime(Date.now() + 30 * 60000);
+    global.API = { chat: async () => JSON.stringify({ decision: 'silent', content: '', next_wake_at_local: wakeText }) };
     try {
-        const before = Date.now();
         const result = await ProactiveMessages.runLocalCatchup(contact);
-        const after = Date.now();
         const nextWake = ProactiveMessages.settings().nextLocalWakeAtByChar[contact.id];
         assert.equal(result.decision, 'silent');
-        assert.ok(nextWake >= before + 30 * 60000);
-        assert.ok(nextWake <= after + 30 * 60000);
+        assert.equal(nextWake, ProactiveMessages.parseChatTime(wakeText));
     } finally {
         global.API = previousApi;
         global.window = previousWindow;
@@ -318,7 +342,7 @@ test('浏览器手动判断未参与角色不会创建自动唤醒', async () =>
     const previousWindow = global.window;
     const previousApi = global.API;
     global.window = { crypto: { randomUUID: () => 'manual-test-run' } };
-    global.API = { chat: async () => '{"decision":"silent","content":"","next_check_in_minutes":null}' };
+    global.API = { chat: async () => '{"decision":"silent","content":"","next_wake_at_local":null}' };
     try {
         const result = await ProactiveMessages.runLocalCatchup(contact, true);
         const settings = ProactiveMessages.settings();

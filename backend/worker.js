@@ -453,7 +453,7 @@ export class ProactiveCharacterObject {
           usage: compactUsage(responseUsage), status: "done", chat: false, reroll: false
         });
       }
-      const decision = normalizeProactiveDecision(rawContent);
+      const decision = normalizeProactiveDecision(rawContent, capsule);
 
       runtime.lastHeartbeatAt = startedAt;
       runtime.lastDecision = decision.decision;
@@ -491,13 +491,9 @@ export class ProactiveCharacterObject {
         await this.appendEvent("proactive_decision_silent", { heartbeatRunId });
       }
 
-      // ★ 模型只给相对间隔；以模型请求完成后的时间为起点，再由程序限制最晚唤醒。
+      // ★ 按提示中的原截止时间校验具体唤醒时刻；越界或请求期间已过期时随机兜底。
       const scheduleFrom = Date.now();
-      const nextWakeAt = normalizeFutureWakeAt(
-        decision.nextCheckMinutes ? scheduleFrom + decision.nextCheckMinutes * 60000 : null,
-        scheduleFrom + getHeartbeatMs(capsule.policy),
-        capsule.policy
-      );
+      const nextWakeAt = resolveProactiveWakeAt(decision.nextWakeAt, capsule, startedAt, scheduleFrom);
       if (!manual) runtime.nextWakeAt = nextWakeAt;
       await this.state.storage.put("runtime", runtime);
       if (!manual) await this.setNextAlarm(nextWakeAt, "model_decision");
@@ -2126,7 +2122,7 @@ function buildProactiveDecisionMessages(capsule, runtime, now, manual = false) {
     const speaker = message.role === "assistant" ? capsule.characterName : "对方";
     return `[${time}] ${speaker}：${message.content}`;
   }).join("\n");
-  // ★ 模型只选间隔，不再计算绝对时间；发送时刻由 Worker 自己记录。
+  // ★ 模型选择当地的具体唤醒时间；实际发送时刻仍由 Worker 自己记录。
   const nextCheckDeadline = formatProactiveLocalTime(now + getHeartbeatMs(capsule.policy), capsule);
   const system = [
     manual
@@ -2134,11 +2130,13 @@ function buildProactiveDecisionMessages(capsule, runtime, now, manual = false) {
       : `你就是 ${capsule.characterName}。离你们上次对话已经过去了一会儿，想给对方发一条消息吗？还是先不发？你可以自由决定。`,
     "不要解释决策过程，不要提及系统、定时器、JSON 或 AI。",
     "只输出一个严格 JSON 对象，不要输出 Markdown：",
-    '{"decision":"silent或send","content":"send时填写消息正文，silent时为空字符串","next_check_in_minutes":"下次判断距离现在的分钟数或null"}',
+    '{"decision":"silent或send","content":"send时填写消息正文，silent时为空字符串","next_wake_at_local":"下次唤醒你的当地时间YYYY-MM-DD HH:mm"}',
     `当前真实时间：${formatProactiveLocalTime(now, capsule)}`,
-    `下一次判断最晚时间：${nextCheckDeadline}；是否实际发送由程序按设置检查。`,
+    // ★ 下一轮检查只提供再次思考的机会，不是本条消息的发送期限或下一条消息的发送承诺。
+    "无论本次发送还是保持沉默，请用 next_wake_at_local 填写下一次唤醒你的具体当地时间，格式为 YYYY-MM-DD HH:mm，必须晚于当前时间且不超过下面的最晚时间。越界、格式错误或未填写时，程序会在允许范围内随机选择一个时间。",
+    `下一次检查最晚安排到：${nextCheckDeadline}。到时只是重新判断是否联系，不代表必须发送；程序也会检查是否满足发送设置。`,
     `连续主动未回复数：${Number(runtime.unansweredCount || 0)}`,
-    "消息的实际发送时间由程序记录，不要输出时间戳。"
+    "如果本次决定发送，消息会在生成后交给程序发送，本条消息的实际发送时间由程序记录；你只需填写下一次唤醒时间，无需填写本条消息的发送时间。"
   ].join("\n");
   const context = [
     capsule.characterPrompt ? `【角色设定】\n${capsule.characterPrompt}` : "",
@@ -2153,7 +2151,7 @@ function buildProactiveDecisionMessages(capsule, runtime, now, manual = false) {
   ];
 }
 
-function normalizeProactiveDecision(rawText) {
+function normalizeProactiveDecision(rawText, capsule) {
   let parsed;
   try {
     parsed = extractJsonObject(String(rawText || "")
@@ -2164,11 +2162,39 @@ function normalizeProactiveDecision(rawText) {
   }
   const decision = parsed?.decision === "send" ? "send" : "silent";
   const content = decision === "send" ? String(parsed?.content || "").trim().slice(0, 4000) : "";
-  const proposedMinutes = Number(parsed?.next_check_in_minutes);
-  const nextCheckMinutes = Number.isFinite(proposedMinutes) && proposedMinutes > 0 ? proposedMinutes : null;
-  if (!content) return { decision: "silent", content: "", sentAt: null, nextCheckMinutes };
+  const nextWakeAt = parseProactiveLocalWakeAt(parsed?.next_wake_at_local, capsule);
+  if (!content) return { decision: "silent", content: "", sentAt: null, nextWakeAt };
   // ★ Worker 实时发送，不让模型猜测发出时间；使用请求完成时的实际时间。
-  return { decision, content, sentAt: new Date().toISOString(), nextCheckMinutes };
+  return { decision, content, sentAt: new Date().toISOString(), nextWakeAt };
+}
+
+function parseProactiveLocalWakeAt(value, capsule) {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text)) return null;
+  const wallTime = Date.parse(text.replace(" ", "T") + ":00Z");
+  if (!Number.isFinite(wallTime)) return null;
+  // ★ Worker 不能把无偏移的当地时间当成 UTC；采样相邻两天的偏移，兼顾跨天与夏令时切换。
+  const offsets = new Set([Number(capsule.timezoneOffsetMinutes || 0) * 60000]);
+  if (capsule.timezone) {
+    offsets.clear();
+    for (const delta of [-86400000, 0, 86400000]) {
+      const sample = wallTime + delta;
+      const local = formatProactiveLocalTime(sample, capsule);
+      offsets.add(sample - Date.parse(local.replace(" ", "T") + ":00Z"));
+    }
+  }
+  // ★ 回读必须与原文一致，拒绝不存在的日期或夏令时跳过的时刻；重复时刻取较早一次。
+  const candidates = [...offsets].map(offset => wallTime + offset)
+    .filter(time => formatProactiveLocalTime(time, capsule) === text);
+  return candidates.length ? Math.min(...candidates) : null;
+}
+
+function resolveProactiveWakeAt(value, capsule, requestedAt, now = Date.now()) {
+  const deadline = requestedAt + getHeartbeatMs(capsule.policy);
+  // ★ 若请求耗尽了整个窗口，从完成时刻重新给出完整窗口；随机结果至少晚于当前 1 毫秒。
+  const maxWake = Math.max(now + 1, deadline > now ? deadline : now + getHeartbeatMs(capsule.policy));
+  if (Number.isFinite(value) && value > now && value <= maxWake) return value;
+  return now + 1 + Math.floor(Math.random() * Math.floor(maxWake - now));
 }
 
 function parseProactiveTime(value) {

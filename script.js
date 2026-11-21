@@ -219,7 +219,7 @@
 //   - todoPlans: 探索页 TO DO 计划列表
 //   - countdownDays: 探索页倒数日 / 正数日列表
 //   - characterSchedules: 探索页角色日程列表，每个角色一份开关和当天 entries
-//   - characterMemories: 探索页角色记忆列表，每个角色一份开关、注入天数和每日 records
+//   - characterMemories: 探索页角色记忆列表，每个角色一份开关、注入天数、每日 records 和长期 impression
 //   - todoPlanDraftDateOffset: TO DO 弹窗 7 天日期条相对今天的起点偏移
 //   - countdownDraftDateOffset: 倒数日弹窗 7 天日期条相对今天的起点偏移
 //   - editingTodoPlanId: 当前正在编辑的 TO DO 计划 ID
@@ -9781,6 +9781,7 @@ const App = {
         STATE.currentMemoryContactId = contactId;
         STATE.characterMemoryViewMode = 'all';
         UI.switchView('character-memory-detail');
+        MemoryImpression.schedule(contactId);
     },
 
     setCharacterMemoryViewMode(mode) {
@@ -10017,6 +10018,9 @@ const App = {
                 await Storage.saveCharacterMemories();
                 this.renderCharacterMemoryList();
                 this.renderCharacterMemoryDetail();
+                // ★ 每日记忆成功后检查增量，长期归纳另走后台队列，不阻塞本轮聊天。
+                MemoryImpression.schedule(contactId);
+                MemoryImpression.render();
                 return true;
             } catch (error) {
                 console.warn('[CharacterMemory] generate failed:', error);
@@ -10045,6 +10049,8 @@ const App = {
     async ensureCharacterMemoryReady(contactId, options = {}) {
         const memory = CharacterMemory.ensureMemory(contactId);
         const targetDateKey = CharacterMemory.getYesterdayKey();
+        // ★ 启动、打开页面与聊天都会经过这里，已初始化的印象可补做累计五日检查。
+        MemoryImpression.schedule(contactId);
         if (memory.enabled !== true || memory.isGenerating) return false;
         const record = CharacterMemory.getRecord(memory, targetDateKey);
         if (record && (record.memories?.length || record.error)) return true;
@@ -10167,6 +10173,8 @@ const App = {
         this.closeMemoryItemModal();
         this.renderCharacterMemoryDetail();
         this.renderCharacterMemoryList();
+        // ★ 手动补入/修改的每日记忆也参与增量，正文变化按日期快照判断，不按修改次数累加。
+        MemoryImpression.schedule(memory.charId);
     },
 
     async deleteMemoryItem(dateKey, itemId) {
@@ -17481,6 +17489,8 @@ const App = {
             this.toggleCharacterScheduleEnabled(itemEl.dataset.id, input.checked === true);
         });
 
+        // ★ 印象面板独立管理编辑、开关和请求运行态，沿用当前角色的记忆 API 预设。
+        MemoryImpression.bindEvents();
         document.getElementById('character-memory-list')?.addEventListener('click', (event) => {
             const itemEl = event.target.closest('.character-memory-contact');
             if (!itemEl?.dataset.id) return;

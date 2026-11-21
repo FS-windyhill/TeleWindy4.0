@@ -1182,7 +1182,7 @@ const ProactiveMessages = {
     buildLocalMessages(contact, windowStart, windowEnd, manual = false) {
         const capsule = this.buildCapsule(contact);
         const history = capsule.messages.map(message => `[${this.formatChatTime(message.eventAt || windowStart)}] ${message.role === 'assistant' ? capsule.characterName : '对方'}：${message.content}`).join('\n');
-        // ★ 模型只选判断间隔；绝对唤醒时刻由程序计算，避免把时区换算交给模型。
+        // ★ 模型直接选择当地唤醒时间；本条补发的显示时间仍是独立字段。
         const nextCheckDeadline = this.formatChatTime(windowEnd + this.getPolicy().heartbeatHours * 3600000);
         return [
             { role: 'system', content: `${capsule.characterPrompt}\n\n${capsule.contextPrompt}`.trim() },
@@ -1192,12 +1192,16 @@ const ProactiveMessages = {
                     : `你是 ${capsule.characterName}。离你们上次对话已经过去了一会儿，想给对方发一条消息吗？还是先不发？你可以自由决定。如果此前离线，只需判断一次是否联系对方。`,
                 '不要解释，不要提到补发、系统、PWA、JSON 或 AI。',
                 `当前时间：${this.formatChatTime(windowEnd)}。`,
-                manual ? '发送时刻由程序记录。' : `如果决定发送，可在 ${this.formatChatTime(windowStart)} 至 ${this.formatChatTime(windowEnd)} 之间选一个本地展示时间。`,
-                `下一次判断最晚时间：${nextCheckDeadline}；是否实际发送由程序按设置检查。`,
-                // ★ 离线补发才允许模型选本地展示时间；唤醒间隔由程序换算成绝对时间。
+                // ★ 本条消息的过去展示时间与下一轮检查分开说明，避免把补发时间误解成未来发送预约。
                 manual
-                    ? '只输出严格 JSON：{"decision":"silent或send","content":"send时的正文，silent时为空","next_check_in_minutes":"下次判断距离现在的分钟数或null"}'
-                    : '只输出严格 JSON：{"decision":"silent或send","content":"send时的正文，silent时为空","sent_at_local":"send时的本地YYYY-MM-DD HH:mm，silent时为null","next_check_in_minutes":"下次判断距离现在的分钟数或null"}',
+                    ? '如果本次决定发送，消息会在生成后立即写入聊天记录，发送时间由程序记录，无需你选择。'
+                    : `如果本次决定补发，请在 ${this.formatChatTime(windowStart)} 至 ${this.formatChatTime(windowEnd)} 这段已经过去的时间内，选择这条消息在聊天记录中的显示时间，填入 sent_at_local。消息会在本次生成后写入聊天记录。`,
+                '无论本次发送还是保持沉默，请用 next_wake_at_local 填写下一次唤醒你的具体当地时间，格式为 YYYY-MM-DD HH:mm，必须晚于当前时间且不超过下面的最晚时间。越界、格式错误或未填写时，程序会在允许范围内随机选择一个时间。',
+                `下一次再唤醒你最晚安排到：${nextCheckDeadline}。到时候会重新让你判断是否联系对方。`,
+                // ★ 手动判断不改变自动唤醒计划；自动判断才会采用返回的下一次唤醒时间。
+                manual
+                    ? '只输出严格 JSON：{"decision":"silent或send","content":"send时的正文，silent时为空","next_wake_at_local":"下次唤醒你的当地时间YYYY-MM-DD HH:mm"}'
+                    : '只输出严格 JSON：{"decision":"silent或send","content":"send时的正文，silent时为空","sent_at_local":"send时的本地YYYY-MM-DD HH:mm，silent时为null","next_wake_at_local":"下次唤醒你的当地时间YYYY-MM-DD HH:mm"}',
                 `【最近聊天快照】\n${history || '暂无聊天记录'}`
             ].join('\n\n') },
             { role: 'user', content: '现在自行决定是否主动联系，并安排下一次唤醒。只输出 JSON。' }
@@ -1215,9 +1219,19 @@ const ProactiveMessages = {
         // ★ 兼容升级途中尚未返回的旧请求；新协议的本地时间不需要模型填写时区偏移。
         const parsedSentAt = this.parseChatTime(data?.sent_at_local || data?.sent_at);
         const sentAt = parsedSentAt >= windowStart && parsedSentAt <= windowEnd ? parsedSentAt : windowEnd;
-        const proposedMinutes = Number(data?.next_check_in_minutes);
-        const nextCheckMinutes = Number.isFinite(proposedMinutes) && proposedMinutes > 0 ? proposedMinutes : null;
-        return { decision, content: decision === 'send' ? String(data.content).trim().slice(0, 4000) : '', sentAt, nextCheckMinutes };
+        // ★ 唤醒时间严格回读校验，拒绝 2 月 30 日、24:00 或夏令时跳过的钟表时间被 Date 自动纠正。
+        const wakeText = typeof data?.next_wake_at_local === 'string' ? data.next_wake_at_local.trim() : '';
+        const parsedWake = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(wakeText) ? this.parseChatTime(wakeText) : 0;
+        const nextWakeAt = parsedWake && this.formatChatTime(parsedWake) === wakeText ? parsedWake : null;
+        return { decision, content: decision === 'send' ? String(data.content).trim().slice(0, 4000) : '', sentAt, nextWakeAt };
+    },
+
+    resolveNextWakeAt(value, now, deadline) {
+        // ★ 请求返回后再检查是否过期；越界和空值都随机兜底，不再夹到最晚时间或沿用分钟数。
+        // ★ 若整个请求已超过原窗口，从完成时刻重建窗口，避免立刻连续唤醒。
+        const maxWake = Math.max(now + 1, deadline > now ? deadline : now + this.getPolicy().heartbeatHours * 3600000);
+        if (Number.isFinite(value) && value > now && value <= maxWake) return value;
+        return now + 1 + Math.floor(Math.random() * Math.floor(maxWake - now));
     },
 
     async runLocalCatchup(contact, force = false) {
@@ -1244,6 +1258,8 @@ const ProactiveMessages = {
         const lastCheck = Number(settings.lastLocalCheckAtByChar[key] || existingNext || now);
         const windowStart = force ? now : Math.max(lastCheck, now - this.duration(settings.catchupMaxHours, 168, 24, false) * 3600000);
         const windowEnd = now;
+        // ★ 截止时间与本次提示保持一致，不因模型耗时而向后顺延。
+        const nextCheckDeadline = now + this.getPolicy().heartbeatHours * 3600000;
         const heartbeatRunId = this.makeId('proactive_local');
         if (!force) settings.lastLocalCheckAtByChar[key] = now;
         this.addLocalEvent(key, 'proactive_model_request_started', { heartbeatRunId, source: force ? 'manual' : 'browser' });
@@ -1279,9 +1295,8 @@ const ProactiveMessages = {
                 this.addLocalEvent(key, 'proactive_decision_silent', { heartbeatRunId });
             }
             const scheduleFrom = Date.now();
-            const maxWake = scheduleFrom + this.getPolicy().heartbeatHours * 3600000;
             if (!force) {
-                settings.nextLocalWakeAtByChar[key] = result.nextCheckMinutes ? Math.min(scheduleFrom + result.nextCheckMinutes * 60000, maxWake) : maxWake;
+                settings.nextLocalWakeAtByChar[key] = this.resolveNextWakeAt(result.nextWakeAt, scheduleFrom, nextCheckDeadline);
                 runtime.nextWakeAt = settings.nextLocalWakeAtByChar[key];
                 this.addLocalEvent(key, 'proactive_next_alarm_set', { nextWakeAt: runtime.nextWakeAt });
             }
