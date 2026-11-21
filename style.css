@@ -5641,6 +5641,16 @@ select#system-prompt-preset-select.setting-input{
     display: block; /* 消除原本 inline 元素的间隙 */
 }
 
+/* ★ 同一个发送键切换纸飞机和停止图标，按钮尺寸保持一致。 */
+#send-button .chat-stop-icon,
+#send-button[data-action="stop-wait"] .chat-send-icon {
+    display: none;
+}
+
+#send-button[data-action="stop-wait"] .chat-stop-icon {
+    display: inline;
+}
+
 #reroll-footer-btn svg {
     width: 0.9em;  /* 根据需要调整图标大小，1.2em 大约相当于 18-20px */
     height: 0.9em;

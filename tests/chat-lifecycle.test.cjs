@@ -31,7 +31,7 @@ function harness() {
         async deleteChatJob() { events.push('delete'); }, forgetPendingJob() { events.push('forget'); },
         updateAsyncBackendLogWithVision() {}, rememberResumedAsyncJobResult() {}, asyncJobLogId: id => id,
         isAsyncBackendRecoverablePollError: () => false };
-    const context = vm.createContext({ STATE: state, UI, Storage, API,
+    const context = vm.createContext({ STATE: state, UI, Storage, API, AbortController,
         CONFIG: { SYSTEM_PROMPT: '' }, window: { innerWidth: 400 }, console: { log() {}, info() {}, warn() {}, error() {} },
         confirm: () => true, formatTimestamp: () => '2026-11-14 12:00',
         ProactiveMessages: { makeId: prefix => prefix + ++serial, async onAssistantMessage() {} },
@@ -45,7 +45,7 @@ function harness() {
     vm.runInContext(fs.readFileSync('js/phone-call.js', 'utf8') + '\nthis.PhoneCall = PhoneCall;', context);
     const signatures = ['async handleOfflineSend(isReroll = false) {', 'async handleSend(isReroll = false) {', 'ensureHistoryCacheMetadata(contact, historyKey = \'history\') {',
         'selectHistoryWindowRecords(contact, requestSettings, historyKey = \'history\') {', 'async resumePendingChatJobs() {',
-        'rememberPendingJob(jobId, settings) {'];
+        'rememberPendingJob(jobId, settings) {', 'getPendingOnlineChatJobs(contact) {', 'stopOnlineChatWait() {'];
     const app = vm.runInContext('({' + signatures.map(method).join('\n') + '})', context);
     const previewSignatures = ["getRerollPreviewIds(contact, historyKey = 'history') {",
         'beginRerollPreview(contact, historyKey, ids) {', 'clearRerollPreview(contact, historyKey, refresh = false) {',
@@ -60,6 +60,128 @@ function harness() {
         isAsyncBackendJobStale: () => false, renderAsyncBackendPendingJobs() {}, scheduleAsyncBackendResumeCheck() {} });
     return { app, contact, state, UI, API, Storage, input, snapshots, appended, removed, events, context, calls: () => apiCalls };
 }
+
+// ★ 停止后可立即重试原消息；旧请求即使无视取消信号，也不能插入回复或收掉新一轮。
+test('停止直连等待后立即重试，迟到的旧回复不会修改历史或清掉新请求状态', async () => {
+    const h = harness();
+    h.contact.chatMode = 'online';
+    h.contact.history = [{ role: 'user', messageId: 'first', content: '第一条消息' }];
+    Object.assign(h.app, {
+        buildAgentCapabilityPrompt: () => '',
+        async consumeWorkerPostAgentResult() { return true; },
+        discardAgentConfirmationsForMessages() {},
+        markContactIncomingMessage() {},
+        refreshDesktopUnreadDotsIfNeeded() {}
+    });
+    Object.assign(h.context.Pomodoro, { async tick() {}, context: () => ({}) });
+    const requests = [deferred(), deferred()];
+    const started = [deferred(), deferred()];
+    let call = 0;
+    h.API.chat = (_messages, settings) => {
+        const index = call++;
+        started[index].resolve(settings);
+        return requests[index].promise;
+    };
+    const old = h.app.handleSend(true);
+    const firstSettings = await started[0].promise;
+    h.app.stopOnlineChatWait();
+    assert.equal(firstSettings.REQUEST_SIGNAL.aborted, true);
+    assert.equal(h.state.chatRequestActive, false);
+    assert.equal(h.state.typingContactId, null);
+    assert.equal(h.contact.history[0].messageId, 'first');
+
+    const retry = h.app.handleSend(true);
+    const retrySettings = await started[1].promise;
+    assert.equal(retrySettings.ASYNC_BACKEND_USER_MESSAGE_ID, 'first');
+    requests[0].resolve('迟到的旧回复');
+    await old;
+    assert.equal(h.state.chatRequestActive, true);
+    assert.equal(h.state.typingContactId, 'a');
+    assert.equal(h.contact.history.length, 1);
+    requests[1].resolve('新回复');
+    await retry;
+    assert.deepEqual(Array.from(h.contact.history, msg => msg.content), ['第一条消息', '新回复']);
+    assert.equal(h.state.chatRequestActive, false);
+});
+
+test('停止后台等待时只清理本聊天的 job，已经发出的恢复查询不能回填', async () => {
+    const h = harness();
+    const job = { jobId: 'old-job', contactId: 'a', status: 'running', chatHistoryKey: 'history' };
+    const offlineJob = { ...job, jobId: 'offline-job', chatHistoryKey: 'offlineHistory' };
+    const otherJob = { ...job, jobId: 'other-job', contactId: 'b' };
+    let pendingJobs = [job, offlineJob, otherJob];
+    const query = deferred();
+    const queried = [];
+    h.API.loadPendingJobs = () => pendingJobs;
+    h.API.savePendingJobs = value => { pendingJobs = value; };
+    h.API.getChatJob = (_url, id, _token, signal) => {
+        queried.push(id);
+        if (id === job.jobId) {
+            query.signal = signal;
+            return query.promise;
+        }
+        return Promise.resolve({ status: 'running' });
+    };
+    h.app.applyAsyncBackendAgentStage = async () => {};
+    const resume = h.app.resumePendingChatJobs();
+    h.app.stopOnlineChatWait();
+    assert.equal(query.signal.aborted, true);
+    assert.deepEqual(Array.from(pendingJobs, item => item.jobId), ['offline-job', 'other-job']);
+    query.resolve({ status: 'done', result: '迟到的后台回复' });
+    await resume;
+    assert.equal(h.contact.history.length, 0);
+    assert.deepEqual(queried, ['old-job', 'offline-job', 'other-job']);
+});
+
+test('停止时 Worker 尚未确认创建，迟到的 job 不会登记为待接收', async () => {
+    const h = harness();
+    const create = deferred();
+    const controller = new AbortController();
+    h.context.UsageStats = { jobStart() {} };
+    const api = vm.runInContext('({' + method('async chatViaAsyncBackend(messages, settings) {') + '})', h.context);
+    const deleted = [];
+    api.asyncJobLogId = id => id;
+    api.createChatJob = () => create.promise;
+    api.deleteChatJob = async (_url, id) => { deleted.push(id); };
+    api.rememberPendingJob = () => assert.fail('已停止的 job 不能登记为待接收');
+    const request = api.chatViaAsyncBackend([], {
+        ASYNC_BACKEND_URL: 'https://worker.example',
+        ONLINE_CHAT_WAIT: { controller }
+    });
+    controller.abort();
+    create.resolve({ jobId: 'late-job' });
+    await assert.rejects(request, { name: 'AbortError' });
+    assert.deepEqual(deleted, ['late-job']);
+});
+
+test('停止独立识图后保留原图，重试会识图且不会被旧描述覆盖', async () => {
+    const h = harness();
+    const image = 'data:image/png;base64,aW1n';
+    const message = { role: 'user', messageId: 'photo', content: '', images: [image] };
+    h.contact.chatMode = 'online';
+    h.contact.history = [message];
+    h.state.settings.VISION_URL = 'https://vision.example';
+    h.app.buildChatRequestSettings = () => ({ IMAGE_API_MODE: 'separate' });
+    h.app.ensureHistoryCacheMetadata = () => { throw Error('本用例只执行到识图'); };
+    const vision = deferred();
+    let count = 0;
+    h.API.analyzeImage = (input, { signal }) => {
+        assert.equal(input, image);
+        vision.signal = signal;
+        return ++count === 1 ? vision.promise : Promise.resolve('新描述');
+    };
+
+    const old = h.app.handleSend(true);
+    h.app.stopOnlineChatWait();
+    assert.equal(vision.signal.aborted, true);
+    assert.equal(message.images[0], image);
+    await h.app.handleSend(true);
+    vision.resolve('迟到的旧描述');
+    await old;
+    assert.equal(count, 2);
+    assert.equal(message.image_description, '新描述');
+});
+
 test('重生成失败/空返回保留原回复，不提前删除卡片', async () => {
     for (const empty of [false, true]) {
         const h = harness(); h.API.chat = async () => { if (empty) return ''; throw Error('断网'); };

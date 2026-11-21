@@ -176,7 +176,7 @@ test('聊天日期拒绝无效日历日期，保留消息记录中的日期', ()
 function harness() {
     const element = () => ({ style: {}, dataset: {}, className: '',
         classList: { add() {}, remove() {}, contains() { return false; } },
-        addEventListener() {}, appendChild() {}, querySelector() { return null; } });
+        addEventListener() {}, appendChild() {}, setAttribute(name, value) { this[name] = value; }, querySelector() { return null; } });
     const template = { content: { cloneNode() {
         const bubble = element();
         bubble.querySelector = selector => ['details', '.thought-content'].includes(selector) ? element() : null;
@@ -190,7 +190,7 @@ function harness() {
     const document = { getElementById(id) {
         return id === 'msg-template' ? template : id === 'msg-context-menu' ? menu : element();
     }, createElement: element, querySelectorAll: () => [] };
-    const context = vm.createContext({ document, window: { innerWidth: 1000 }, ChatBubbles, console,
+    const context = vm.createContext({ document, window: { innerWidth: 1000 }, ChatBubbles, console, AbortController,
         CONFIG: { DEFAULT: { MOMENTS_SETTINGS: {}, USER_AVATAR: '🙂' } },
         Storage: { saveContacts: async () => {} }, navigator: { clipboard: { writeText: async () => {} } },
         ProactiveMessages: { makeId: () => 'new-user', onUserMessage: async () => {} },
@@ -254,6 +254,29 @@ test('新发送的用户文字和图片首次上屏就带真实身份，菜单�
     c.App.handleMessageAction('delete');
     assert.ok(!contact.history.includes(sent));
     assert.equal(contact.history[1].messageId, 'previous');
+});
+
+// ★ 线上状态切换直接检查原发送按钮，同一位置要可点，停完要能重试没有 AI 回复的首条消息。
+test('发送按钮等待时原位变成停止按钮，停止后恢复发送和重试', () => {
+    const c = harness();
+    const contact = c.open({ role: 'user', content: '第一条消息', messageId: 'first' });
+    const { sendBtn, rerollBtn } = c.UI.els;
+    const controller = new AbortController();
+    c.STATE.onlineChatWait = { contactId: contact.id, controller };
+    c.STATE.chatRequestActive = true;
+    c.App.renderAsyncBackendPendingJobs = () => {};
+    c.UI.setLoading(true, contact.id);
+    assert.equal(sendBtn.dataset.action, 'stop-wait');
+    assert.equal(sendBtn['aria-label'], '停止等待');
+    assert.equal(sendBtn.disabled, false);
+    assert.equal(rerollBtn.disabled, true);
+
+    c.App.stopOnlineChatWait();
+    assert.equal(controller.signal.aborted, true);
+    assert.equal(sendBtn.dataset.action, 'send');
+    assert.equal(sendBtn['aria-label'], '发送');
+    assert.equal(sendBtn.disabled, false);
+    assert.equal(rerollBtn.disabled, false);
 });
 
 test('删除全部文字保留图片后，真实历史渲染不会把用户时间前缀当正文', () => {

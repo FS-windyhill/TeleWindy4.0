@@ -683,6 +683,7 @@ const STATE = {
     settings: {}, 
     typingContactId: null, // ★★★ 新增：用于追踪哪个联系人正在输入，null表示无人输入
     chatRequestActive: false, // ★ 主聊天共用请求槽，准备上下文期间也阻止重复请求和跨角色结果覆盖
+    onlineChatWait: null, // ★ 线上回复的等待归属，旧请求退出时不能清掉新一轮状态
     visibleMsgCount: 15, // ★★★ 新增：当前聊天窗口显示的条数，默认为15
     isSelectMode: false,      // 当前是否处于多选模式
     selectedBubbles: new Set(),  // 存储选中的气泡DOM元素
@@ -1129,12 +1130,21 @@ const API = {
             ttlSeconds: job.ttlSeconds
         });
         UsageStats.jobStart(job, settings);
+        // ★ 创建请求可能在用户停止后才返回 ID。只清理这个 job，不能再登记为待接收。
+        const wait = settings.ONLINE_CHAT_WAIT;
+        const signal = wait?.controller.signal;
+        if (signal?.aborted) {
+            void this.deleteChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN);
+            signal.throwIfAborted();
+        }
         this.rememberPendingJob(job.jobId, settings);
 
         try {
             const result = await this.waitForChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN, {
-                onJobUpdate: settings.ASYNC_BACKEND_ON_JOB_UPDATE
+                onJobUpdate: settings.ASYNC_BACKEND_ON_JOB_UPDATE,
+                signal
             });
+            signal?.throwIfAborted();
             UsageStats.jobFinish({ ...result, jobId: job.jobId });
             if (result.status !== 'done') {
                 const jobFailedError = new Error(result.error || 'Async job failed');
@@ -1189,7 +1199,7 @@ const API = {
                 resultLength: (result.result || '').length
             });
             // ★ 前台等待链路也把 jobId 带回 App 层，避免和“回前台补查”链路重复入库。
-            this.lastAsyncBackendResult = {
+            const reply = {
                 jobId: job.jobId,
                 result: (result.result || '').trim(),
                 image_description: result.image_description || null,
@@ -1203,9 +1213,13 @@ const API = {
                 // ★ 主动消息会按真实发送时间插入历史，中途数组下标可能变化；回填优先使用稳定消息 ID。
                 userMessageId: settings.ASYNC_BACKEND_USER_MESSAGE_ID || null
             };
+            if (wait) wait.result = reply;
+            else this.lastAsyncBackendResult = reply;
             if (result.multimodal_fallback === true) this.notifyMultimodalFallback(job.jobId);
             return (result.result || '').trim();
         } catch (error) {
+            // ★ 主动停止不走网络故障的恢复分支，也不显示失败气泡。
+            signal?.throwIfAborted();
             console.warn('[AsyncBackend] job failed or interrupted', {
                 jobId: this.asyncJobLogId(job.jobId),
                 error: error.message
@@ -1389,13 +1403,15 @@ const API = {
     async waitForChatJob(backendUrl, jobId, token, options = {}) {
         const startedAt = Date.now();
         const timeoutMs = 55 * 60 * 1000;
+        const { signal } = options;
         let pollCount = 0;
 
         while (Date.now() - startedAt < timeoutMs) {
+            signal?.throwIfAborted();
             pollCount += 1;
             let job;
             try {
-                job = await this.getChatJob(backendUrl, jobId, token);
+                job = await this.getChatJob(backendUrl, jobId, token, signal);
             } catch (error) {
                 const resumedJob = this.getResumedAsyncJobResult(jobId);
                 if (error.status === 404 && resumedJob) {
@@ -1410,6 +1426,7 @@ const API = {
                 }
                 throw error;
             }
+            signal?.throwIfAborted();
             console.info('[AsyncBackend] poll result', {
                 jobId: this.asyncJobLogId(jobId),
                 pollCount,
@@ -1447,9 +1464,10 @@ const API = {
         throw new Error('Async job timed out');
     },
 
-    async getChatJob(backendUrl, jobId, token) {
+    async getChatJob(backendUrl, jobId, token, signal) {
         const response = await fetch(`${backendUrl}/jobs/${jobId}`, {
-            headers: { 'Authorization': `Bearer ${token}` }
+            headers: { 'Authorization': `Bearer ${token}` },
+            signal
         });
 
         if (!response.ok) {
@@ -1977,7 +1995,7 @@ const API = {
             headers: { 'Content-Type': 'application/json' }
         };
 
-        // ★ 电话挂断可中止直连请求；其它调用不提供 signal，保持原来的生命周期。
+        // ★ 电话挂断和聊天停止等待共用直连请求的取消信号。
         if (settings.REQUEST_SIGNAL) options.signal = settings.REQUEST_SIGNAL;
         const sysPrompts = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
         const requestedMessageIndex = Number.isInteger(settings.MULTIMODAL_MESSAGE_INDEX)
@@ -2353,6 +2371,7 @@ const API = {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${key}`
                 },
+                signal: visionSettings.signal,
                 body: JSON.stringify(payload)
             }, { API_URL: url, MODEL: model }, '识图');
 
@@ -4636,13 +4655,27 @@ const UI = {
                 this.els.chatAvatar.src = avatarSrc;
             }
         }
-        this.renderContactPresence(contact, STATE.typingContactId === contact.id);
+        this.refreshChatPresence(contact.id);
     },
 
     refreshChatPresence(contactId = STATE.currentContactId) {
         if (!contactId || contactId !== STATE.currentContactId) return;
         const contact = STATE.contacts.find(c => c.id === contactId);
-        if (contact) this.renderContactPresence(contact, STATE.typingContactId === contact.id);
+        if (!contact) return;
+        // ★ 前台等待和切屏后留下的普通聊天 job 都能用底部发送键停止。
+        const wait = STATE.onlineChatWait?.contactId === contactId ? STATE.onlineChatWait : null;
+        const pending = App.getPendingOnlineChatJobs(contact);
+        const isLoading = STATE.typingContactId === contactId || pending.length > 0;
+        this.renderContactPresence(contact, isLoading);
+        const receiving = pending.some(job => job.jobId === App._receivingOnlineChatJobId);
+        const canStop = !wait?.committing && !receiving && (!!wait || pending.length > 0);
+        const sendBtn = this.els.sendBtn;
+        const label = canStop ? '停止等待' : '发送';
+        sendBtn.dataset.action = canStop ? 'stop-wait' : 'send';
+        sendBtn.title = label;
+        sendBtn.setAttribute('aria-label', label);
+        sendBtn.disabled = isLoading && !canStop;
+        this.updateRerollState(contact, isLoading);
     },
 
     startPresenceTicker() {
@@ -4657,21 +4690,19 @@ const UI = {
         else if (STATE.typingContactId === contactId) STATE.typingContactId = null;
         
         // 2. 关键检查：只有当这个状态更新是针对“当前打开的”聊天窗口时，才刷新UI
-        if (contactId === STATE.currentContactId) {
-            this.els.sendBtn.disabled = isLoading;
-            const contact = STATE.contacts.find(c => c.id === contactId);
-            this.renderContactPresence(contact, isLoading);
-        }
+        this.refreshChatPresence(contactId);
     },
 
-    updateRerollState(contact) {
-        const hasHistory = contact.history.some(m => {
+    updateRerollState(contact, isLoading = this.els.sendBtn?.disabled || this.els.sendBtn?.dataset.action === 'stop-wait') {
+        if (!this.els.rerollBtn) return;
+        // ★ 首条消息停止后还没有 AI 回复，也要能直接重试这条用户消息。
+        const canReroll = contact.history.some(m => {
             const isTransientError = m.isTransientError === true
                 || (m.asyncJobId && String(m.content || '').startsWith('(发送失败:'));
-            return m.role === 'assistant' && !isTransientError;
+            return m.role === 'user' || (m.role === 'assistant' && !isTransientError);
         });
-        this.els.rerollBtn.style.opacity = hasHistory ? '1' : '0.5';
-        this.els.rerollBtn.disabled = !hasHistory;
+        this.els.rerollBtn.style.opacity = canReroll && !isLoading ? '1' : '0.5';
+        this.els.rerollBtn.disabled = !canReroll || !!isLoading;
     },
 
 
@@ -5052,7 +5083,10 @@ const App = {
             let hasRunningJob = false;
 
             for (const pending of jobs) {
+                const controller = new AbortController();
                 try {
+                    // ★ 上一个 job 查询期间，也可能在聊天页停止队列里的下一项。
+                    if (!API.loadPendingJobs().some(job => job.jobId === pending.jobId)) continue;
                     if (this.isAsyncBackendJobStale(pending)) {
                         await this.markAsyncBackendJobStale(pending);
                         continue;
@@ -5062,7 +5096,9 @@ const App = {
                         jobId: API.asyncJobLogId(pending.jobId),
                         contactId: pending.contactId || null
                     });
-                    const job = await API.getChatJob(pending.backendUrl, pending.jobId, pending.token);
+                    this._asyncBackendLookup = { jobId: pending.jobId, controller };
+                    const job = await API.getChatJob(pending.backendUrl, pending.jobId, pending.token, controller.signal);
+                    if (controller.signal.aborted) continue;
                     console.info('[AsyncBackend] resume status', {
                         jobId: API.asyncJobLogId(pending.jobId),
                         status: job.status
@@ -5138,6 +5174,11 @@ const App = {
                     }
 
                     if (job.status === 'done') {
+                        // ★ 正文开始回填后交给现有的落库/回滚流程，停止入口只处理等待阶段。
+                        if (this.getPendingOnlineChatJobs(contact).some(item => item.jobId === pending.jobId)) {
+                            this._receivingOnlineChatJobId = pending.jobId;
+                            UI.refreshChatPresence?.(contact.id);
+                        }
                         API.updateAsyncBackendLogWithVision(job, pending);
                         API.rememberResumedAsyncJobResult(pending.jobId, job);
 
@@ -5256,7 +5297,9 @@ const App = {
                             else if (this.isViewingContactChat(contact.id)) UI.renderChatHistory(contact);
                             throw saveError;
                         }
-                        await API.deleteChatJob(pending.backendUrl, pending.jobId, pending.token);
+                        const cleanup = API.deleteChatJob(pending.backendUrl, pending.jobId, pending.token);
+                        // ★ 线上回复已落库，Worker 清理慢时也要恢复发送键。
+                        if (this._receivingOnlineChatJobId !== pending.jobId) await cleanup;
                         API.forgetPendingJob(pending.jobId);
                         if (!alreadySaved && assistantMessage) {
                             ProactiveMessages.onAssistantMessage(contact).catch(error => console.warn('[主动消息] 后台恢复回复同步失败:', error));
@@ -5279,6 +5322,7 @@ const App = {
                         }
                     }
                 } catch (error) {
+                    if (controller.signal.aborted) continue;
                     console.warn('[AsyncBackend] resume lookup failed', {
                         jobId: API.asyncJobLogId(pending.jobId),
                         error: error.message
@@ -5315,6 +5359,10 @@ const App = {
                     if (API.isAsyncBackendRecoverablePollError(error)) {
                         hasRunningJob = true;
                     }
+                } finally {
+                    this._asyncBackendLookup = null;
+                    this._receivingOnlineChatJobId = null;
+                    if (!controller.signal.aborted) UI.refreshChatPresence?.(pending.contactId);
                 }
             }
 
@@ -11241,6 +11289,41 @@ const App = {
     },
     // ★★★ 线上聊天与线下见面共用的请求配置组装 END ★★★
 
+    getPendingOnlineChatJobs(contact) {
+        return (API.loadPendingJobs?.() || []).filter(job => {
+            if (job.contactId !== contact.id || job.status !== 'running' || job.context?.scope) return false;
+            if (job.chatHistoryKey) return job.chatHistoryKey === 'history';
+            // ★ 旧 job 还没有 chatHistoryKey，沿用后台恢复的线上/线下识别规则。
+            return !job.userMessageId || !contact.offlineHistory?.some(msg => msg.messageId === job.userMessageId);
+        });
+    },
+
+    stopOnlineChatWait() {
+        const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
+        if (!contact) return;
+        const wait = STATE.onlineChatWait?.contactId === contact.id ? STATE.onlineChatWait : null;
+        const pending = this.getPendingOnlineChatJobs(contact);
+        if (wait?.committing || pending.some(job => job.jobId === this._receivingOnlineChatJobId)) return;
+        if (!wait && !pending.length) return;
+
+        // ★ 先移除本地恢复记录，再清理 Worker；网络断开时也能马上继续聊天。
+        if (pending.length) {
+            const ids = new Set(pending.map(job => job.jobId));
+            API.savePendingJobs(API.loadPendingJobs().filter(job => !ids.has(job.jobId)));
+            const lookup = this._asyncBackendLookup;
+            if (lookup && ids.has(lookup.jobId)) lookup.controller.abort();
+            for (const job of pending) void API.deleteChatJob(job.backendUrl, job.jobId, job.token);
+        }
+        if (wait) {
+            wait.controller.abort();
+            STATE.onlineChatWait = null;
+            STATE.chatRequestActive = false;
+        }
+        UI.clearRerollPreview?.(contact, 'history', true);
+        UI.setLoading(false, contact.id);
+        this.renderAsyncBackendPendingJobs();
+    },
+
     async handleSend(isReroll = false) {
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!contact) return;
@@ -11284,7 +11367,13 @@ const App = {
 
         const usingAsyncBackend = API.shouldUseAsyncBackend(requestSettings);
         let replacementRollback = null; // ★ 保存新正文失败时恢复旧数组，避免内存和磁盘各留一半。
+        const controller = new AbortController();
+        const { signal } = controller;
+        const wait = { contactId: contact.id, controller, committing: false, result: null };
+        STATE.onlineChatWait = wait;
         STATE.chatRequestActive = true;
+        requestSettings.ONLINE_CHAT_WAIT = wait;
+        requestSettings.REQUEST_SIGNAL = signal;
         UI.setLoading(true, contact.id);
         requestSettings.CHAT_HISTORY_KEY = 'history';
         try {
@@ -11329,7 +11418,6 @@ const App = {
         
             // ★ 判断是否有待发送的图片 (只有非 Reroll 时才处理新图)
             const hasPendingImage = (STATE.pendingImage && !isReroll);
-            let imageDescription = ""; 
             let currentImageBase64 = null;
 
             // 如果既没文本也没图，且不是reroll，就退出
@@ -11375,9 +11463,11 @@ const App = {
                 // Reroll 复用历史记录里的文本
                 userText = lastUserMsg.content;
             
-                // ★ 多模态重新生成必须复用这条用户消息原来的图片；普通模式仍然只复用已经保存的识图描述。
+                // ★ 复用本轮原图；若上次在识图阶段停止，没有描述时允许重新识图。
                 // 图片气泡被“向 Ta 隐藏”后不能偷偷重新带回请求，索引规则与渲染/删除保持一致。
-                if (requestSettings.IMAGE_API_MODE === 'multimodal' && Array.isArray(lastUserMsg.images) && lastUserMsg.images[0]) {
+                const needsOriginalImage = requestSettings.IMAGE_API_MODE === 'multimodal'
+                    || (requestSettings.IMAGE_API_MODE === 'separate' && !lastUserMsg.image_description);
+                if (needsOriginalImage && Array.isArray(lastUserMsg.images) && lastUserMsg.images[0]) {
                     const imagePartIndex = HistoryVisibility.getTextParagraphs(lastUserMsg).length;
                     const hiddenIndices = Array.isArray(lastUserMsg.hiddenIndices) ? lastUserMsg.hiddenIndices : [];
                     if (!hiddenIndices.includes(imagePartIndex)) {
@@ -11484,74 +11574,70 @@ const App = {
                 STATE.pendingImage = null; // ★ 清空暂存，防止下次误发
                 if (window.innerWidth < 800) UI.els.input.blur();
 
-                // 4. ★★★ 核心分支：如果有图，先跑识图 API ★★★
-                // 4. ★★★ 核心分支：如果有图，先跑识图 API ★★★
-                if (hasPendingImage && requestSettings.IMAGE_API_MODE === 'separate') {
-                    const visionSettings = {
-                        // 稍微优化下默认值，如果这里是空字符串， fetch 会直接报错被 catch 捕获
-                        url: STATE.settings.VISION_URL, 
-                        key: STATE.settings.VISION_KEY || STATE.settings.API_KEY,
-                        model: STATE.settings.VISION_MODEL || 'Qwen/Qwen3-VL-30B-A3B-Instruct',
-                        prompt: STATE.settings.VISION_PROMPT || '描述这张图片'
+                // ★ 先裁剪旧图；直连识图可能被停止，先把已经上屏的原消息和图片落库。
+                let imgCount = newUserMsg.images ? 1 : 0;
+                for (let i = currentMsgIndex - 1; i >= 0; i--) {
+                    if (contact.history[i].images?.length && ++imgCount > 3) {
+                        contact.history[i].images = null;
+                        contact.history[i].isImageExpired = true;
+                    }
+                }
+            }
+
+            // ★★★ 独立识图：新发的图和上次还没识完的原图共用取消信号 ★★★
+            if (currentImageBase64 && requestSettings.IMAGE_API_MODE === 'separate') {
+                const visionSettings = {
+                    url: STATE.settings.VISION_URL,
+                    key: STATE.settings.VISION_KEY || STATE.settings.API_KEY,
+                    model: STATE.settings.VISION_MODEL || 'Qwen/Qwen3-VL-30B-A3B-Instruct',
+                    prompt: STATE.settings.VISION_PROMPT || '描述这张图片',
+                    signal
+                };
+
+                if (usingAsyncBackend) {
+                    // ★ 后台识图：
+                    // 走 Worker 时不在前端等待视觉模型，避免手机切屏时识图请求被浏览器杀掉。
+                    // 图片和视觉配置只随本次 job 临时发送，Worker 用完不会存 KV。
+                    const visionAuthMode = requestSettings.ASYNC_BACKEND_KEY_MODE || 'client_key';
+                    requestSettings.ASYNC_BACKEND_VISION = {
+                        image: currentImageBase64,
+                        url: visionSettings.url,
+                        key: visionAuthMode === 'server_secret' ? '' : visionSettings.key,
+                        model: visionSettings.model,
+                        prompt: visionSettings.prompt,
+                        auth_mode: visionAuthMode
                     };
-
-                    if (usingAsyncBackend) {
-                        // ★ 后台识图：
-                        // 走 Worker 时不在前端等待视觉模型，避免手机切屏时识图请求被浏览器杀掉。
-                        // 图片和视觉配置只随本次 job 临时发送，Worker 用完不会存 KV。
-                        const visionAuthMode = requestSettings.ASYNC_BACKEND_KEY_MODE || 'client_key';
-                        requestSettings.ASYNC_BACKEND_VISION = {
-                            image: currentImageBase64,
-                            url: visionSettings.url,
-                            key: visionAuthMode === 'server_secret' ? '' : visionSettings.key,
-                            model: visionSettings.model,
-                            prompt: visionSettings.prompt,
-                            auth_mode: visionAuthMode
-                        };
-                        requestSettings.ASYNC_BACKEND_USER_MESSAGE_INDEX = currentMsgIndex;
-                    } else {
-                        UI.setLoading(true, contact.id);
-                        try {
-                            // 如果连 URL 都没填，直接抛出错误，不发请求了
-                            if (!visionSettings.url) throw new Error("未配置视觉API地址");
-
-                            imageDescription = await API.analyzeImage(currentImageBase64, visionSettings);
-
-                        } catch (err) {
-                            console.error("识图流程跳过/失败:", err);
-                            // ★ 给 AI 一个明确的提示，告诉它为什么看不见
-                            imageDescription = "（系统提示：用户发送了一张图片，但由于未配置视觉模型或网络错误，无法提供图片内容的文本描述。请根据用户的文字上下文进行回复，如果需要，可以礼貌地询问图片内容。）";
-                        }
+                    requestSettings.ASYNC_BACKEND_USER_MESSAGE_INDEX = contact.history.indexOf(agentUserMessage);
+                } else {
+                    if (!isReroll) {
+                        await Storage.saveContacts();
+                        signal.throwIfAborted();
                     }
-                }
+                    let imageDescription;
+                    try {
+                        // 如果连 URL 都没填，直接抛出错误，不发请求了
+                        if (!visionSettings.url) throw new Error("未配置视觉API地址");
 
-                // ★ 识图结果补到同一条已上屏消息，保留原消息和气泡身份。
-                newUserMsg.image_description = imageDescription || null;
+                        imageDescription = await API.analyzeImage(currentImageBase64, visionSettings);
 
-                // ★ 存储优化：只保留最后 3 张图的 base64，旧的删掉 base64 省空间
-                let imgCount = 0;
-                if (newUserMsg.images) imgCount++; 
-                for (let i = contact.history.length - 1; i >= 0; i--) {
-                    // ★ 本轮图片已计数；消息提前入库后，这里不能再把它算成第二张。
-                    if (contact.history[i] === newUserMsg) continue;
-                    if (contact.history[i].images && contact.history[i].images.length > 0) {
-                        imgCount++;
-                        if (imgCount > 3) {
-                            contact.history[i].images = null; 
-                            contact.history[i].isImageExpired = true; 
-                        }
+                    } catch (err) {
+                        signal.throwIfAborted();
+                        console.error("识图流程跳过/失败:", err);
+                        // ★ 给 AI 一个明确的提示，告诉它为什么看不见
+                        imageDescription = "（系统提示：用户发送了一张图片，但由于未配置视觉模型或网络错误，无法提供图片内容的文本描述。请根据用户的文字上下文进行回复，如果需要，可以礼貌地询问图片内容。）";
                     }
+                    // ★ 停止后保留原图；只有仍在等待的这轮才回填识图结果。
+                    signal.throwIfAborted();
+                    agentUserMessage.image_description = imageDescription || null;
                 }
-            
             }
 
             // 保存一次（包含刚刚优化的图片数据）
             await Storage.saveContacts();
+            signal.throwIfAborted();
             if (!isReroll && agentUserMessage) {
                 ProactiveMessages.onUserMessage(contact).catch(error => console.warn('[主动消息] 用户消息同步失败:', error));
             }
-            UI.setLoading(true, contact.id);
-
             // ★★★★★ Agent：前置执行关闭 START ★★★★★
             // 新协议由角色回复里的『行动意图』触发 skill；用户消息阶段不再让副模型抢先判断。
             const agentRuntimeResult = null;
@@ -11564,10 +11650,12 @@ const App = {
             const historyMetadataChanged = this.ensureHistoryCacheMetadata(contact);
             if (historyMetadataChanged) {
                 await Storage.saveContacts();
+                signal.throwIfAborted();
             }
             const historyWindow = this.selectHistoryWindowRecords(contact, requestSettings);
             if (historyWindow.changed) {
                 await Storage.saveContacts();
+                signal.throwIfAborted();
             }
 
             // 预处理 History：统一走 AI 可见历史清洗，避免聊天、朋友圈、记忆各写一套隐藏规则。
@@ -11634,6 +11722,7 @@ const App = {
             // 这里会先检查天气缓存是不是当前 0/12 点刷新时段的。
             // 如果今天还没有缓存，就在真正发请求前补一次。
             await this.ensureWorldSenseWeatherReady();
+            signal.throwIfAborted();
             const worldSensePrompt = WorldSense.buildPromptFromSettings(STATE.settings, new Date());
             if (worldSensePrompt) {
                 routineDynamicContextPrompts.push(worldSensePrompt);
@@ -11651,6 +11740,7 @@ const App = {
             // ★★★★★ 角色记忆：收集本轮动态背景 START ★★★★★
             // 记忆只注入昨天及更早的总结；寄语只在 UI 展示，不进入上下文。
             await this.ensureCharacterMemoryReady(contact.id, { priority: true, silent: true });
+            signal.throwIfAborted();
             const characterMemoryPrompt = CharacterMemory.buildChatPrompt(contact.id, new Date());
             if (characterMemoryPrompt) {
                 routineDynamicContextPrompts.push(characterMemoryPrompt);
@@ -11676,6 +11766,7 @@ const App = {
             // ★★★★★ 角色日程：收集本轮动态背景 START ★★★★★
             // 日程只在该角色开启时注入；如果今天还没生成，会优先补当前角色这一份。
             await this.ensureCharacterScheduleReady(contact.id, { priority: true, silent: true });
+            signal.throwIfAborted();
             const characterSchedulePrompt = CharacterSchedule.buildChatPrompt(contact.id, new Date());
             if (characterSchedulePrompt) {
                 routineDynamicContextPrompts.push(characterSchedulePrompt);
@@ -11692,6 +11783,7 @@ const App = {
             // 先校正截止时间，避免后台定时器延迟导致已完成的番茄仍被写成进行中。
             // ★ 正式聊天只需要校正番茄钟状态，不在聊天输入期间重绘隐藏的番茄钟页面。
             await Pomodoro.tick(Date.now(), { renderMode: 'indicator' });
+            signal.throwIfAborted();
             const pomodoroUpdateInfo = Pomodoro.context(contact.id, currentMomentTurnId);
             requestSettings.POMODORO_INJECTION = pomodoroUpdateInfo;
             // 与朋友圈共用即时背景队列且排在它前面，统一走 auto / user / system 分流。
@@ -11701,6 +11793,7 @@ const App = {
             if (pomodoroUserMessage) {
                 pomodoroUserMessage.pomodoroInjection = pomodoroUpdateInfo;
                 await Storage.saveContacts();
+                signal.throwIfAborted();
             }
             // ★★★★★ 番茄钟：按角色收集实时状态与完成通知 END ★★★★★
 
@@ -11877,17 +11970,22 @@ const App = {
             // ============================================================
             requestSettings.USAGE_CHAT = true;
             requestSettings.USAGE_REROLL = isReroll;
+            signal.throwIfAborted();
             const aiText = await API.chat(messagesToSend, requestSettings);
+            signal.throwIfAborted();
+            // ★ 进入落库后由成功/失败流程收尾；停止只会中断还在等待的回复。
+            wait.committing = true;
+            UI.refreshChatPresence?.(contact.id);
             
             const aiTimestamp = formatTimestamp();
-            const asyncJobId = usingAsyncBackend ? API.lastAsyncBackendResult?.jobId : null;
-            const asyncImageDescription = usingAsyncBackend ? API.lastAsyncBackendResult?.image_description : null;
-            const asyncAgentActions = usingAsyncBackend ? API.lastAsyncBackendResult?.agent_actions : null;
-            const asyncAgentPrompt = usingAsyncBackend ? API.lastAsyncBackendResult?.agent_prompt : '';
-            const asyncAgentStatus = usingAsyncBackend ? API.lastAsyncBackendResult?.agent_status : '';
-            const asyncAgentError = usingAsyncBackend ? API.lastAsyncBackendResult?.agent_error : '';
-            const asyncUserMessageIndex = usingAsyncBackend ? API.lastAsyncBackendResult?.userMessageIndex : null;
-            const asyncUserMessageId = usingAsyncBackend ? API.lastAsyncBackendResult?.userMessageId : null;
+            const asyncJobId = wait.result?.jobId;
+            const asyncImageDescription = wait.result?.image_description;
+            const asyncAgentActions = wait.result?.agent_actions;
+            const asyncAgentPrompt = wait.result?.agent_prompt || '';
+            const asyncAgentStatus = wait.result?.agent_status || '';
+            const asyncAgentError = wait.result?.agent_error || '';
+            const asyncUserMessageIndex = wait.result?.userMessageIndex;
+            const asyncUserMessageId = wait.result?.userMessageId;
 
             // ★ 后台识图回填：
             // 前台轮询链路如果顺利等到 Worker 完成，也要把图片描述补进刚刚的用户消息。
@@ -11982,7 +12080,7 @@ const App = {
             UI.clearRerollPreview?.(contact, 'history');
             const assistantMessage = contact.history[newAiMessageIndex] || null;
             if (assistantMessage && assistantMessage.role === 'assistant') {
-                const consumedWorkerPostAgent = await this.consumeWorkerPostAgentResult(contact, assistantMessage, API.lastAsyncBackendResult?.post_agent);
+                const consumedWorkerPostAgent = await this.consumeWorkerPostAgentResult(contact, assistantMessage, wait.result?.post_agent);
                 if (!consumedWorkerPostAgent) {
                     this.runAgentPostAgents(contact, aiText, assistantMessage).catch(error => {
                         console.warn('[PostAgent][总路由] async failed:', error);
@@ -12057,16 +12155,15 @@ const App = {
                 this.refreshDesktopUnreadDotsIfNeeded();
             }
             
-            // ★ 写入完成才清理 Worker；确认失败保留 pending，恢复时按 jobId 去重。
+            // ★ 写入完成才清理 Worker；清理请求不再占住发送按钮。
             if (asyncJobId) {
-                try {
-                    await API.deleteChatJob(requestSettings.ASYNC_BACKEND_URL, asyncJobId, requestSettings.ASYNC_BACKEND_TOKEN);
-                    API.forgetPendingJob(asyncJobId);
-                } catch (ackError) { console.warn('[AsyncBackend] 等待下次确认:', ackError); }
+                API.forgetPendingJob(asyncJobId);
+                void API.deleteChatJob(requestSettings.ASYNC_BACKEND_URL, asyncJobId, requestSettings.ASYNC_BACKEND_TOKEN);
             }
             UI.setLoading(false, contact.id);
             
         } catch (error) {
+            if (signal.aborted) return;
             if (replacementRollback) {
                 replacementRollback();
                 if (this.isViewingContactChat(contact.id)) UI.renderChatHistory(contact);
@@ -12087,6 +12184,7 @@ const App = {
 
             UI.clearRerollPreview?.(contact, 'history', true);
             await this.maybePromptDynamicContextCompatMode(error, requestSettings, contact);
+            if (signal.aborted) return;
 
             if (this.isViewingContactChat(contact.id)) {
                 UI.setLoading(false, contact.id);
@@ -12094,14 +12192,15 @@ const App = {
                 UI.appendMessageBubble(`(发送失败: ${error.message})`, 'ai', contact.avatar, null, errorIndex);
             }
         } finally {
-            UI.clearRerollPreview?.(contact, 'history');
-            STATE.chatRequestActive = false;
-            UI.setLoading(false, contact.id);
-            if (this.isViewingContactChat(contact.id)) {
-                UI.updateRerollState(contact);
+            // ★ 停止后下一轮可以立即开始；旧轮次的 finally 不能清掉它的状态或预览。
+            if (STATE.onlineChatWait === wait) {
+                UI.clearRerollPreview?.(contact, 'history');
+                STATE.onlineChatWait = null;
+                STATE.chatRequestActive = false;
+                UI.setLoading(false, contact.id);
+                // 手机端不自动聚焦，防止键盘弹起遮挡
+                if (this.isViewingContactChat(contact.id) && window.innerWidth >= 800 && UI.els.input) UI.els.input.focus();
             }
-            // 手机端不自动聚焦，防止键盘弹起遮挡
-            if (this.isViewingContactChat(contact.id) && window.innerWidth >= 800 && UI.els.input) UI.els.input.focus();
         }
     },
 
@@ -15877,7 +15976,11 @@ const App = {
             };
         }
 
-        if(UI.els.sendBtn) UI.els.sendBtn.onclick = () => this.handleSend(false);
+        // ★ 只有点击底部按钮才停止等待，输入框的回车仍只用于发送。
+        if (UI.els.sendBtn) UI.els.sendBtn.onclick = () => {
+            if (UI.els.sendBtn.dataset.action === 'stop-wait') this.stopOnlineChatWait();
+            else this.handleSend(false);
+        };
         if(UI.els.rerollBtn) UI.els.rerollBtn.onclick = () => this.handleSend(true);
 
         // ★★★★★ 后台回复接收：切回前台自动补查 START ★★★★★

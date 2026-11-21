@@ -1973,10 +1973,14 @@
                     </svg>
                 </button>
 
-                <!-- Send: 把 '➤' 换成了 纸飞机图标 -->
-                <button id="send-button" title="发送">
-                    <svg viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                <!-- ★ 等待回复时原位切换成停止按钮，图标与点击区域共用。 -->
+                <button type="button" id="send-button" title="发送" aria-label="发送">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path class="chat-send-icon" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        <g class="chat-stop-icon">
+                            <rect x="6" y="5" width="4" height="14" rx="1"/>
+                            <rect x="14" y="5" width="4" height="14" rx="1"/>
+                        </g>
                     </svg>
                 </button>
             </footer>
@@ -3302,6 +3306,8 @@
                 <img id="phone-avatar" alt="角色头像">
                 <h2 id="phone-name"></h2>
                 <p id="phone-status" role="status" aria-live="polite">准备拨打</p>
+                <!-- ★ 常亮失败提示独立保留，不被收音/播放状态更新覆盖。 -->
+                <p id="phone-wake-hint" role="status" aria-live="polite" hidden></p>
             </header>
             <div id="phone-transcript" class="phone-transcript" role="log" aria-label="本次电话文字"></div>
             <footer class="phone-controls">
@@ -3336,7 +3342,7 @@
     <script src="./js/history-visibility.js?v=20261023-bubble-id-1"></script>
     <script src="./js/offline-chat.js?v=20261029-offline-1"></script>
     <!-- ★ 电话独立管理临时会话与音频，不把电话模式写入角色持久化字段。 -->
-    <script src="./js/phone-call.js?v=20261119-phone-history-1"></script>
+    <script src="./js/phone-call.js?v=20261121-phone-wake-lock-1"></script>
     <script src="./js/phone-history.js?v=20261119-phone-history-2"></script>
     <script src="./js/chat-voice-input.js?v=20261116-chat-voice-toast-3"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->

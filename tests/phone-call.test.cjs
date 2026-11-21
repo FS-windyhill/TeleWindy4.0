@@ -30,6 +30,163 @@ function harness() {
 }
 function deferred() { let resolve; const promise = new Promise(r => { resolve = r; }); return { resolve, promise }; }
 
+// ★ 模拟系统收回亮屏和主动释放，验证真实生命周期，不申请设备权限或调用付费接口。
+function screenLock() {
+    const listeners = [];
+    return { released: false, releases: 0,
+        addEventListener(name, listener) { assert.equal(name, 'release'); listeners.push(listener); },
+        revoke() { this.released = true; listeners.forEach(listener => listener()); },
+        async release() { this.releases++; this.revoke(); }
+    };
+}
+
+test('仅拨打后申请亮屏，不阻塞音频解锁，多轮状态复用同一把锁，挂断释放', async () => {
+    const h = harness(), lock = screenLock(), audio = deferred(), events = [];
+    h.context.navigator = { wakeLock: { async request(type) { events.push(type); return lock; } } };
+    h.phone.open({ id: 'a' }); const s = h.phone.session;
+    assert.equal(events.length, 0); assert.equal(h.element('phone-wake-hint').hidden, true);
+    h.phone.buildModelSettings = () => ({ API_KEY: 'test', API_URL: 'https://example.test' });
+    h.phone.validateTts = () => {};
+    h.state.settings.PHONE_STT_PROVIDER = 'deepseek';
+    h.state.settings.PHONE_STT_KEY = 'test';
+    h.phone.unlockAudio = () => { events.push('unlock'); return audio.promise; };
+    const dialing = h.phone.dial();
+    assert.deepEqual(events, ['screen', 'unlock']);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(s.wakeLock, lock);
+    for (const phase of ['thinking', 'speaking', 'listening', 'recognizing']) {
+        h.phone.setPhase(s, phase, '通话中');
+        await h.phone.acquireWakeLock(s);
+        assert.equal(s.wakeLock, lock);
+    }
+    assert.deepEqual(events, ['screen', 'unlock']);
+    await h.phone.hangup();
+    assert.equal(lock.releases, 1); assert.equal(s.wakeLock, null);
+    assert.equal(h.element('phone-wake-hint').hidden, true);
+    audio.resolve(); await dialing;
+});
+
+test('常亮不支持、申请拒绝或已被释放时持续提示，通话仍可进行，重申请成功清除提示', async () => {
+    for (const mode of ['unsupported', 'rejected', 'throw', 'released']) {
+        const h = harness(), lock = screenLock();
+        if (mode === 'released') lock.revoke();
+        h.context.navigator = mode === 'unsupported' ? {} : { wakeLock: { request() {
+            if (mode === 'throw') throw Error('系统拒绝');
+            return mode === 'rejected' ? Promise.reject(Error('系统拒绝')) : Promise.resolve(lock);
+        } } };
+        h.phone.open({ id: 'a' }); const s = h.phone.session;
+        h.phone.setPhase(s, 'listening', '已接通');
+        await h.phone.acquireWakeLock(s);
+        assert.equal(s.phase, 'listening'); assert.equal(s.controller.signal.aborted, false);
+        assert.equal(h.element('phone-wake-hint').hidden, false);
+        assert.match(h.element('phone-wake-hint').textContent, /常亮未生效.*自动锁屏/);
+        h.phone.setPhase(s, 'speaking', '对方说话');
+        assert.equal(h.element('phone-wake-hint').hidden, false);
+        const working = screenLock();
+        h.context.navigator = { wakeLock: { async request() { return working; } } };
+        await h.phone.acquireWakeLock(s);
+        assert.equal(s.wakeLock, working); assert.equal(h.element('phone-wake-hint').hidden, true);
+        await h.phone.hangup();
+        assert.equal(working.releases, 1);
+    }
+});
+
+test('系统中途收回亮屏时提示且不循环争抢，暂停释放，重试同步重新申请', async () => {
+    const h = harness(), locks = [screenLock(), screenLock(), screenLock()]; let requests = 0;
+    h.context.navigator = { wakeLock: { async request() { return locks[requests++]; } } };
+    h.phone.open({ id: 'a' }); const s = h.phone.session;
+    h.phone.setPhase(s, 'listening', '已接通');
+    await h.phone.acquireWakeLock(s);
+    locks[0].revoke();
+    assert.equal(s.wakeLock, null); assert.equal(requests, 1);
+    assert.equal(h.element('phone-wake-hint').hidden, false);
+    h.phone.fail(s, Error('网络失败'));
+    assert.equal(s.phase, 'error'); assert.equal(h.element('phone-wake-hint').hidden, true);
+    s.micApproved = true;
+    h.phone.unlockAudio = async () => {}; h.phone.reply = async () => {};
+    const retry = h.phone.retry();
+    assert.equal(requests, 2);
+    await retry;
+    assert.equal(s.wakeLock, locks[1]);
+    h.phone.fail(s, Error('再次失败'));
+    assert.equal(locks[1].releases, 1);
+    assert.equal(h.element('phone-wake-hint').hidden, true);
+    await h.phone.retry();
+    assert.equal(s.wakeLock, locks[2]);
+    await h.phone.hangup();
+    assert.equal(locks[2].releases, 1);
+});
+
+test('挂断或暂停后迟到的亮屏申请立即释放，不能占用设备', async () => {
+    for (const action of ['hangup', 'fail']) {
+        const h = harness(), pending = deferred(), lock = screenLock();
+        h.context.navigator = { wakeLock: { request() { return pending.promise; } } };
+        h.phone.open({ id: 'a' }); const s = h.phone.session;
+        h.phone.setPhase(s, 'thinking', '等待回复');
+        const work = h.phone.acquireWakeLock(s);
+        if (action === 'hangup') await h.phone.hangup();
+        else h.phone.fail(s, Error('暂停'));
+        pending.resolve(lock); await work;
+        assert.equal(lock.releases, 1); assert.equal(s.wakeLock, null);
+        assert.equal(h.element('phone-wake-hint').hidden, true);
+    }
+});
+
+test('旧申请迟到成功或失败，都不能覆盖新通话或重试获得的亮屏锁和提示', async () => {
+    for (const next of ['retry', 'new-call']) for (const result of ['success', 'failure']) {
+        const h = harness(), oldLock = screenLock(), newLock = screenLock(); let rejectOld;
+        const pending = deferred();
+        const oldPromise = new Promise((resolve, reject) => { pending.promise.then(resolve); rejectOld = reject; });
+        let requests = 0;
+        h.context.navigator = { wakeLock: { request() { return requests++ ? Promise.resolve(newLock) : oldPromise; } } };
+        h.phone.open({ id: 'a' }); const oldSession = h.phone.session;
+        h.phone.setPhase(oldSession, 'listening', '已接通');
+        const oldWork = h.phone.acquireWakeLock(oldSession);
+        // ★ 同一申请未完成时重复调用不会再占一把锁。
+        await h.phone.acquireWakeLock(oldSession); assert.equal(requests, 1);
+        if (next === 'new-call') {
+            await h.phone.hangup(); h.phone.open({ id: 'b' });
+            h.phone.setPhase(h.phone.session, 'dialing', '拨打中');
+            await h.phone.acquireWakeLock(h.phone.session);
+        } else {
+            h.phone.fail(oldSession, Error('暂停'));
+            oldSession.micApproved = true;
+            h.phone.unlockAudio = async () => {}; h.phone.reply = async () => {};
+            await h.phone.retry();
+        }
+        if (result === 'success') pending.resolve(oldLock);
+        else rejectOld(Error('旧申请失败'));
+        await oldWork;
+        assert.equal(h.phone.session.wakeLock, newLock); assert.equal(newLock.releases, 0);
+        assert.equal(oldLock.releases, result === 'success' ? 1 : 0);
+        assert.equal(h.element('phone-wake-hint').hidden, true);
+        await h.phone.hangup(); assert.equal(newLock.releases, 1);
+    }
+});
+
+test('锁屏/切后台及离开页面仍挂断并释放亮屏，不在返回页面时偷偷恢复电话', async () => {
+    for (const event of ['visibilitychange', 'pagehide']) {
+        const h = harness(), handlers = {}, lock = screenLock(); let requests = 0;
+        h.context.navigator = { wakeLock: { async request() { requests++; return lock; } } };
+        // ★ 注册真实页面事件；仅替换浏览器外壳，验证原挂断路径仍清理亮屏资源。
+        h.context.document.addEventListener = (name, listener) => { handlers[name] = listener; };
+        h.context.window = { addEventListener(name, listener) { handlers[name] = listener; } };
+        h.context.MutationObserver = class { observe() {} };
+        for (const id of ['phone-tts-provider', 'phone-stt-provider', 'phone-audition', 'phone-dial',
+            'phone-done', 'phone-retry', 'phone-hangup', 'phone-close']) h.element(id).addEventListener = () => {};
+        h.phone.init(); h.phone.open({ id: 'a' }); const s = h.phone.session;
+        h.phone.setPhase(s, 'listening', '已接通');
+        await h.phone.acquireWakeLock(s);
+        h.context.document.hidden = true;
+        handlers[event]();
+        assert.equal(h.phone.session, null); assert.equal(s.controller.signal.aborted, true);
+        assert.equal(lock.releases, 1); assert.equal(h.element('phone-wake-hint').hidden, true);
+        h.context.document.hidden = false;
+        handlers.visibilitychange();
+        assert.equal(h.phone.session, null); assert.equal(requests, 1);
+    }
+});
+
 test('服务商切换保留各自的表单草稿和角色音色，旧国际版配置继续可用', () => {
     const h = harness(), { phone, element } = h;
     const settings = h.state.settings = { PHONE_TTS_KEY: 'old-key', PHONE_TTS_MODEL: 'old-model' };

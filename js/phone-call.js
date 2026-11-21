@@ -231,8 +231,62 @@ const PhoneCall = {
         if (document.getElementById('app-container')) document.getElementById('app-container').inert = true;
         document.getElementById('phone-close').focus?.();
         this.setPhase(this.session, 'ready', '准备拨打');
+        this.setWakeHint(s);
     },
     alive(s) { return this.session === s && !s.controller.signal.aborted; },
+    // ================ 通话亮屏：只防止自动熄屏，不改变锁屏/切后台挂断规则 ================
+    needsWakeLock(s) {
+        return this.alive(s) && s.phase !== 'ready' && s.phase !== 'error' && !document.hidden;
+    },
+    setWakeHint(s, message = '') {
+        if (!this.alive(s)) return;
+        const hint = document.getElementById('phone-wake-hint');
+        hint.textContent = message;
+        hint.hidden = !message;
+    },
+    async acquireWakeLock(s) {
+        if (!this.needsWakeLock(s) || s.wakeRequest || (s.wakeLock && !s.wakeLock.released)) return;
+        // ★ 每次申请独立标记；挂断/报错会作废标记，迟到的结果不能占用亮屏或覆盖重试状态。
+        const request = s.wakeRequest = {};
+        const warning = '屏幕常亮未生效，自动锁屏可能中断通话';
+        try {
+            if (!globalThis.navigator?.wakeLock?.request) throw new Error('当前浏览器不支持屏幕常亮');
+            const lock = await navigator.wakeLock.request('screen');
+            if (s.wakeRequest !== request || !this.needsWakeLock(s)) {
+                void this.releaseScreenLock(lock);
+                return;
+            }
+            s.wakeLock = lock;
+            lock.addEventListener('release', () => {
+                if (s.wakeLock !== lock) return;
+                s.wakeLock = null;
+                // ★ 省电策略可能在通话中收回亮屏；持续提示，不循环申请与系统争抢。
+                if (this.needsWakeLock(s)) this.setWakeHint(s, warning);
+            }, { once: true });
+            if (lock.released) {
+                s.wakeLock = null;
+                this.setWakeHint(s, warning);
+            } else this.setWakeHint(s);
+        } catch (_) {
+            // ★ 亮屏只是辅助能力，失败不进入通话错误态，也不能阻塞麦克风或语音播放。
+            if (s.wakeRequest === request && this.needsWakeLock(s)) this.setWakeHint(s, warning);
+        } finally {
+            if (s.wakeRequest === request) s.wakeRequest = null;
+        }
+    },
+    async releaseScreenLock(lock) {
+        if (!lock || lock.released) return;
+        try { await lock.release(); }
+        catch (_) { console.warn('[PhoneCall] 屏幕常亮释放失败'); }
+    },
+    releaseWakeLock(s) {
+        s.wakeRequest = null;
+        const lock = s.wakeLock;
+        s.wakeLock = null;
+        // ★ 先清引用再释放，主动挂断/暂停产生的 release 事件不弹出失效提示。
+        this.setWakeHint(s);
+        void this.releaseScreenLock(lock);
+    },
     setPhase(s, phase, label) {
         if (!this.alive(s)) return;
         s.phase = phase;
@@ -274,6 +328,7 @@ const PhoneCall = {
                 if (!(window.SpeechRecognition || window.webkitSpeechRecognition)) throw new Error('当前浏览器不支持语音识别，请选择 DeepSeek');
             } else if (!s.audioSettings.PHONE_STT_KEY || !s.audioSettings.PHONE_STT_URL) throw new Error('请先填写 DeepSeek 识别地址和密钥');
             this.setPhase(s, 'dialing', '正在拨打中');
+            void this.acquireWakeLock(s);
             // ★ 必须在「拨打」点击的同步调用栈解锁；等接口返回再 new Audio 会被 Safari 拦截。
             await this.unlockAudio(s);
             if (!this.alive(s) || !await this.acquireMicrophone(s)) return;
@@ -324,6 +379,10 @@ const PhoneCall = {
         const s = this.session;
         if (!s || s.phase !== 'error') return;
         try {
+            if (s.micApproved) {
+                this.setPhase(s, 'thinking', '正在重试');
+                void this.acquireWakeLock(s);
+            }
             // ★ 重试点击也同步恢复同一个 AudioContext，不能在网络请求之后才申请播放。
             await this.unlockAudio(s);
             if (!this.alive(s)) return;
@@ -339,11 +398,13 @@ const PhoneCall = {
         if (!this.alive(s)) return;
         this.stopListening(s);
         this.setPhase(s, 'error', '通话暂停');
+        this.releaseWakeLock(s);
         Toast.show(this.reason(error));
     },
     async hangup() {
         const s = this.session;
         if (!s) return;
+        this.releaseWakeLock(s);
         this.session = null;
         s.controller.abort();
         this.stopListening(s);
