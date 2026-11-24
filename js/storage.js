@@ -399,6 +399,14 @@ const Storage = {
             STATE.characterMemories = [];
             STATE.characterHeartNotes = [];
         }
+        // ★ 夕拾独立加载，旧备份缺字段时默认为空；其它探索数据异常也不清掉已存收藏。
+        try {
+            const xiShiRecords = await DB.get(CONFIG.XI_SHI_KEY);
+            STATE.xiShiRecords = Array.isArray(xiShiRecords) ? xiShiRecords : [];
+        } catch (error) {
+            console.warn('读取夕拾失败:', error);
+            STATE.xiShiRecords = [];
+        }
         // ★★★★★ 探索 TO DO / 倒数日 / 角色日程 / 角色记忆 END ★★★★★
 
 
@@ -630,6 +638,11 @@ const Storage = {
             return;
         }
         await DB.set(CONFIG.CHARACTER_MEMORIES_KEY, STATE.characterMemories);
+    },
+
+    // ★ 夕拾先写入候选列表，成功后由模块提交内存；沿用整库备份，无需新建 objectStore。
+    async saveXiShi(records = STATE.xiShiRecords) {
+        await DB.set(CONFIG.XI_SHI_KEY, records);
     },
 
     // 保存角色心笺列表

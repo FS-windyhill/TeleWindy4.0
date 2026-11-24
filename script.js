@@ -714,6 +714,8 @@ const STATE = {
     characterSchedules: [],
     characterMemories: [],
     characterHeartNotes: [],
+    // ★ 夕拾与聊天记录分开保存，编辑/删除原消息不改变收藏快照。
+    xiShiRecords: [],
     todoPlanDraftDateOffset: 0,
     countdownDraftDateOffset: 0,
     editingTodoPlanId: null,
@@ -2874,6 +2876,10 @@ const UI = {
         ['phone-history', 'phone-history-calls', 'phone-history-detail'].forEach(page => {
             if (viewName !== page) document.getElementById(`view-${page}`).style.display = 'none';
         });
+        // ★ 夕拾两级页面统一隐藏，返回探索/聊天时不残留收藏面板。
+        ['xi-shi', 'xi-shi-detail'].forEach(page => {
+            if (viewName !== page) document.getElementById(`view-${page}`).style.display = 'none';
+        });
         // ★ 心笺也是探索子页，与角色记忆保持相同的显隐收口。
         if (viewHeartNote && viewName !== 'heart-note') viewHeartNote.style.display = 'none';
         if (viewHeartNoteDetail && viewName !== 'heart-note-detail') viewHeartNoteDetail.style.display = 'none';
@@ -2887,7 +2893,7 @@ const UI = {
         // 先清除底栏的全部高亮状态
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-        if (['phone-history', 'phone-history-calls', 'phone-history-detail'].includes(viewName)) {
+        if (['xi-shi', 'xi-shi-detail', 'phone-history', 'phone-history-calls', 'phone-history-detail'].includes(viewName)) {
             appContainer.classList.remove('in-chat-mode');
             // ★ 聊天页保留常驻布局，与心笺等探索子页使用同一规则。
             document.querySelectorAll('.page-view').forEach(view => {
@@ -2895,7 +2901,8 @@ const UI = {
             });
             document.getElementById(`view-${viewName}`).style.display = 'flex';
             if (bottomTabBar) bottomTabBar.style.display = 'none';
-            PhoneHistory.render(viewName);
+            if (viewName.startsWith('xi-shi')) XiShi.render(viewName);
+            else PhoneHistory.render(viewName);
         } else if (viewName === 'storage-space') {
             App.rememberReturnView('storage-space', STATE.currentMainView || 'explore');
             appContainer.classList.remove('in-chat-mode');
@@ -6032,6 +6039,8 @@ const App = {
             ['character-schedule-detail', 'view-character-schedule-detail'],
             ['character-memory', 'view-character-memory'],
             ['character-memory-detail', 'view-character-memory-detail'],
+            ['xi-shi', 'view-xi-shi'],
+            ['xi-shi-detail', 'view-xi-shi-detail'],
             ['phone-history', 'view-phone-history'],
             ['phone-history-calls', 'view-phone-history-calls'],
             ['phone-history-detail', 'view-phone-history-detail'],
@@ -6089,6 +6098,8 @@ const App = {
             'character-schedule-detail': 'character-schedule-detail-back-btn',
             'character-memory': 'character-memory-back-btn',
             'character-memory-detail': 'character-memory-detail-back-btn',
+            'xi-shi': 'xi-shi-back-btn',
+            'xi-shi-detail': 'xi-shi-detail-back-btn',
             'phone-history': 'phone-history-back-btn',
             'phone-history-calls': 'phone-history-calls-back-btn',
             'phone-history-detail': 'phone-history-detail-back-btn',
@@ -12699,6 +12710,9 @@ const App = {
         const msgData = contact.offlineHistory.find(item => String(item?.messageId) === STATE.offlineSelectedMessageId);
         if (!msgData) return;
 
+        // ★ 线下见面收藏整张回复卡片，和线上共用快照存储。
+        if (action === 'collect-xi-shi') { XiShi.collect(contact, msgData, 'offlineHistory'); return; }
+
         const timestampRegex = /^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/;
 
         if (action === 'edit') {
@@ -13755,6 +13769,9 @@ const App = {
             // ★ 菜单打开后目标可能已被别的操作删除；直接停止，不能改动旧下标上的邻居。
             return;
         }
+
+        // ★ 菜单收藏目标是整组消息；正文和图片复制到夕拾，不受之后改写影响。
+        if (action === 'collect-xi-shi') { XiShi.collect(currentContact, msgData); return; }
 
         // 定义时间戳正则（Edit和Copy公用）
         const timestampRegex = /^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/;

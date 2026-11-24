@@ -38,6 +38,8 @@ const CONFIG = {
     CHARACTER_SCHEDULES_KEY: 'teleWindy_character_schedules_v1',
     CHARACTER_MEMORIES_KEY: 'teleWindy_character_memories_v1',
     CHARACTER_HEART_NOTES_KEY: 'teleWindy_character_heart_notes_v1',
+    // ★ 夕拾是独立纪念快照，只参与本地存储和备份，不参与上下文。
+    XI_SHI_KEY: 'teleWindy_xi_shi_v1',
     MAIN_CONTEXT_LOG_KEY: 'teleWindy_main_context_log_v1',
     AGENT_CONTEXT_LOG_KEY: 'teleWindy_agent_context_log_v1',
     // ★ 主动消息只保存最近一次实际发往模型的请求，和普通聊天日志分开。

@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 长期记忆弹窗统一背景模糊，更新版本参数避免 PWA 沿用旧样式。 -->
-    <link rel="stylesheet" href="./style.css?v=20261124-memory-impression-blur-1">
+    <link rel="stylesheet" href="./style.css?v=20261124-xi-shi-thought-2">
 </head>
 <body>
 
@@ -385,6 +385,20 @@
 
                 
 
+
+                <!-- ★★★★★ 夕拾：探索页入口 START ★★★★★ -->
+                <li id="explore-xi-shi-btn">
+                    <span class="icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="0.95em" height="0.95em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-rose preview-icon" aria-hidden="true"><path d="M17 10h-1a4 4 0 1 1 4-4v.534"/><path d="M17 6h1a4 4 0 0 1 1.42 7.74l-2.29.87a6 6 0 0 1-5.339-10.68l2.069-1.31"/><path d="M4.5 17c2.8-.5 4.4 0 5.5.8s1.8 2.2 2.3 3.7c-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2"/><path d="M9.77 12C4 15 2 22 2 22"/><circle cx="17" cy="8" r="2"/></svg>
+                    </span>
+                    <span class="text">夕拾</span>
+                    <span class="arrow">
+                        <svg width="1.5em" height="1.5em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg" style="vertical-align: -0.125em;">
+                            <path d="M9 6L16 12L9 18" />
+                        </svg>
+                    </span>
+                </li>
+                <!-- ★★★★★ 夕拾：探索页入口 END ★★★★★ -->
 
                 <!-- ★★★★★ 通话记录：探索页入口 START ★★★★★ -->
                 <li id="explore-phone-history-btn">
@@ -834,6 +848,33 @@
             </main>
         </div>
         <!-- ★★★★★ 角色记忆页面 END ★★★★★ -->
+
+        <!-- ★★★★★ 夕拾：角色列表 / 收藏快照 START ★★★★★ -->
+        <div id="view-xi-shi" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button type="button" id="xi-shi-back-btn" class="header-icon-btn left" title="返回探索"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                <h1>夕拾</h1>
+            </header>
+            <main class="heart-note-page">
+                <div id="xi-shi-contacts" class="heart-note-contact-list"></div>
+                <div id="xi-shi-empty" class="todo-empty-hint">还没有角色，先去通讯录创建一个吧。</div>
+            </main>
+        </div>
+        <div id="view-xi-shi-detail" class="page-view" style="display: none;">
+            <header class="app-header">
+                <button type="button" id="xi-shi-detail-back-btn" class="header-icon-btn left" title="返回夕拾"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
+                <h1 id="xi-shi-detail-title">夕拾</h1>
+            </header>
+            <main class="heart-note-page">
+                <div class="inline-list-search" id="xi-shi-search">
+                    <div class="inline-search-row"><span class="inline-search-field"><svg xmlns="http://www.w3.org/2000/svg" width="0.92rem" height="0.92rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-search preview-icon inline-search-icon" aria-hidden="true" focusable="false"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg><input id="xi-shi-search-input" type="search" placeholder="搜索当前角色的夕拾…" aria-label="搜索当前角色的夕拾" autocomplete="off"></span><button type="button" class="inline-search-clear" hidden><svg xmlns="http://www.w3.org/2000/svg" width="0.92rem" height="0.92rem" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-eraser preview-icon" aria-hidden="true" focusable="false"><path d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21"/><path d="m5.082 11.09 8.828 8.828"/></svg><span>清空</span></button></div>
+                    <div class="inline-search-status" role="status" aria-live="polite" hidden></div>
+                </div>
+                <div id="xi-shi-list" class="heart-note-detail-list"></div>
+                <div id="xi-shi-detail-empty" class="todo-empty-hint">还没有夕拾，在聊天消息菜单中点“收藏到夕拾”，留住想珍藏的片刻。</div>
+            </main>
+        </div>
+        <!-- ★★★★★ 夕拾：角色列表 / 收藏快照 END ★★★★★ -->
 
         <!-- ★★★★★ 通话记录：联系人 / 电话列表 / 原文详情 START ★★★★★ -->
         <div id="view-phone-history" class="page-view" style="display: none;">
@@ -3038,6 +3079,8 @@
             <button data-action="copy">复制</button>
             <button data-action="multi-select">多选</button>
             <button data-action="toggle-hidden" id="btn-toggle-hidden">向Ta隐藏</button> 
+            <!-- ★ 夕拾收藏整组快照，与删除聊天原文互不影响。 -->
+            <button data-action="collect-xi-shi">收藏到夕拾</button>
             
             <!-- 删除通常是危险操作，用 CSS 单独标红 -->
             <button data-action="delete">删除</button> 
@@ -3375,12 +3418,12 @@
     
 
     <!-- 项目脚本：先加载独立服务，再加载主业务入口 -->
-    <script src="./js/config.js?v=20261030-font-default-1"></script>
+    <script src="./js/config.js?v=20261124-xi-shi-1"></script>
     <script src="./js/css-presets.js?v=20261101-header-default-2"></script>
     <script src="./js/custom-css.js?v=20261101-prefix-parser-1"></script>
     <!-- ★ 气泡身份要先于存储迁移、历史过滤和聊天页加载。 -->
     <script src="./js/chat-bubbles.js?v=20261025-bubble-snapshot-1"></script>
-    <script src="./js/storage.js?v=20261023-bubble-id-1"></script>
+    <script src="./js/storage.js?v=20261124-xi-shi-1"></script>
     <!-- ★ 存储统计只在打开管理页时读取旧数据，不改变 IndexedDB 格式。 -->
     <script src="./js/storage-space.js?v=20261024-4"></script>
     <script src="./js/usage-stats.js?v=20261024-usage-cache-3"></script>
@@ -3390,6 +3433,8 @@
     <script src="./js/offline-chat.js?v=20261029-offline-1"></script>
     <!-- ★ 电话独立管理临时会话与音频，不把电话模式写入角色持久化字段。 -->
     <script src="./js/phone-call.js?v=20261121-phone-wake-lock-1"></script>
+    <!-- ★ 夕拾只读纪念快照，复用现有列表搜索，不参与 AI 上下文。 -->
+    <script src="./js/xi-shi.js?v=20261124-xi-shi-thought-2"></script>
     <script src="./js/phone-history.js?v=20261119-phone-history-2"></script>
     <script src="./js/chat-voice-input.js?v=20261116-chat-voice-toast-3"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->
@@ -3407,7 +3452,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261119-schedule-current-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261121-memory-impression-1"></script>
+    <script src="./script.js?v=20261124-xi-shi-1"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

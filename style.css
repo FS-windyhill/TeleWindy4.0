@@ -14077,6 +14077,61 @@ body.dark-mode .offline-card-avatar {
     .phone-header h2 { margin-top: 8px; font-size: 20px; }
 }
 /* ★★★★★ 通话记录 START：卡片沿用心笺，详情只调整顶部与阅读空间 ★★★★★ */
+/* ★★★★★ 夕拾 START：沿用心笺卡片，只覆盖本页正文和星标，不改变心笺外观。 ★★★★★ */
+.xi-shi-contact { width: 100%; box-sizing: border-box; text-align: left; font: inherit; color: inherit; }
+.xi-shi-contact .heart-note-contact-name,
+.xi-shi-contact .heart-note-contact-status { display: block; }
+.xi-shi-contact:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+#view-xi-shi-detail .xi-shi-text { font-size: 1rem; font-style: normal; text-align: left; }
+/* ★ 正文和思考链共用夕拾自己的背景/边框变量，亮暗模式一起切换，不依赖聊天思考链类名。 */
+#view-xi-shi-detail { --xi-shi-content-background: rgb(255 255 255 / 38%); --xi-shi-content-border: rgba(100, 100, 100, 0.2); }
+body.dark-mode #view-xi-shi-detail { --xi-shi-content-background: rgba(255, 255, 255, 0.1); --xi-shi-content-border: rgba(245, 245, 245, 0.2); }
+#view-xi-shi-detail .xi-shi-text,
+#view-xi-shi-detail .xi-shi-thought { background: var(--xi-shi-content-background); border: 1px solid var(--xi-shi-content-border); }
+/* ★ 夕拾独立折叠面板：保留整行按钮和点击收起，内部透明，避免展开后叠出第二层背景。 */
+#view-xi-shi-detail .xi-shi-thought { display: block; width: 100%; box-sizing: border-box; margin-bottom: 10px; border-radius: 8px; overflow: hidden; transition: all 0.3s ease; text-align: center; }
+#view-xi-shi-detail .xi-shi-thought summary { display: flex; align-items: center; width: 100%; box-sizing: border-box; justify-content: center; padding: 5px 8px; font-size: 0.85em; font-weight: bold; color: #585858; cursor: pointer; user-select: none; outline: none; text-align: center; }
+#view-xi-shi-detail .xi-shi-thought summary::marker,
+#view-xi-shi-detail .xi-shi-thought summary::-webkit-details-marker { display: none; }
+#view-xi-shi-detail .xi-shi-thought summary::before { content: "💡 思考过程 (点击展开)"; }
+#view-xi-shi-detail .xi-shi-thought[open] summary::before { content: "💡 思考过程 (点击折叠)"; }
+#view-xi-shi-detail .xi-shi-thought-content { width: 100%; box-sizing: border-box; padding: 8px 12px; font-size: 0.9rem; font-style: italic; color: #505050; border-top: 1px dashed rgb(0 0 0 / 35%); background: transparent; white-space: pre-wrap; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+body.dark-mode #view-xi-shi-detail .xi-shi-thought summary { color: #c0c0c0; }
+body.dark-mode #view-xi-shi-detail .xi-shi-thought-content { color: #dbdbdb; border-top-color: rgb(255 255 255 / 30%); }
+/* ★ 按钮的尺寸、底色和 Pin 选中色与角色记忆保持一致，类名独立便于单独美化。 */
+.xi-shi-icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; border: 1px solid rgba(100, 100, 100, 0.3); border-radius: 8px; background: rgba(80, 80, 80, 0.1); color: #707070; cursor: pointer; }
+.xi-shi-icon-btn svg { width: 17px; height: 17px; }
+.xi-shi-pin-btn .xi-shi-pin-shape { fill: transparent; }
+.xi-shi-pin-btn.active { color: #ffb21c; }
+.xi-shi-pin-btn.active .xi-shi-pin-shape { fill: currentColor; }
+.xi-shi-icon-btn.danger { color: #d93838; }
+body.dark-mode .xi-shi-icon-btn { background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(245, 245, 245, 0.3); color: #adadad; }
+body.dark-mode .xi-shi-pin-btn.active { color: #ffc247; }
+body.dark-mode .xi-shi-icon-btn.danger { color: #d93838; }
+/* ★ 署名放在正文框外，使用较小的斜体；正文仍保持 1rem 正体。 */
+
+
+.xi-shi-source { 
+    margin-top: 10px; 
+    font-size: 0.85rem; 
+    line-height: 1.55; 
+    text-align:center; 
+    overflow-wrap: anywhere; 
+    color: #0000005e;
+}
+
+body.dark-mode .xi-shi-source { 
+    color: #ffffff5e;
+}
+
+
+
+.xi-shi-image { display: block; max-width: 100%; max-height: 420px; object-fit: contain; border-radius: 8px; margin: 10px auto 0; }
+/* ★ 通用提示默认隐藏；夕拾通过 hidden 属性切换，非空态主动显示。 */
+#xi-shi-empty, #xi-shi-detail-empty { display: block; }
+#xi-shi-empty[hidden], #xi-shi-detail-empty[hidden] { display: none !important; }
+/* ★★★★★ 夕拾 END ★★★★★ */
+
 .phone-history-card { width: 100%; box-sizing: border-box; text-align: left; font: inherit; color: inherit; }
 .phone-history-card .heart-note-contact-name,
 .phone-history-card .heart-note-contact-status { display: block; }
