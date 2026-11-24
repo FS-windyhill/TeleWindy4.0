@@ -10094,7 +10094,17 @@ body.dark-mode .character-memory-date {
     cursor: pointer;
 }
 
-/* ★ 遮罩只做轻模糊，面板自身再磨砂，让原来的壁纸色彩仍能透进来。 */
+/* ★ 弹窗打开时先模糊背景页，两个记忆页签共用，不依赖列表数量或卡片合成顺序。
+   卡片暂时不单独磨砂，减少长列表的 backdrop-filter 合成层；关闭后自动恢复原样。 */
+#view-character-memory-detail.memory-impression-open {
+    filter: blur(4px);
+}
+#view-character-memory-detail.memory-impression-open .character-memory-card {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+/* ★ 遮罩保留壁纸的轻模糊，面板自身再磨砂，让原来的壁纸色彩仍能透进来。 */
 .memory-impression-overlay {
     position: fixed;
     inset: 0;

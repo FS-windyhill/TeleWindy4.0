@@ -60,11 +60,11 @@ const MemoryImpression = {
             'JSON 字符串内的换行写成 \\n，制表符写成 \\t；双引号与反斜杠正确转义，不要在字符串内直接换行。',
             '角色人设决定你如何理解经历；每日记忆提供实际发生的事情。不得把人设当作已经发生的事件。',
             evidence
-                ? '这是分批提炼阶段：以客观材料写明重要事实、反复出现的模式及变化，保留关键日期和不确定性，不写抒情独白。返回 {"evidence":"约1000字以内的材料"}。'
-                : '最终正文使用角色第一人称，写成一段自然的记忆描述，约50-150字为软目标。',
+                ? '这是分批提炼阶段：以客观材料写明重要事实、反复出现的模式及变化，保留关键日期和不确定性，不写抒情独白。返回 {"evidence":"约500字以内的材料"}。'
+                : '最终正文使用第一人称，你作为这个角色，根据你们的这些天的记忆，写一段你这些日子来形成的自然记忆印象，约50-150字为软目标。',
             !evidence && oldText
-                ? '判断新经历是否值得改变现有印象。不为更新而换词，保留仍成立的认知和手动编辑的表达；新证据可以修正旧认识。无需改变返回 {"changed":false}；需要改变返回 {"changed":true,"text":"完整的新印象"}。'
-                : (!evidence ? '根据提供的全部材料重新形成整体印象，返回 {"changed":true,"text":"完整印象"}。' : ''),
+                ? '判断新经历是否值得改变现有记忆印象。新证据可以修正旧认识。无需改变时，返回 {"changed":false}；需要改变时，返回 {"changed":true,"text":"完整的新印象"}。'
+                : (!evidence ? '根据提供的你的人设，和你与对方这些日子的记忆，撰写一段你这些日子的记忆印象，返回 {"changed":true,"text":"完整印象"}。' : ''),
             '【你的角色设定】', `角色名：${contact.name || '未知角色'}`, contact.prompt || '暂无角色设定。',
             // ★ 朋友圈昵称不代表聊天中的身份；称呼只沿用人设与记忆，不额外猜测姓名。
             '称呼沿用角色人设或记忆中已有的表达；没有明确姓名时使用自然代称，不自行起名。'
@@ -266,6 +266,8 @@ const MemoryImpression = {
         this.contactId = contactId;
         this.editing = false;
         this.returnFocus = document.activeElement;
+        // ★ 背景页单独模糊，避免“全部记忆”卡片较多时，遮罩的 backdrop-filter 合成失效。
+        document.getElementById('view-character-memory-detail')?.classList.add('memory-impression-open');
         document.getElementById('modal-memory-impression').classList.remove('hidden');
         document.getElementById('memory-impression-more').open = false;
         this.render();
@@ -275,6 +277,7 @@ const MemoryImpression = {
     close() {
         if (this.editing && !confirm('放弃尚未保存的修改？')) return;
         document.getElementById('modal-memory-impression').classList.add('hidden');
+        document.getElementById('view-character-memory-detail')?.classList.remove('memory-impression-open');
         this.contactId = null;
         this.editing = false;
         this.returnFocus?.focus();

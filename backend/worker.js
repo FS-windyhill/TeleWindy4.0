@@ -1,6 +1,6 @@
 const DEFAULT_JOB_TTL_HOURS = 6;
 // ★ 前端只用此版本识别已部署的 Worker；发布新版 worker.js 时同步递增。
-const WORKER_VERSION = "2026.10.24.2";
+const WORKER_VERSION = "2026.11.24";
 const WORKER_PROTOCOL_VERSION = 1;
 const MIN_JOB_TTL_HOURS = 0.25;
 const MAX_JOB_TTL_HOURS = 24;
@@ -2128,13 +2128,12 @@ function buildProactiveDecisionMessages(capsule, runtime, now, manual = false) {
     manual
       ? `你就是 ${capsule.characterName}。离你们上次对话已经过去了一会儿，想给对方发一条消息吗？还是先不发？你可以自由决定。`
       : `你就是 ${capsule.characterName}。离你们上次对话已经过去了一会儿，想给对方发一条消息吗？还是先不发？你可以自由决定。`,
-    "不要解释决策过程，不要提及系统、定时器、JSON 或 AI。",
     "只输出一个严格 JSON 对象，不要输出 Markdown：",
-    '{"decision":"silent或send","content":"send时填写消息正文，silent时为空字符串","next_wake_at_local":"下次唤醒你的当地时间YYYY-MM-DD HH:mm"}',
+    '{"decision":"silent或send","content":"send时填写消息正文，silent时为空字符串","next_wake_at_local":"下次唤醒你的时间YYYY-MM-DD HH:mm"}',
     `当前真实时间：${formatProactiveLocalTime(now, capsule)}`,
     // ★ 下一轮检查只提供再次思考的机会，不是本条消息的发送期限或下一条消息的发送承诺。
-    "无论本次发送还是保持沉默，请用 next_wake_at_local 填写下一次唤醒你的具体当地时间，格式为 YYYY-MM-DD HH:mm，必须晚于当前时间且不超过下面的最晚时间。越界、格式错误或未填写时，程序会在允许范围内随机选择一个时间。",
-    `下一次检查最晚安排到：${nextCheckDeadline}。到时只是重新判断是否联系，不代表必须发送；程序也会检查是否满足发送设置。`,
+    "无论本次发送还是保持沉默，请用 next_wake_at_local 填写下一次唤醒你的具体当地时间，格式为 YYYY-MM-DD HH:mm，必须晚于当前时间且不超过下面的最晚时间。",
+    `下一次唤醒你最晚安排到：${nextCheckDeadline}。到时会再次让你判断是否联系对方。`,
     `连续主动未回复数：${Number(runtime.unansweredCount || 0)}`,
     "如果本次决定发送，消息会在生成后交给程序发送，本条消息的实际发送时间由程序记录；你只需填写下一次唤醒时间，无需填写本条消息的发送时间。"
   ].join("\n");
