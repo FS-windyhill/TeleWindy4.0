@@ -174,9 +174,9 @@ test('聊天日期拒绝无效日历日期，保留消息记录中的日期', ()
 
 // ★ 完整加载聊天页对象，测试真正由 createSingleBubble 写入的 DOM 身份字段。
 function harness() {
-    const element = () => ({ style: {}, dataset: {}, className: '',
-        classList: { add() {}, remove() {}, contains() { return false; } },
-        addEventListener() {}, appendChild() {}, setAttribute(name, value) { this[name] = value; }, querySelector() { return null; } });
+    const element = () => ({ style: { setProperty() {} }, dataset: {}, className: '',
+        classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
+        addEventListener() {}, closest() { return this; }, getBoundingClientRect() { return { width: 420, height: 100, left: 100, right: 200, top: 300, bottom: 400 }; }, appendChild() {}, setAttribute(name, value) { this[name] = value; }, querySelector() { return null; } });
     const template = { content: { cloneNode() {
         const bubble = element();
         bubble.querySelector = selector => ['details', '.thought-content'].includes(selector) ? element() : null;
@@ -186,15 +186,15 @@ function harness() {
     } } };
     const menu = element();
     menu.dataset.initialized = 'true';
-    menu.querySelector = () => element();
+    menu.querySelector = () => { const node = element(); node.querySelector = () => element(); return node; };
     const document = { getElementById(id) {
         return id === 'msg-template' ? template : id === 'msg-context-menu' ? menu : element();
-    }, createElement: element, querySelectorAll: () => [] };
-    const context = vm.createContext({ document, window: { innerWidth: 1000 }, ChatBubbles, console, AbortController,
+    }, addEventListener() {}, removeEventListener() {}, createElement: element, querySelectorAll: () => [] };
+    const context = vm.createContext({ document, window: { innerWidth: 1000, innerHeight: 800, addEventListener() {}, removeEventListener() {} }, ChatBubbles, console, AbortController,
         CONFIG: { DEFAULT: { MOMENTS_SETTINGS: {}, USER_AVATAR: '🙂' } },
         Storage: { saveContacts: async () => {} }, navigator: { clipboard: { writeText: async () => {} } },
         ProactiveMessages: { makeId: () => 'new-user', onUserMessage: async () => {} },
-        requestAnimationFrame: callback => callback(), confirm: () => true, alert() {}, setTimeout() {} });
+        requestAnimationFrame: callback => callback(), confirm: () => true, alert() {}, clearTimeout() {}, setTimeout() {} });
     vm.runInContext(fs.readFileSync('script.js', 'utf8')
         + '\nthis.App=App;this.UI=UI;this.STATE=STATE;this.Toast=Toast;this.API=API;'
         + '\nparseCustomMarkdown = text => text;', context);
@@ -277,6 +277,29 @@ test('发送按钮等待时原位变成停止按钮，停止后恢复发送和�
     assert.equal(sendBtn['aria-label'], '发送');
     assert.equal(sendBtn.disabled, false);
     assert.equal(rerollBtn.disabled, false);
+});
+
+// ★ 复用同一组底部按钮时，状态必须跟随当前角色；切回 A 仍可停止 A。
+test('A 正在输入时切换 B 可发送和 reroll，B 结束不清掉 A 的等待', () => {
+    const c = harness();
+    const a = c.open({ role: 'user', content: 'A 的问题', messageId: 'a-user' });
+    const b = { id: 'b', history: [{ role: 'user', content: 'B 的问题', messageId: 'b-user' }] };
+    c.STATE.contacts.push(b);
+    const wait = { contactId: a.id, controller: new AbortController() };
+    c.STATE.chatRequests = new Map([[a.id, wait]]);
+    c.UI.setLoading(true, a.id);
+    c.STATE.currentContactId = b.id;
+    c.UI.setLoading(false, b.id);
+    assert.equal(c.UI.els.sendBtn.disabled, false);
+    assert.equal(c.UI.els.sendBtn.dataset.action, 'send');
+    assert.equal(c.UI.els.rerollBtn.disabled, false);
+    c.UI.setLoading(true, b.id);
+    c.UI.setLoading(false, b.id);
+    c.STATE.currentContactId = a.id;
+    c.UI.refreshChatPresence(a.id);
+    assert.equal(c.UI.els.sendBtn.dataset.action, 'stop-wait');
+    assert.equal(c.UI.els.rerollBtn.disabled, true);
+    assert.equal(c.STATE.typingContactIds.has(a.id), true);
 });
 
 test('删除全部文字保留图片后，真实历史渲染不会把用户时间前缀当正文', () => {

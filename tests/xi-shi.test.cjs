@@ -54,6 +54,9 @@ function harness() {
     context.parseCustomMarkdown = text => context.App.escapeHtml(text);
     context.window = { getSelection: () => ({ toString: () => '' }) };
     vm.runInContext(fs.readFileSync('js/xi-shi.js', 'utf8') + '\nglobalThis.XiShi = XiShi;', context);
+    // ★ 此处隔离浏览器 DOM；真实 Markdown、高亮节点和安全过滤由浏览器集成检查覆盖。
+    context.XiShi.renderMarkdown = (text, keyword) => keyword
+        ? context.App.highlightSearchText(text, keyword) : context.parseCustomMarkdown(text);
     const contact = { id: 'a', name: '<角色>', history: [], offlineHistory: [] };
     context.STATE.contacts = [contact];
     context.STATE.currentContactId = 'a';
@@ -74,8 +77,8 @@ test('整组收藏为独立快照：编辑/删除原消息、修改图片数组�
     assert.equal(h.STATE.xiShiRecords.length, 1);
     assert.equal(h.STATE.xiShiRecords[0].text, '第一段\n\n第二段');
     assert.equal(h.STATE.xiShiRecords[0].images[0], 'data:image/png;base64,a');
-    assert.equal(h.toasts[0].options?.icon || 'check', 'check');
-    assert.equal(h.toasts.at(-1).options?.icon || 'check', 'check');
+    assert.equal(h.toasts[0].options?.icon || 'check', 'xi-shi');
+    assert.equal(h.toasts.at(-1).options?.icon || 'check', 'xi-shi');
     assert.equal(h.toasts.at(-1).text, '已收藏到夕拾');
 });
 
@@ -93,17 +96,17 @@ test('线上/线下菜单按消息身份收藏整组，不会因菜单打开后�
     assert.equal(h.STATE.xiShiRecords.length, 2);
 });
 
-test('星标按操作时间置顶，取消星标恢复收藏时间顺序，搜索完整正文且不改变源列表', async () => {
+test('星标优先且组内按消息时间倒序，取消星标恢复消息时间顺序，搜索完整正文且不改变源列表', async () => {
     const h = harness();
     for (let n = 1; n <= 3; n++) {
         h.clock(n * 1000);
-        const msg = { messageId: `m${n}`, content: `${'长正文'.repeat(50)} 纪念 A+B ${n}` };
+        const msg = { messageId: `m${n}`, timestamp: `2026-11-24 12:0${n}`, content: `${'长正文'.repeat(50)} 纪念 A+B ${n}` };
         h.contact.history.push(msg); await h.XiShi.collect(h.contact, msg);
     }
     const [a, b, c] = h.STATE.xiShiRecords;
     h.clock(4000); await h.XiShi.update(b.id);
     h.clock(5000); await h.XiShi.update(a.id);
-    assert.deepEqual(Array.from(h.XiShi.sorted(), r => r.id), [a.id, b.id, c.id]);
+    assert.deepEqual(Array.from(h.XiShi.sorted(), r => r.id), [b.id, a.id, c.id]);
     assert.equal(h.XiShi.sorted('a+b').length, 3);
     assert.equal(h.XiShi.sorted('不存在').length, 0);
     await h.XiShi.update(a.id);
@@ -222,4 +225,72 @@ test('展开后点模块任意非标题区域收起，summary 保留原生行为
     h.XiShi.handleThoughtClick(event(null));
     assert.equal(details.open, true);
     assert.equal(h.XiShi.handleThoughtClick({ target: { closest: () => null } }), false);
+});
+
+// ★ 收藏顺序故意与消息顺序相反，星标顺序也反过来，避免只靠列表插入顺序碰巧通过。
+test('消息实际时间决定排序，置顶内部也按消息时间倒序，同条消息的气泡按原文倒序', async () => {
+    const h = harness();
+    const older = { messageId: 'older', role: 'assistant', timestamp: '2026-11-20 10:00', content: '旧消息' };
+    const newer = { messageId: 'newer', role: 'assistant', timestamp: '2026-11-24 10:00', content: '新消息第一段\n\n新消息第二段' };
+    h.contact.history.push(older, newer);
+    const firstKey = h.ChatBubbles.keyAt(newer, 0), secondKey = h.ChatBubbles.keyAt(newer, 1);
+    await h.XiShi.collectMany(h.contact, [{ message: newer, key: secondKey }, { message: newer, key: firstKey }]);
+    h.clock(9000); await h.XiShi.collect(h.contact, older);
+    const [second, first, old] = h.STATE.xiShiRecords;
+    assert.deepEqual(Array.from(h.XiShi.sorted(), r => r.id), [second.id, first.id, old.id]);
+    h.clock(10000); await h.XiShi.update(second.id);
+    h.clock(11000); await h.XiShi.update(old.id);
+    assert.deepEqual(Array.from(h.XiShi.sorted(), r => r.id), [second.id, old.id, first.id]);
+    h.contact.history = [];
+    assert.deepEqual(Array.from(h.XiShi.sorted(), r => r.id), [second.id, old.id, first.id]);
+});
+
+test('文字、图片和思考气泡分别快照，单气泡去重不排斥整组收藏，修改原文后仍然独立', async () => {
+    const h = harness();
+    const message = { messageId: 'all', role: 'assistant', content: '<think>思考内容</think>第一段\n\n第二段',
+        timestamp: '2026-11-24 10:00', images: ['data:image/png;base64,aaa'], image_description: '图片内容' };
+    h.contact.history.push(message);
+    h.ChatBubbles.ensure(message);
+    const keys = [message.bubbleIds[0], message.imageBubbleKey, message.thoughtBubbleKey];
+    await h.XiShi.collectMany(h.contact, keys.map(key => ({ message, key })));
+    const [text, image, thought] = h.STATE.xiShiRecords;
+    assert.equal(text.text, '第一段'); assert.equal(text.images.length, 0); assert.equal(text.imageDescription, '');
+    assert.equal(image.text, ''); assert.equal(image.images[0], 'data:image/png;base64,aaa'); assert.equal(image.imageDescription, '图片内容');
+    assert.equal(thought.text, '思考内容'); assert.equal(thought.images.length, 0);
+    assert.equal(h.XiShi.content(thought).thought, '思考内容');
+    assert.equal(await h.XiShi.collectMany(h.contact, keys.map(key => ({ message, key }))), false);
+    assert.equal(h.STATE.xiShiRecords.length, 3);
+    await h.XiShi.collect(h.contact, message);
+    assert.equal(h.STATE.xiShiRecords.length, 4);
+    h.ChatBubbles.edit(message, '改写'); message.images[0] = '改图';
+    assert.equal(text.text, '第一段'); assert.equal(image.images[0], 'data:image/png;base64,aaa');
+    assert.equal(thought.text, '思考内容');
+});
+
+test('批量收藏失败全部不提交，重试不丢条目；已删除气泡和消息不收藏邻居', async () => {
+    const h = harness(), message = { messageId: 'batch', role: 'user', content: '第一段\n\n第二段' };
+    h.contact.history.push(message);
+    const key = h.ChatBubbles.keyAt(message, 0), other = h.ChatBubbles.keyAt(message, 1);
+    const targets = [key, other].map(key => ({ message, key }));
+    h.fail(true);
+    assert.equal(await h.XiShi.collectMany(h.contact, targets), false);
+    assert.equal(h.STATE.xiShiRecords.length, 0);
+    h.fail(false); assert.equal(await h.XiShi.collectMany(h.contact, targets), true);
+    assert.equal(h.STATE.xiShiRecords.length, 2);
+    h.ChatBubbles.deleteParts(message, [key]);
+    assert.equal(await h.XiShi.collectMany(h.contact, [{ message, key }]), false);
+    h.contact.history = [{ messageId: 'neighbor', content: '邻居' }];
+    assert.equal(await h.XiShi.collectMany(h.contact, [{ message, key: other }]), false);
+    assert.equal(h.STATE.xiShiRecords.length, 2);
+});
+
+test('旧收藏按原消息时间排序，原文已删除时仍可按快照时间排序，不猜旧日期的年份', () => {
+    const h = harness();
+    h.contact.history = [{ messageId: 'old', eventAt: 1000 }, { messageId: 'new', eventAt: 2000 }];
+    const record = (id, extra) => ({ id, contactId: 'a', source: 'history', sourceMessageId: id, text: id, ...extra });
+    h.STATE.xiShiRecords = [record('old', { collectedAt: 9000 }), record('new', { collectedAt: 3000 })];
+    assert.deepEqual(Array.from(h.XiShi.sorted(), r => r.id), ['new', 'old']);
+    h.STATE.xiShiRecords.push(record('deleted', { messageTime: '2026-11-24 10:00', collectedAt: 1 }));
+    assert.equal(h.XiShi.sorted()[0].id, 'deleted');
+    assert.equal(h.XiShi.parseTime('Nov.24 10:00'), 0);
 });

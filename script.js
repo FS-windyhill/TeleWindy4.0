@@ -682,8 +682,10 @@ const STATE = {
     currentBookId: null, // ★★★ 新增：当前正在编辑哪本书
     settings: {}, 
     typingContactId: null, // ★★★ 新增：用于追踪哪个联系人正在输入，null表示无人输入
-    chatRequestActive: false, // ★ 主聊天共用请求槽，准备上下文期间也阻止重复请求和跨角色结果覆盖
-    onlineChatWait: null, // ★ 线上回复的等待归属，旧请求退出时不能清掉新一轮状态
+    chatRequestActive: false, // ★ 是否还有聊天请求，保留给需要判断整体忙碌状态的入口。
+    chatRequests: new Map(), // ★ 按角色保存请求归属；同角色防重，不阻塞其他角色。
+    typingContactIds: new Set(), // ★ 多个角色可以同时输入，切页时各自恢复状态。
+    onlineChatWait: null, // ★ 最近一轮线上等待，具体归属以 chatRequests 为准。
     visibleMsgCount: 15, // ★★★ 新增：当前聊天窗口显示的条数，默认为15
     isSelectMode: false,      // 当前是否处于多选模式
     selectedBubbles: new Set(),  // 存储选中的气泡DOM元素
@@ -1216,6 +1218,7 @@ const API = {
                 userMessageId: settings.ASYNC_BACKEND_USER_MESSAGE_ID || null
             };
             if (wait) wait.result = reply;
+            else if (settings.ASYNC_BACKEND_RESULT) Object.assign(settings.ASYNC_BACKEND_RESULT, reply);
             else this.lastAsyncBackendResult = reply;
             if (result.multimodal_fallback === true) this.notifyMultimodalFallback(job.jobId);
             return (result.result || '').trim();
@@ -2410,7 +2413,7 @@ const Toast = {
         const item = {
             message: String(message || ''),
             duration: Number.isFinite(options.duration) ? Math.max(0, options.duration) : 1500,
-            icon: ['check', 'settings', 'warning', 'loader', 'triangle-exclamation-point'].includes(options.icon)
+            icon: ['check', 'settings', 'warning', 'loader', 'triangle-exclamation-point', 'xi-shi'].includes(options.icon)
                 ? options.icon : 'check'
         };
 
@@ -2443,7 +2446,10 @@ const Toast = {
         icon.setAttribute('stroke-linejoin', 'round');
         icon.setAttribute('aria-hidden', 'true');
 
-        if (item.icon === 'settings') {
+        if (item.icon === 'xi-shi') {
+            // ★ 夕拾收藏反馈使用探索入口的玫瑰，尺寸沿用 Toast 的 0.8rem，线宽沿用通用设置。
+            icon.innerHTML = '<path d="M17 10h-1a4 4 0 1 1 4-4v.534"/><path d="M17 6h1a4 4 0 0 1 1.42 7.74l-2.29.87a6 6 0 0 1-5.339-10.68l2.069-1.31"/><path d="M4.5 17c2.8-.5 4.4 0 5.5.8s1.8 2.2 2.3 3.7c-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2"/><path d="M9.77 12C4 15 2 22 2 22"/><circle cx="17" cy="8" r="2"/>';
+        } else if (item.icon === 'settings') {
             const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
             circle.setAttribute('cx', '12');
             circle.setAttribute('cy', '12');
@@ -2837,6 +2843,8 @@ const UI = {
 
     // 切换窗口+朋友圈版
     switchView(viewName) {
+        // ★ 切换页面时收起消息悬浮菜单，并清理临时的滚动/键盘监听。
+        App.hideMessageContextMenu();
         // ★ 页面切走时立即停麦，避免识别结果回填到后来打开的聊天。
         globalThis.ChatVoiceInput?.cancel();
         const appContainer = document.getElementById('app-container');
@@ -4510,11 +4518,12 @@ const UI = {
 
     updateOfflineRerollState(contact) {
         if (!this.els.offlineRerollBtn) return;
+        const isLoading = STATE.chatRequests?.has(contact?.id) || STATE.typingContactIds?.has(contact?.id);
         const hasHistory = (contact?.offlineHistory || []).some(m => {
             return m.role === 'assistant' && m.isTransientError !== true;
         });
-        this.els.offlineRerollBtn.style.opacity = hasHistory ? '1' : '0.5';
-        this.els.offlineRerollBtn.disabled = !hasHistory;
+        this.els.offlineRerollBtn.style.opacity = hasHistory && !isLoading ? '1' : '0.5';
+        this.els.offlineRerollBtn.disabled = !hasHistory || !!isLoading;
     },
 
     // 线下记录里的临时失败占位在重新打开时清掉，与线上 clearTransientChatErrors 同口径。
@@ -4670,9 +4679,10 @@ const UI = {
         const contact = STATE.contacts.find(c => c.id === contactId);
         if (!contact) return;
         // ★ 前台等待和切屏后留下的普通聊天 job 都能用底部发送键停止。
-        const wait = STATE.onlineChatWait?.contactId === contactId ? STATE.onlineChatWait : null;
+        const wait = STATE.chatRequests?.get(contactId)
+            || (STATE.onlineChatWait?.contactId === contactId ? STATE.onlineChatWait : null);
         const pending = App.getPendingOnlineChatJobs(contact);
-        const isLoading = STATE.typingContactId === contactId || pending.length > 0;
+        const isLoading = STATE.typingContactIds?.has(contactId) || STATE.typingContactId === contactId || pending.length > 0;
         this.renderContactPresence(contact, isLoading);
         const receiving = pending.some(job => job.jobId === App._receivingOnlineChatJobId);
         const canStop = !wait?.committing && !receiving && (!!wait || pending.length > 0);
@@ -4692,12 +4702,19 @@ const UI = {
     },
     // UI渲染：对方正在输入
     setLoading(isLoading, contactId) { // ★★★ 参数 contactId 依然是必需的
-        // 1. 更新全局状态，让程序知道“谁”在输入
-        if (isLoading) STATE.typingContactId = contactId;
-        else if (STATE.typingContactId === contactId) STATE.typingContactId = null;
+        // ★ 每个角色独立登记；A 结束时不能清掉仍在等待的 B。
+        const typing = STATE.typingContactIds ||= new Set();
+        if (isLoading) typing.add(contactId);
+        else typing.delete(contactId);
+        STATE.typingContactId = typing.values().next().value ?? null;
         
         // 2. 关键检查：只有当这个状态更新是针对“当前打开的”聊天窗口时，才刷新UI
         this.refreshChatPresence(contactId);
+        if (STATE.contacts.find(c => c.id === contactId)?.chatMode === 'offline' && App.isOfflineChatOpen?.(contactId)) {
+            this.setOfflineTyping(isLoading);
+            if (this.els.offlineSendBtn) this.els.offlineSendBtn.disabled = !!isLoading;
+            this.updateOfflineRerollState(STATE.contacts.find(c => c.id === contactId));
+        }
     },
 
     updateRerollState(contact, isLoading = this.els.sendBtn?.disabled || this.els.sendBtn?.dataset.action === 'stop-wait') {
@@ -10887,7 +10904,7 @@ const App = {
 
         // ★★★ 新增：进入聊天时，根据全局状态，正确设置顶部的“正在输入”或“在线”状态
         // 检查当前是不是应该显示“正在输入”
-        const isLoading = STATE.typingContactId === id;
+        const isLoading = STATE.typingContactIds?.has(id) || STATE.typingContactId === id;
         // 更新UI（即使isLoading是false，也需要调用一次来把状态文字设置为当前联系人名）
         UI.setLoading(isLoading, id);
 
@@ -11320,7 +11337,8 @@ const App = {
     stopOnlineChatWait() {
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!contact) return;
-        const wait = STATE.onlineChatWait?.contactId === contact.id ? STATE.onlineChatWait : null;
+        const wait = STATE.chatRequests?.get(contact.id)
+            || (STATE.onlineChatWait?.contactId === contact.id ? STATE.onlineChatWait : null);
         const pending = this.getPendingOnlineChatJobs(contact);
         if (wait?.committing || pending.some(job => job.jobId === this._receivingOnlineChatJobId)) return;
         if (!wait && !pending.length) return;
@@ -11335,8 +11353,9 @@ const App = {
         }
         if (wait) {
             wait.controller.abort();
-            STATE.onlineChatWait = null;
-            STATE.chatRequestActive = false;
+            STATE.chatRequests?.delete(contact.id);
+            if (STATE.onlineChatWait === wait) STATE.onlineChatWait = null;
+            STATE.chatRequestActive = !!STATE.chatRequests?.size;
         }
         UI.clearRerollPreview?.(contact, 'history', true);
         UI.setLoading(false, contact.id);
@@ -11346,8 +11365,8 @@ const App = {
     async handleSend(isReroll = false) {
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!contact) return;
-        // ★ 在首次 await 前占用请求槽；跨角色也不能并发覆盖 API.lastAsyncBackendResult。
-        if (STATE.chatRequestActive || STATE.typingContactId) return;
+        // ★ 只拦本角色的重复请求；其他角色可独立发送和重生成。
+        if (STATE.chatRequests?.has(contact.id) || STATE.typingContactIds?.has(contact.id) || STATE.typingContactId === contact.id) return;
         if (typeof API.loadPendingJobs === 'function' && API.loadPendingJobs().some(job =>
             job.contactId === contact.id && job.status === 'running')) return;
         // ★ 主动消息沿用自己的前端/Worker 请求方式，旧正文保留到新结果成功。
@@ -11389,6 +11408,7 @@ const App = {
         const controller = new AbortController();
         const { signal } = controller;
         const wait = { contactId: contact.id, controller, committing: false, result: null };
+        (STATE.chatRequests ||= new Map()).set(contact.id, wait);
         STATE.onlineChatWait = wait;
         STATE.chatRequestActive = true;
         requestSettings.ONLINE_CHAT_WAIT = wait;
@@ -12212,10 +12232,11 @@ const App = {
             }
         } finally {
             // ★ 停止后下一轮可以立即开始；旧轮次的 finally 不能清掉它的状态或预览。
-            if (STATE.onlineChatWait === wait) {
+            if (STATE.chatRequests?.get(contact.id) === wait) {
                 UI.clearRerollPreview?.(contact, 'history');
-                STATE.onlineChatWait = null;
-                STATE.chatRequestActive = false;
+                STATE.chatRequests.delete(contact.id);
+                if (STATE.onlineChatWait === wait) STATE.onlineChatWait = null;
+                STATE.chatRequestActive = STATE.chatRequests.size > 0;
                 UI.setLoading(false, contact.id);
                 // 手机端不自动聚焦，防止键盘弹起遮挡
                 if (this.isViewingContactChat(contact.id) && window.innerWidth >= 800 && UI.els.input) UI.els.input.focus();
@@ -12251,6 +12272,8 @@ const App = {
         // 打开时才可见：把上次遗留的输入内容按当前字号重新适配高度
         UI.autoGrowComposer(UI.els.offlineInput);
         UI.renderOfflineChatHistory(contact);
+        // ★ 共用线下 DOM，进入时按当前角色恢复，不能沿用上一位的按钮状态。
+        UI.setLoading(!!STATE.typingContactIds?.has(contact.id), contact.id);
         Storage.saveContacts();
     },
 
@@ -12316,8 +12339,8 @@ const App = {
     async handleOfflineSend(isReroll = false) {
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         if (!contact || !OfflineChat.isOffline(contact)) return;
-        // ★ 在首次 await 前占用请求槽；跨角色也不能并发覆盖 API.lastAsyncBackendResult。
-        if (STATE.chatRequestActive || STATE.typingContactId) return;
+        // ★ 线下与线上共用角色级防重，不占用其他角色的请求槽。
+        if (STATE.chatRequests?.has(contact.id) || STATE.typingContactIds?.has(contact.id) || STATE.typingContactId === contact.id) return;
         if (typeof API.loadPendingJobs === 'function' && API.loadPendingJobs().some(job =>
             job.contactId === contact.id && job.status === 'running')) return;
         OfflineChat.ensureFields(contact);
@@ -12340,8 +12363,12 @@ const App = {
         let userText = (inputEl?.value || '').trim();
         if (!isReroll && !userText) return;
         let replacementRollback = null; // ★ 保存新正文失败时恢复旧数组，避免内存和磁盘各留一半。
+        // ★ 后台结果绑定本轮对象，多个角色同时返回也不会串用 jobId。
+        const wait = { contactId: contact.id, controller: new AbortController(), result: null };
+        (STATE.chatRequests ||= new Map()).set(contact.id, wait);
+        requestSettings.ONLINE_CHAT_WAIT = wait;
         STATE.chatRequestActive = true;
-        STATE.typingContactId = contact.id;
+        UI.setLoading(true, contact.id);
         requestSettings.CHAT_HISTORY_KEY = 'offlineHistory';
         try {
 
@@ -12396,9 +12423,7 @@ const App = {
             const roundId = agentUserMessage?.messageId || '';
 
             await Storage.saveContacts();
-            STATE.typingContactId = contact.id;
-            UI.setOfflineTyping(true);
-            if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.disabled = true;
+            UI.setLoading(true, contact.id);
 
             // ============================================================
             // 4. 构建线下见面 prompt
@@ -12562,7 +12587,7 @@ const App = {
             requestSettings.USAGE_REROLL = isReroll;
             const aiText = await API.chat(messagesToSend, requestSettings);
 
-            const asyncJobId = usingAsyncBackend ? API.lastAsyncBackendResult?.jobId : null;
+            const asyncJobId = usingAsyncBackend ? wait.result?.jobId : null;
             const alreadySavedByResume = asyncJobId
                 ? contact.offlineHistory.some(msg => msg.asyncJobId === asyncJobId)
                 : false;
@@ -12649,10 +12674,9 @@ const App = {
             if (this.isOfflineChatOpen(contact.id)) UI.appendOfflineCard(contact, errorMessage);
         } finally {
             UI.clearRerollPreview?.(contact, 'offlineHistory');
-            STATE.chatRequestActive = false;
-            if (STATE.typingContactId === contact.id) STATE.typingContactId = null;
-            if (this.isOfflineChatOpen(contact.id)) UI.setOfflineTyping(false);
-            if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.disabled = false;
+            if (STATE.chatRequests?.get(contact.id) === wait) STATE.chatRequests.delete(contact.id);
+            STATE.chatRequestActive = !!STATE.chatRequests?.size;
+            UI.setLoading(false, contact.id);
             if (this.isOfflineChatOpen(contact.id) && window.innerWidth >= 800 && UI.els.offlineInput) UI.els.offlineInput.focus();
         }
     },
@@ -12663,7 +12687,7 @@ const App = {
     // 通过 STATE.offlineSelectedMessageId / STATE.offlineSelectMode 分流到整条卡片级操作。
     // ============================================================
 
-    showOfflineMessageContextMenu(cardEl) {
+    showOfflineMessageContextMenu(cardEl, point) {
         const contact = STATE.contacts.find(c => c.id === STATE.currentContactId);
         const messageId = String(cardEl?.dataset?.messageId || '');
         const message = messageId
@@ -12692,16 +12716,10 @@ const App = {
             });
         }
         const toggleBtn = menu.querySelector('button[data-action="toggle-hidden"]');
-        if (toggleBtn) toggleBtn.textContent = message.isHidden ? '取消隐藏' : '向Ta隐藏';
+        if (toggleBtn) toggleBtn.querySelector('.message-menu-label').textContent = message.isHidden ? '取消隐藏' : '向ta隐藏';
 
-        // 防误触锁与线上菜单保持一致
-        menu.classList.add('locked');
-        menu.style.pointerEvents = 'none';
-        menu.style.display = 'flex';
-        setTimeout(() => {
-            menu.classList.remove('locked');
-            menu.style.pointerEvents = 'auto';
-        }, 300);
+        this.contextMenuBubble = cardEl;
+        this.presentMessageContextMenu(cardEl.getBoundingClientRect(), point);
     },
 
     handleOfflineMessageAction(action) {
@@ -12746,7 +12764,9 @@ const App = {
             Storage.saveContacts();
             UI.renderOfflineChatHistory(contact, false, true);
         } else if (action === 'multi-select') {
+            const card = this.contextMenuBubble;
             this.enterOfflineSelectMode();
+            if (card) this.toggleOfflineCardSelection(card);
         } else if (action === 'copy') {
             let contentToCopy = msgData.content || '';
             if (timestampRegex.test(contentToCopy)) {
@@ -13839,11 +13859,9 @@ const App = {
         }
 
         if (action === 'multi-select') {
+            const bubble = this.contextMenuBubble;
             this.enterSelectMode();
-            // 自动选中触发菜单的那个气泡
-            const msgIndex = STATE.selectedMessageIndex;
-            // 假设我们能获取到刚才点的那个元素 (这里稍微简化，先进入模式)
-            // 你可以通过之前 savedRect 对应的元素来选中，或者留空让用户自己选
+            if (bubble) this.toggleBubbleSelection(bubble);
         }
 
         else if (action === 'copy') {
@@ -13997,6 +14015,7 @@ const App = {
             if (STATE.offlineSelectMode) this.handleOfflineBatchCopy();
             else this.handleBatchCopy();
         });
+        document.getElementById('btn-batch-collect').addEventListener('click', () => this.handleBatchCollect());
         document.getElementById('btn-batch-delete').addEventListener('click', () => {
             if (STATE.offlineSelectMode) this.handleOfflineBatchDelete();
             else this.handleBatchDelete();
@@ -14012,6 +14031,35 @@ const App = {
     },
 
 
+
+    // ★ 线上按气泡独立收藏，线下仍以整张卡片为单位；保存成功后再退出多选，失败保留选择供重试。
+    async handleBatchCollect() {
+        if (this._batchCollecting) return;
+        const contact = STATE.contacts.find(item => item.id === STATE.currentContactId);
+        if (!contact) return;
+        const offline = !!STATE.offlineSelectMode;
+        const source = offline ? 'offlineHistory' : 'history';
+        const selected = offline ? STATE.offlineSelectedIds : STATE.selectedBubbles;
+        const targets = offline
+            ? (contact.offlineHistory || []).filter(message => selected?.has(String(message.messageId))).map(message => ({ message }))
+            : [...(selected || [])].map(bubble => this.resolveSelectedBubble(contact, bubble)).filter(Boolean)
+                .sort((a, b) => a.msgIndex - b.msgIndex || (a.partIndex === 'thought' ? -1 : a.partIndex) - (b.partIndex === 'thought' ? -1 : b.partIndex));
+        if (!targets.length) return;
+        this._batchCollecting = true;
+        try {
+            const saved = await XiShi.collectMany(contact, targets, source);
+            const allSaved = targets.every(({ message, key }) => XiShi.records(contact.id).some(record => record.source === source
+                && record.sourceMessageId === String(message.messageId) && (record.sourceBubbleKey || '') === (key || '')));
+            // ★ 用户保存时可能已切换聊天或重新进入多选，不关闭后来打开的选择栏。
+            if ((saved || allSaved) && STATE.currentContactId === contact.id
+                && selected === (offline ? STATE.offlineSelectedIds : STATE.selectedBubbles)) {
+                if (offline) this.exitOfflineSelectMode();
+                else this.exitSelectMode();
+            }
+        } finally {
+            this._batchCollecting = false;
+        }
+    },
 
     // ==========================================
     // ★★★ 核心：批量复制逻辑 ★★★
@@ -14209,7 +14257,7 @@ const App = {
 
 
     // 【7. APP CONTROLLER】
-    showMessageContextMenu(msgIndex, rect, target) {
+    showMessageContextMenu(msgIndex, rect, target, point) {
         STATE.selectedMessageId = null;
         STATE.selectedMessageRef = null;
         STATE.selectedMessageIndex = msgIndex;
@@ -14246,9 +14294,7 @@ const App = {
                 this.handleMessageAction(action); 
                 this.hideMessageContextMenu();
             });
-            menu.querySelector('.menu-backdrop').addEventListener('click', () => {
-                this.hideMessageContextMenu();
-            });
+
         }
 
         // ★★★ 新增：动态修改按钮文字 ★★★
@@ -14260,9 +14306,9 @@ const App = {
             
             if (toggleBtn) {
                 if (msg.isHidden) {
-                    toggleBtn.textContent = "取消隐藏";
+                    toggleBtn.querySelector(".message-menu-label").textContent = "取消隐藏";
                 } else {
-                    toggleBtn.textContent = "向Ta隐藏";
+                    toggleBtn.querySelector(".message-menu-label").textContent = "向ta隐藏";
                 }
             }
         }
@@ -14270,24 +14316,84 @@ const App = {
 
 
 
-        // --- ★★★★★ 核心修改：防误触锁 ★★★★★ ---
-        
-        // 1. 先加上锁定 class (或者直接用 style)
+        this.contextMenuBubble = target?.closest('.message-bubble') || null;
+        this.presentMessageContextMenu(rect, point);
+    },
+
+    // ★ 悬浮菜单共用定位：优先气泡上方，空间不足翻到下方；长气泡按实际触点定位。
+    presentMessageContextMenu(rect, point) {
+        const menu = document.getElementById('msg-context-menu');
+        const panel = menu.querySelector('.menu-panel');
+        this.contextMenuCleanup?.();
+        clearTimeout(this.contextMenuUnlockTimer);
+        menu.style.display = 'block';
         menu.classList.add('locked');
-        menu.style.pointerEvents = 'none'; // 物理禁用点击
-        menu.style.display = 'flex';       // 显示出来
-        
-        // 2. 300毫秒后解锁
-        setTimeout(() => {
-            menu.classList.remove('locked');
-            menu.style.pointerEvents = 'auto'; // 恢复点击
+        menu.style.pointerEvents = 'auto';
+        const viewport = window.visualViewport;
+        const leftEdge = viewport?.offsetLeft || 0, topEdge = viewport?.offsetTop || 0;
+        const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
+        // ★ 与 CSS 的紧凑宽度保持一致，视口缩小时仍保留两侧空隙。
+        panel.style.width = `${Math.min(300, width - 32)}px`;
+        const bounds = panel.getBoundingClientRect();
+        const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
+        const anchorX = clamp(point?.x ?? (rect.left + rect.right) / 2, leftEdge + 8, leftEdge + width - 8);
+        const tall = rect.height > height * 0.55;
+        const anchorTop = tall && point ? point.y : rect.top;
+        const anchorBottom = tall && point ? point.y : rect.bottom;
+        const above = anchorTop - bounds.height - 12;
+        const below = above < topEdge + 8;
+        panel.classList.toggle('below', below);
+        const left = clamp(anchorX - bounds.width / 2, leftEdge + 8, leftEdge + width - bounds.width - 8);
+        const top = clamp(below ? anchorBottom + 12 : above, topEdge + 8, topEdge + height - bounds.height - 8);
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
+        panel.style.setProperty('--menu-arrow-x', `${clamp(anchorX - left, 14, bounds.width - 14)}px`);
+        // ★ 遮罩始终接住点击，锁定只拦菜单动作，避免松手时穿透到底下的图片或链接。
+        if (!menu.dataset.dismissInitialized) {
+            menu.dataset.dismissInitialized = 'true';
+            menu.querySelector('.menu-backdrop').addEventListener('click', () => {
+                if (!menu.classList.contains('locked')) this.hideMessageContextMenu();
+            });
+        }
+        // ★ 真正长按时要等手指/鼠标松开再解锁，长时间按住也不会把松手当成菜单点击。
+        let pressing = point?.pressed === true;
+        const release = () => {
+            if (!pressing) return;
+            pressing = false;
+            clearTimeout(this.contextMenuUnlockTimer);
+            this.contextMenuUnlockTimer = setTimeout(() => menu.classList.remove('locked'), 150);
+        };
+        this.contextMenuUnlockTimer = setTimeout(() => {
+            if (!pressing) menu.classList.remove('locked');
         }, 300);
+        const close = () => this.hideMessageContextMenu();
+        const keydown = event => { if (event.key === 'Escape') close(); };
+        window.addEventListener('resize', close);
+        document.addEventListener('scroll', close, true);
+        document.addEventListener('keydown', keydown);
+        document.addEventListener('touchend', release, true);
+        document.addEventListener('touchcancel', release, true);
+        document.addEventListener('mouseup', release, true);
+        viewport?.addEventListener('resize', close);
+        this.contextMenuCleanup = () => {
+            window.removeEventListener('resize', close);
+            document.removeEventListener('scroll', close, true);
+            document.removeEventListener('keydown', keydown);
+            document.removeEventListener('touchend', release, true);
+            document.removeEventListener('touchcancel', release, true);
+            document.removeEventListener('mouseup', release, true);
+            viewport?.removeEventListener('resize', close);
+        };
     },
 
     // 隐藏方法
     hideMessageContextMenu() {
         const menu = document.getElementById('msg-context-menu');
         if (menu) menu.style.display = 'none';
+        clearTimeout(this.contextMenuUnlockTimer);
+        this.contextMenuCleanup?.();
+        this.contextMenuCleanup = null;
+        this.contextMenuBubble = null;
         STATE.selectedMessageIndex = null;
         STATE.selectedMessageId = null;
         STATE.selectedMessageRef = null;
@@ -16080,9 +16186,9 @@ const App = {
                 if (!card || window.getSelection().toString().length > 0) return null;
                 return card;
             };
-            const openOfflineMenu = (card) => {
+            const openOfflineMenu = (card, point) => {
                 if (STATE.offlineSelectMode) return;
-                this.showOfflineMessageContextMenu(card);
+                this.showOfflineMessageContextMenu(card, point);
             };
 
             UI.els.offlineMsgs.addEventListener('contextmenu', (event) => event.preventDefault());
@@ -16096,7 +16202,7 @@ const App = {
                 offlineLongPressTimer = setTimeout(() => {
                     e.preventDefault();
                     if (window.getSelection().toString().length > 0) return;
-                    openOfflineMenu(card);
+                    openOfflineMenu(card, { x: offlineStartX, y: offlineStartY, pressed: true });
                 }, 380);
             }, { passive: false });
 
@@ -16108,6 +16214,7 @@ const App = {
             }, { passive: true });
 
             UI.els.offlineMsgs.addEventListener('touchend', clearOfflineLongPress, { passive: true });
+            UI.els.offlineMsgs.addEventListener('touchcancel', clearOfflineLongPress, { passive: true });
 
             UI.els.offlineMsgs.addEventListener('mousedown', e => {
                 if (e.button !== 0) return;
@@ -16116,7 +16223,7 @@ const App = {
                 if (!card) return;
                 offlineLongPressTimer = setTimeout(() => {
                     if (window.getSelection().toString().length > 0) return;
-                    openOfflineMenu(card);
+                    openOfflineMenu(card, { x: e.clientX, y: e.clientY, pressed: true });
                 }, 380);
             });
             UI.els.offlineMsgs.addEventListener('mouseup', clearOfflineLongPress);
@@ -16445,6 +16552,7 @@ const App = {
 
         // 1. 触摸开始
         UI.els.chatMsgs.addEventListener('touchstart', e => {
+            if (STATE.isSelectMode) return;
             // 点击代码复制按钮时不启动消息长按菜单
             if (e.target.closest('.code-copy-btn')) return;
 
@@ -16470,7 +16578,7 @@ const App = {
                 // ★★★ 使用 bubble 的位置来弹出菜单，如果 bubble 存在的话 ★★★
                 // 这样即使用户按在分割线上，也能在 group 的位置弹出菜单
                 const rect = bubble ? bubble.getBoundingClientRect() : group.getBoundingClientRect();
-                App.showMessageContextMenu(msgIndex, rect, bubble || group);
+                App.showMessageContextMenu(msgIndex, rect, bubble || group, { x: startX, y: startY, pressed: true });
 
             }, LONG_PRESS_DURATION);
 
@@ -16495,8 +16603,14 @@ const App = {
             }
         }, { passive: true });
 
+        UI.els.chatMsgs.addEventListener('touchcancel', () => {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }, { passive: true });
+
         // 4. 桌面端鼠标长按 (应用相同的修改逻辑)
         UI.els.chatMsgs.addEventListener('mousedown', e => {
+            if (STATE.isSelectMode) return;
             if (e.button !== 0) return; 
             // 点击代码复制按钮时不启动消息长按菜单
             if (e.target.closest('.code-copy-btn')) return;
@@ -16515,7 +16629,7 @@ const App = {
                 
                 // ★★★ 使用 bubble 或 group 的位置来弹出菜单 ★★★
                 const rect = bubble ? bubble.getBoundingClientRect() : group.getBoundingClientRect();
-                App.showMessageContextMenu(msgIndex, rect, bubble || group);
+                App.showMessageContextMenu(msgIndex, rect, bubble || group, { x: e.clientX, y: e.clientY, pressed: true });
             }, LONG_PRESS_DURATION);
         });
 

@@ -1427,8 +1427,10 @@ const ProactiveMessages = {
             await Storage.saveContacts();
             settings.USAGE_CHAT = true;
             settings.USAGE_REROLL = true;
+            // ★ 结果跟随本次请求，其他角色并发聊天不会覆盖本轮 jobId。
+            settings.ASYNC_BACKEND_RESULT = {};
             const rawText = await API.chat(messages, settings);
-            const jobId = API.lastAsyncBackendResult?.jobId || null;
+            const jobId = settings.ASYNC_BACKEND_RESULT.jobId || null;
             await this.applyRerollResult(contact, context, rawText, jobId);
             if (jobId) {
                 try {
@@ -1446,7 +1448,7 @@ const ProactiveMessages = {
         } finally {
             UI.clearRerollPreview?.(contact, 'history');
             this.rerollingContacts.delete(String(contact.id));
-            if (STATE.typingContactId === contact.id) UI.setLoading(false, contact.id);
+            UI.setLoading(false, contact.id);
         }
     },    // ★★★★★ 主动消息独立重生成 END ★★★★★
 

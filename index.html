@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 长期记忆弹窗统一背景模糊，更新版本参数避免 PWA 沿用旧样式。 -->
-    <link rel="stylesheet" href="./style.css?v=20261124-xi-shi-thought-2">
+    <link rel="stylesheet" href="./style.css?v=20261125-message-menu-compact-2">
 </head>
 <body>
 
@@ -871,7 +871,7 @@
                     <div class="inline-search-status" role="status" aria-live="polite" hidden></div>
                 </div>
                 <div id="xi-shi-list" class="heart-note-detail-list"></div>
-                <div id="xi-shi-detail-empty" class="todo-empty-hint">还没有夕拾，在聊天消息菜单中点“收藏到夕拾”，留住想珍藏的片刻。</div>
+                <div id="xi-shi-detail-empty" class="todo-empty-hint">还没有夕拾，在聊天消息菜单或多选气泡中点“收藏”，留住想珍藏的片刻。</div>
             </main>
         </div>
         <!-- ★★★★★ 夕拾：角色列表 / 收藏快照 END ★★★★★ -->
@@ -3069,28 +3069,21 @@
     </div>
     <!-- ★★★★★ 联系人列表长按操作菜单 END ★★★★★ -->
 
+    <!-- ★ 长按整组操作：标题只作说明，六个功能横排；透明遮罩仅用于点击外部关闭。 -->
     <div id="msg-context-menu" class="msg-context-menu" style="display: none;">
         <div class="menu-backdrop"></div>
-        <div class="menu-panel">
-            <!-- ★★★ 新增标题 ★★★ -->
+        <div class="menu-panel" role="dialog" aria-label="编辑整组">
             <div class="menu-title">编辑整组</div>
-
-            <button data-action="edit">编辑</button>
-            <button data-action="copy">复制</button>
-            <button data-action="multi-select">多选</button>
-            <button data-action="toggle-hidden" id="btn-toggle-hidden">向Ta隐藏</button> 
-            <!-- ★ 夕拾收藏整组快照，与删除聊天原文互不影响。 -->
-            <button data-action="collect-xi-shi">收藏到夕拾</button>
-            
-            <!-- 删除通常是危险操作，用 CSS 单独标红 -->
-            <button data-action="delete">删除</button> 
-            
-            
-            <!-- 取消按钮与其他按钮稍微隔开一点 -->
-            <div class="menu-gap"></div>
-            <button data-action="cancel" class="btn-cancel">取消</button>
+            <div class="message-menu-actions">
+                <button type="button" data-action="edit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L9 17l-4 1 1-4Z"/></svg><span class="message-menu-label">编辑</span></button>
+                <button type="button" data-action="copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg><span class="message-menu-label">复制</span></button>
+                <button type="button" data-action="multi-select"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="m7 12 3 3 7-7"/></svg><span class="message-menu-label">多选</span></button>
+                <!-- ★ 收藏图形与夕拾入口保持一致，尺寸和线宽沿用消息菜单规格。 -->
+                <button type="button" data-action="collect-xi-shi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 10h-1a4 4 0 1 1 4-4v.534"/><path d="M17 6h1a4 4 0 0 1 1.42 7.74l-2.29.87a6 6 0 0 1-5.339-10.68l2.069-1.31"/><path d="M4.5 17c2.8-.5 4.4 0 5.5.8s1.8 2.2 2.3 3.7c-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2"/><path d="M9.77 12C4 15 2 22 2 22"/><circle cx="17" cy="8" r="2"/></svg><span class="message-menu-label">收藏</span></button>
+                <button type="button" data-action="toggle-hidden" id="btn-toggle-hidden"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A10.5 10.5 0 0 1 12 5c7 0 10 7 10 7a17 17 0 0 1-3.1 4M6.3 6.3A20 20 0 0 0 2 12s3 7 10 7a10 10 0 0 0 5.7-1.7"/></svg><span class="message-menu-label">向ta隐藏</span></button>
+                <button type="button" data-action="delete"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg><span class="message-menu-label">删除</span></button>
+            </div>
         </div>
-
     </div>
 
     <!-- 轻量操作反馈独立于弹窗存在，消息菜单关闭后仍能继续显示。 -->
@@ -3292,9 +3285,11 @@
     <!-- 新增：多选操作栏 (Action Bar)               -->
     <!-- ========================================== -->
     <div id="multi-select-bar" class="multi-select-bar hidden">
-        <div class="select-count">已选择 <span id="select-count-num">0</span> 条</div>
+        <!-- ★ 标题和计数同排，下面五个按钮等分可用宽度。 -->
+        <div class="select-heading"><span>多选气泡</span><div class="select-count">已选择 <span id="select-count-num">0</span> 条</div></div>
         <div class="select-actions">
             <button id="btn-batch-copy" class="action-btn">复制</button>
+            <button id="btn-batch-collect" class="action-btn">收藏</button>
             
             <!-- ★★★ 新增：批量隐藏按钮 ★★★ -->
             <button id="btn-batch-hide" class="action-btn">隐藏</button>
@@ -3434,7 +3429,7 @@
     <!-- ★ 电话独立管理临时会话与音频，不把电话模式写入角色持久化字段。 -->
     <script src="./js/phone-call.js?v=20261121-phone-wake-lock-1"></script>
     <!-- ★ 夕拾只读纪念快照，复用现有列表搜索，不参与 AI 上下文。 -->
-    <script src="./js/xi-shi.js?v=20261124-xi-shi-thought-2"></script>
+    <script src="./js/xi-shi.js?v=20261125-bubble-time-markdown-1"></script>
     <script src="./js/phone-history.js?v=20261119-phone-history-2"></script>
     <script src="./js/chat-voice-input.js?v=20261116-chat-voice-toast-3"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->
@@ -3452,7 +3447,7 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261119-schedule-current-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261124-xi-shi-1"></script>
+    <script src="./script.js?v=20261125-message-menu-compact-2"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

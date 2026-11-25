@@ -47,6 +47,10 @@ function harness() {
         'selectHistoryWindowRecords(contact, requestSettings, historyKey = \'history\') {', 'async resumePendingChatJobs() {',
         'rememberPendingJob(jobId, settings) {', 'getPendingOnlineChatJobs(contact) {', 'stopOnlineChatWait() {'];
     const app = vm.runInContext('({' + signatures.map(method).join('\n') + '})', context);
+    // ★ 输入状态使用真实角色集合，验证并发结束和切页时的按钮归属。
+    Object.assign(UI, vm.runInContext('({' + method('setLoading(isLoading, contactId) {') + '})', context));
+    UI.refreshChatPresence = () => {};
+    UI.updateOfflineRerollState = () => {};
     const previewSignatures = ["getRerollPreviewIds(contact, historyKey = 'history') {",
         'beginRerollPreview(contact, historyKey, ids) {', 'clearRerollPreview(contact, historyKey, refresh = false) {',
         'refreshRerollPreview(contact, historyKey) {'];
@@ -154,6 +158,28 @@ test('停止时 Worker 尚未确认创建，迟到的 job 不会登记为待接�
     assert.deepEqual(deleted, ['late-job']);
 });
 
+test('真实后台入口并发返回时，普通聊天和主动 reroll 都保存各自的结果容器', async () => {
+    const h = harness();
+    h.context.UsageStats = { jobStart() {}, jobFinish() {} };
+    const api = vm.runInContext('({' + method('async chatViaAsyncBackend(messages, settings) {') + '})', h.context);
+    const gates = [deferred(), deferred()];
+    let serial = 0;
+    Object.assign(api, { asyncJobLogId: id => id, rememberPendingJob() {},
+        createChatJob: async () => ({ jobId: String(serial++) }),
+        waitForChatJob: (_url, id) => gates[Number(id)].promise,
+        async deleteChatJob() {}, forgetPendingJob() {} });
+    const wait = { controller: new AbortController(), result: null };
+    const holder = {};
+    const a = api.chatViaAsyncBackend([], { ASYNC_BACKEND_URL: 'https://worker.example', CHAT_HISTORY_KEY: 'history', ONLINE_CHAT_WAIT: wait });
+    const b = api.chatViaAsyncBackend([], { ASYNC_BACKEND_URL: 'https://worker.example', ASYNC_BACKEND_RESULT: holder });
+    gates[1].resolve({ status: 'done', result: 'B 的回复' });
+    assert.equal(await b, 'B 的回复');
+    gates[0].resolve({ status: 'done', result: 'A 的回复' });
+    assert.equal(await a, 'A 的回复');
+    assert.equal(wait.result.jobId, '0');
+    assert.equal(holder.jobId, '1');
+});
+
 test('停止独立识图后保留原图，重试会识图且不会被旧描述覆盖', async () => {
     const h = harness();
     const image = 'data:image/png;base64,aW1n';
@@ -246,6 +272,94 @@ test('数据库尚未保存完成时再次触发，仍只执行一轮请求', as
     await h.app.handleOfflineSend(true);
     gate.resolve(); await first;
     assert.equal(h.calls(), 1);
+});
+
+// ★ 覆盖线上、线下交叉并发；B 无论发送还是 reroll，都不受 A 的输入状态影响。
+for (const firstMode of ['online', 'offline']) {
+    for (const secondMode of ['online', 'offline']) {
+        for (const reroll of [false, true]) {
+            test(`${firstMode} A 等待时 ${secondMode} B 可${reroll ? '重生成' : '发送'}，结果和收尾各自归属`, async () => {
+                const h = harness();
+                const errors = [];
+                h.context.console.error = error => errors.push(error.stack || String(error));
+                h.contact.chatMode = firstMode;
+                h.contact.history = [{ role: 'user', content: 'A 的问题', messageId: 'a-user' }];
+                const b = { id: 'b', name: 'B', chatMode: secondMode,
+                    history: [{ role: 'user', content: 'B 的问题', messageId: 'b-user' }],
+                    offlineHistory: [{ role: 'user', content: 'B 的问题', messageId: 'b-offline-user' }] };
+                h.state.contacts.push(b);
+                Object.assign(h.app, { buildAgentCapabilityPrompt: () => '',
+                    async consumeWorkerPostAgentResult() { return true; }, discardAgentConfirmationsForMessages() {},
+                    markContactIncomingMessage() {}, refreshDesktopUnreadDotsIfNeeded() {} });
+                Object.assign(h.context.Pomodoro, { async tick() {}, context: () => ({}) });
+                h.context.ProactiveMessages.onUserMessage = async () => {};
+                Object.assign(h.UI, { getUserAvatar: () => '', createSingleBubble: () => ({}),
+                    appendChatMessageGroup() {}, clearImagePreview() {}, scrollToBottom() {} });
+                Object.assign(h.context, { splitMessageIntoBubbleParts: text => [text], parseCustomMarkdown: text => text,
+                    document: { createElement: () => ({ dataset: {}, appendChild() {} }) } });
+                const gates = [deferred(), deferred()], started = [deferred(), deferred()];
+                let calls = 0;
+                h.API.shouldUseAsyncBackend = () => true;
+                h.API.chat = async (_messages, settings) => {
+                    const index = calls++;
+                    started[index].resolve();
+                    await gates[index].promise;
+                    settings.ONLINE_CHAT_WAIT.result = { jobId: `job-${index}` };
+                    return index === 0 ? 'A 的新回复' : 'B 的新回复';
+                };
+                const send = mode => mode === 'online' ? h.app.handleSend.bind(h.app) : h.app.handleOfflineSend.bind(h.app);
+                const aRequest = send(firstMode)(true);
+                await Promise.race([started[0].promise, aRequest.then(() => assert.fail('A 未进入 API 请求'))]);
+                h.state.currentContactId = 'b';
+                h.input.value = 'B 的新问题';
+                const bRequest = send(secondMode)(reroll);
+                await Promise.race([started[1].promise, bRequest.then(() => assert.fail('B 未进入 API 请求：' + errors.join('\n')))]);
+                assert.equal(h.state.chatRequests.size, 2);
+                assert.equal(h.state.typingContactIds.has('a'), true);
+                assert.equal(h.state.typingContactIds.has('b'), true);
+                await send(secondMode)(true);
+                assert.equal(calls, 2); // ★ 同角色仍防重，不能多占一轮请求。
+
+                // ★ A 先完成时，不能清掉 B 的输入状态或启用 B 的线下发送按钮。
+                gates[0].resolve(); await aRequest;
+                assert.equal(h.state.chatRequests.has('a'), false);
+                assert.equal(h.state.chatRequests.has('b'), true);
+                assert.equal(h.state.typingContactIds.has('b'), true);
+                assert.equal(h.state.chatRequestActive, true);
+                if (secondMode === 'offline') assert.equal(h.UI.els.offlineSendBtn.disabled, true);
+                gates[1].resolve(); await bRequest;
+                const aHistory = firstMode === 'online' ? h.contact.history : h.contact.offlineHistory;
+                const bHistory = secondMode === 'online' ? b.history : b.offlineHistory;
+                assert.equal(aHistory.at(-1).content, 'A 的新回复');
+                assert.equal(aHistory.at(-1).asyncJobId, 'job-0');
+                assert.equal(bHistory.at(-1).content, 'B 的新回复');
+                assert.equal(bHistory.at(-1).asyncJobId, 'job-1');
+                assert.equal(h.state.typingContactIds.size, 0);
+                assert.equal(h.state.chatRequestActive, false);
+            });
+        }
+    }
+}
+
+test('并发等待时停止 A 只取消 A，B 仍可独立停止', () => {
+    const h = harness();
+    const b = { id: 'b', history: [] };
+    h.state.contacts.push(b);
+    const aWait = { contactId: 'a', controller: new AbortController() };
+    const bWait = { contactId: 'b', controller: new AbortController() };
+    h.state.chatRequests = new Map([['a', aWait], ['b', bWait]]);
+    h.state.onlineChatWait = bWait;
+    h.UI.setLoading(true, 'a'); h.UI.setLoading(true, 'b');
+    h.app.stopOnlineChatWait();
+    assert.equal(aWait.controller.signal.aborted, true);
+    assert.equal(bWait.controller.signal.aborted, false);
+    assert.equal(h.state.typingContactIds.has('b'), true);
+    assert.equal(h.state.chatRequestActive, true);
+    h.state.currentContactId = 'b';
+    h.app.stopOnlineChatWait();
+    assert.equal(bWait.controller.signal.aborted, true);
+    assert.equal(h.state.chatRequests.size, 0);
+    assert.equal(h.state.typingContactIds.size, 0);
 });
 test('准备上下文抛错也能解锁，允许之后重新生成', async () => {
     const h = harness(); h.app.ensureWorldSenseWeatherReady = async () => { throw Error('准备失败'); };

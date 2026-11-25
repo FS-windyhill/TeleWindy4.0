@@ -19,7 +19,7 @@ const context = vm.createContext({ console, Date, Intl, Set, window: { crypto: r
         removeLatestAiBubbles: () => { context.removedAiBubbles += 1; },
         playWaterfall: async (...args) => { context.waterfalls.push(args); }
     },
-    WorldInfoEngine: { scan: () => '' }, CharacterSchedule: { buildChatPrompt: () => '' },
+    WorldInfoEngine: { scan: () => '' }, CharacterSchedule: { buildChatPrompt: () => '', getSchedule: () => null },
     formatTimeForMoments: time => String(time), localStorage: { getItem: () => 'install' },
     Blob, alert: () => {}, confirm: () => true, Toast: { show: () => {} }, removedAiBubbles: 0, waterfalls: []
 });
