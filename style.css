@@ -13986,6 +13986,8 @@ body.dark-mode #view-xi-shi-detail { --xi-shi-content-background: rgba(255, 255,
 #view-xi-shi-detail .xi-shi-thought summary::before { content: "💡 思考过程 (点击展开)"; }
 #view-xi-shi-detail .xi-shi-thought[open] summary::before { content: "💡 思考过程 (点击折叠)"; }
 /* ★ 图片描述复用思考过程面板，只替换标题，亮暗模式和展开后的正文排版保持一致。 */
+/* ★ 图片描述按钮与上方内容保持 6px 间距，展开后仍由整个折叠面板统一留白。 */
+#view-xi-shi-detail .xi-shi-thought.xi-shi-image-description { margin-top: 6px; }
 #view-xi-shi-detail .xi-shi-thought.xi-shi-image-description summary::before { content: "🖼 图片描述 (点击展开)"; }
 #view-xi-shi-detail .xi-shi-thought.xi-shi-image-description[open] summary::before { content: "🖼 图片描述 (点击折叠)"; }
 #view-xi-shi-detail .xi-shi-thought-content { width: 100%; box-sizing: border-box; padding: 8px 12px; font-size: 0.9rem; font-style: italic; color: #505050; border-top: 1px dashed rgb(0 0 0 / 35%); background: transparent; white-space: pre-wrap; text-align: start; overflow-wrap: anywhere; cursor: pointer; }
