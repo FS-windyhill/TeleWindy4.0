@@ -26,12 +26,11 @@ const XiShi = {
 
     // ★ 批量收藏一次落盘，每个气泡单独成条；整组与单气泡使用不同身份，互不覆盖。
     collectMany(contact, targets, source = 'history') {
-        let needsSave = false;
+        let needsSave = false, omittedImage = false;
         const snapshots = targets.flatMap(({ message, key }) => {
             if (!contact?.[source]?.includes(message)) return [];
             if (!message.messageId) { message.messageId = ChatBubbles.newKey(); needsSave = true; }
-            let text = String(message.content || ''), images = message.images,
-                imageDescription = message.image_description, imageExpired = message.isImageExpired;
+            let text = String(message.content || ''), imageDescription = String(message.image_description || '').trim();
             let bubbleType = '', bubbleOrder = -1;
             if (key) {
                 ChatBubbles.ensure(message);
@@ -42,26 +41,34 @@ const XiShi = {
                 bubbleType = index === 'thought' ? 'thought' : index === message.bubbleIds.length ? 'image' : 'text';
                 bubbleOrder = index === 'thought' ? -1 : index;
                 text = bubbleType === 'thought' ? parsed.thought : bubbleType === 'text' ? parsed.parts[index] : '';
-                if (bubbleType !== 'image') { images = []; imageDescription = ''; imageExpired = false; }
+                if (bubbleType !== 'image') imageDescription = '';
             }
-            // ★ 立即复制正文、时间和图片，排队保存期间原消息被编辑或删除也不改变这份纪念。
-            return [{
+            // ★ 只快照文字和识图描述，原图与过期状态不进入夕拾；排队期间改写原消息也不改变收藏。
+            const snapshot = {
                 id: ChatBubbles.newKey(), contactId: contact.id, source,
                 sourceMessageId: String(message.messageId), role: message.role,
                 sourceBubbleKey: key || '', bubbleType, bubbleOrder,
                 sourceOrder: contact[source].indexOf(message),
-                text, images: Array.isArray(images) ? images.filter(url => typeof url === 'string') : [],
-                imageDescription: String(imageDescription || ''), imageExpired: imageExpired === true,
+                text, imageDescription,
                 messageTime: message.timestamp || message.eventAt || message.recordedAt || '',
                 messageTimeMs: this.parseTime(message.eventAt) || this.parseTime(message.timestamp) || this.parseTime(message.recordedAt),
                 collectedAt: Date.now(), starredAt: 0
-            }];
+            };
+            const content = this.content(snapshot);
+            if (![content.text, content.thought, content.imageDescription].some(value => value?.trim())) {
+                omittedImage = omittedImage || ChatBubbles.hasImage(message);
+                return [];
+            }
+            return [snapshot];
         });
-        if (!snapshots.length) return Promise.resolve(false);
+        if (!snapshots.length) {
+            if (omittedImage) Toast.show('没有可收藏的文字或图片描述', { icon: 'warning' });
+            return Promise.resolve(false);
+        }
         return this.enqueue(async () => {
             // ★ 极旧消息先补存稳定身份；不能使用会随插入/删除变化的历史数组下标去重。
             if (needsSave) await Storage.saveContacts();
-            const next = [...(STATE.xiShiRecords || [])];
+            const next = Storage.prepareXiShiRecords(STATE.xiShiRecords || []);
             const previousCount = next.length;
             snapshots.forEach(snapshot => {
                 if (!next.some(record => record.contactId === contact.id && record.source === source
@@ -80,7 +87,7 @@ const XiShi = {
     },
 
     content(record) {
-        if (record.bubbleType === 'thought') return { text: '', thought: record.text };
+        if (record.bubbleType === 'thought') return { text: '', thought: record.text, imageDescription: '' };
         // ★ 用户消息的系统时间戳移到卡片左上角；角色自己写的日期和文字保持原样。
         let text = record.role === 'user' && !record.bubbleType ? record.text.replace(ChatBubbles.timestampRegex, '') : record.text;
         const thoughts = [];
@@ -91,15 +98,14 @@ const XiShi = {
                 return '';
             }).trim();
         }
-        const imageText = record.imageDescription ? `[图片描述] ${record.imageDescription}`
-            : record.imageExpired && !record.images?.length ? '[图片（原图已清理）]' : '';
-        return { text: [text, imageText].filter(Boolean).join('\n\n'), thought: thoughts.join('\n\n') };
+        // ★ 识图描述单独折叠，不混进正文；旧收藏里的图片附件也不再展示。
+        return { text, thought: thoughts.join('\n\n'), imageDescription: String(record.imageDescription || '').trim() };
     },
 
     text(record) {
-        // ★ 全文搜索继续覆盖折叠的思考链，不把标签本身当成正文，也不受展开状态影响。
+        // ★ 全文搜索覆盖折叠的思考链和图片描述，不受展开状态影响。
         const content = this.content(record);
-        return [content.thought, content.text].filter(Boolean).join('\n\n');
+        return [content.thought, content.text, content.imageDescription].filter(Boolean).join('\n\n');
     },
 
     renderThought(thought, keyword) {
@@ -107,6 +113,12 @@ const XiShi = {
         // ★ 沿用聊天的 Markdown 解析，折叠面板使用夕拾独立类名；搜索高亮避免嵌套摘要。
         const html = this.renderMarkdown(thought, keyword);
         return `<details class="xi-shi-thought"><summary aria-label="思考过程"></summary><div class="xi-shi-thought-content">${html}</div></details>`;
+    },
+
+    // ★ 图片描述沿用思考链的边框、折叠和点击收起行为，仅标题独立，默认同样收起。
+    renderImageDescription(description, keyword) {
+        if (!description) return '';
+        return `<details class="xi-shi-thought xi-shi-image-description"><summary aria-label="图片描述"></summary><div class="xi-shi-thought-content">${this.renderMarkdown(description, keyword)}</div></details>`;
     },
 
     handleThoughtClick(event) {
@@ -154,9 +166,11 @@ const XiShi = {
     renderMarkdown(text, keyword = '') {
         const html = ChatBubbles.split(text).map(part => part.trim() === '---'
             ? '<div class="chat-separator"></div>' : parseCustomMarkdown(part)).join('');
-        if (!keyword) return html;
         const template = document.createElement('template');
         template.innerHTML = html;
+        // ★ 正文中的 Markdown/HTML 图片也不加载，避免绕过附件限制；模板仍是惰性 DOM，不会先请求原图。
+        template.content.querySelectorAll('img, picture, svg image').forEach(node => node.remove());
+        if (!keyword) return template.innerHTML;
         const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT);
         const nodes = [];
         while (walker.nextNode()) {
@@ -254,15 +268,10 @@ const XiShi = {
                 </div>
                 ${this.renderThought(content.thought, keyword)}
                 ${content.text ? `<div class="heart-note-text xi-shi-text">${this.renderText(content.text, keyword)}</div>` : ''}
+                ${this.renderImageDescription(content.imageDescription, keyword)}
+                ${![content.text, content.thought, content.imageDescription].some(Boolean) ? '<div class="heart-note-text xi-shi-text">暂无文字或图片描述</div>' : ''}
                 <div class="xi-shi-source">- 来自${App.escapeHtml(speaker)} -</div>
             `;
-            // ★ 图片快照独立保存；只接受图片 data URL 和 HTTP(S)，不将聊天内容作为 HTML 执行。
-            (record.images || []).forEach(url => {
-                if (!/^(?:data:image\/(?:png|jpe?g|gif|webp|avif|bmp);base64,|https?:\/\/)/i.test(url)) return;
-                const image = document.createElement('img');
-                image.className = 'xi-shi-image'; image.src = url; image.alt = '收藏的聊天图片'; image.loading = 'lazy';
-                card.append(image);
-            });
             list.append(card);
         });
     },

@@ -65,7 +65,7 @@ function harness() {
         clock: value => { now = value; }, fail: value => { fail = value; }, accept: value => { accepted = value; } };
 }
 
-test('整组收藏为独立快照：编辑/删除原消息、修改图片数组都不影响收藏，连点不会重复', async () => {
+test('整组收藏只保留文字快照，编辑/删除原消息不影响收藏，连点不会重复', async () => {
     const h = harness();
     const msg = { messageId: 'm', role: 'assistant', content: '第一段\n\n第二段', timestamp: '2026-11-24 12:00', images: ['data:image/png;base64,a'] };
     h.contact.history.push(msg);
@@ -76,7 +76,7 @@ test('整组收藏为独立快照：编辑/删除原消息、修改图片数组�
     assert.equal(await duplicate, false);
     assert.equal(h.STATE.xiShiRecords.length, 1);
     assert.equal(h.STATE.xiShiRecords[0].text, '第一段\n\n第二段');
-    assert.equal(h.STATE.xiShiRecords[0].images[0], 'data:image/png;base64,a');
+    assert.equal(Object.hasOwn(h.STATE.xiShiRecords[0], 'images'), false);
     assert.equal(h.toasts[0].options?.icon || 'check', 'xi-shi');
     assert.equal(h.toasts.at(-1).options?.icon || 'check', 'xi-shi');
     assert.equal(h.toasts.at(-1).text, '已收藏到夕拾');
@@ -245,7 +245,7 @@ test('消息实际时间决定排序，置顶内部也按消息时间倒序，�
     assert.deepEqual(Array.from(h.XiShi.sorted(), r => r.id), [second.id, old.id, first.id]);
 });
 
-test('文字、图片和思考气泡分别快照，单气泡去重不排斥整组收藏，修改原文后仍然独立', async () => {
+test('文字、图片描述和思考气泡分别快照，单气泡去重不排斥整组收藏，原图不进入快照', async () => {
     const h = harness();
     const message = { messageId: 'all', role: 'assistant', content: '<think>思考内容</think>第一段\n\n第二段',
         timestamp: '2026-11-24 10:00', images: ['data:image/png;base64,aaa'], image_description: '图片内容' };
@@ -254,16 +254,16 @@ test('文字、图片和思考气泡分别快照，单气泡去重不排斥整�
     const keys = [message.bubbleIds[0], message.imageBubbleKey, message.thoughtBubbleKey];
     await h.XiShi.collectMany(h.contact, keys.map(key => ({ message, key })));
     const [text, image, thought] = h.STATE.xiShiRecords;
-    assert.equal(text.text, '第一段'); assert.equal(text.images.length, 0); assert.equal(text.imageDescription, '');
-    assert.equal(image.text, ''); assert.equal(image.images[0], 'data:image/png;base64,aaa'); assert.equal(image.imageDescription, '图片内容');
-    assert.equal(thought.text, '思考内容'); assert.equal(thought.images.length, 0);
+    assert.equal(text.text, '第一段'); assert.equal(Object.hasOwn(text, 'images'), false); assert.equal(text.imageDescription, '');
+    assert.equal(image.text, ''); assert.equal(Object.hasOwn(image, 'images'), false); assert.equal(image.imageDescription, '图片内容');
+    assert.equal(thought.text, '思考内容'); assert.equal(Object.hasOwn(thought, 'images'), false);
     assert.equal(h.XiShi.content(thought).thought, '思考内容');
     assert.equal(await h.XiShi.collectMany(h.contact, keys.map(key => ({ message, key }))), false);
     assert.equal(h.STATE.xiShiRecords.length, 3);
     await h.XiShi.collect(h.contact, message);
     assert.equal(h.STATE.xiShiRecords.length, 4);
     h.ChatBubbles.edit(message, '改写'); message.images[0] = '改图';
-    assert.equal(text.text, '第一段'); assert.equal(image.images[0], 'data:image/png;base64,aaa');
+    assert.equal(text.text, '第一段'); assert.equal(Object.hasOwn(image, 'images'), false);
     assert.equal(thought.text, '思考内容');
 });
 
@@ -293,4 +293,64 @@ test('旧收藏按原消息时间排序，原文已删除时仍可按快照时�
     h.STATE.xiShiRecords.push(record('deleted', { messageTime: '2026-11-24 10:00', collectedAt: 1 }));
     assert.equal(h.XiShi.sorted()[0].id, 'deleted');
     assert.equal(h.XiShi.parseTime('Nov.24 10:00'), 0);
+});
+
+test('图片描述默认折叠、与正文分开，搜索折叠内容仍能命中并安全高亮', async () => {
+    const h = harness();
+    const message = { messageId: 'description', role: 'user', content: '[2026-11-25 12:00] 看这张图',
+        images: ['data:image/png;base64,original'], image_description: '夕阳下的海边 <script> A+B' };
+    h.contact.history.push(message);
+    await h.XiShi.collect(h.contact, message);
+    const record = h.STATE.xiShiRecords[0];
+    assert.equal(Object.hasOwn(record, 'images'), false);
+    assert.equal(Object.hasOwn(record, 'imageExpired'), false);
+    assert.equal(h.XiShi.content(record).text, '看这张图');
+    assert.equal(h.XiShi.content(record).imageDescription, '夕阳下的海边 <script> A+B');
+    assert.equal(h.XiShi.sorted('a+b').length, 1);
+    h.XiShi.render('xi-shi-detail');
+    let html = h.get('xi-shi-list').children[0].innerHTML;
+    assert.match(html, /<details class="xi-shi-thought xi-shi-image-description">/);
+    assert.match(html, /aria-label="图片描述"/);
+    assert.doesNotMatch(html, /<details[^>]*\sopen[\s>]|<img|<script>/);
+    h.get('xi-shi-input').value = 'a+b'; h.get('xi-shi-input').events.search();
+    html = h.get('xi-shi-list').children[0].innerHTML;
+    assert.match(html, /<mark[^>]*>A\+B<\/mark>/);
+    assert.equal(h.XiShi.renderImageDescription('', ''), '');
+});
+
+test('无描述的纯图片不产生空白收藏，整组有文字时只收藏文字，混合批量只保存可用内容', async () => {
+    const h = harness();
+    const image = { messageId: 'only-image', role: 'user', content: '[2026-11-25 12:00] ', images: ['original'] };
+    const text = { messageId: 'with-text', role: 'user', content: '保留文字', images: ['original'] };
+    h.contact.history.push(image, text);
+    const key = h.ChatBubbles.keyAt(image, 0);
+    assert.equal(await h.XiShi.collect(h.contact, image), false);
+    assert.equal(await h.XiShi.collectMany(h.contact, [{ message: image, key }]), false);
+    assert.equal(h.STATE.xiShiRecords.length, 0);
+    assert.equal(h.toasts.at(-1).text, '没有可收藏的文字或图片描述');
+    assert.equal(await h.XiShi.collectMany(h.contact, [{ message: image, key }, { message: text }]), true);
+    assert.equal(h.STATE.xiShiRecords.length, 1);
+    assert.equal(h.STATE.xiShiRecords[0].text, '保留文字');
+    assert.equal(Object.hasOwn(h.STATE.xiShiRecords[0], 'images'), false);
+});
+
+test('旧收藏和导入备份移除原图，正文、图片描述及置顶保留，聊天原图不变', async () => {
+    const h = harness();
+    const contact = { ...h.contact, history: [{ messageId: 'old-image', role: 'user', content: '聊天正文', images: ['chat-original'] }] };
+    const old = { id: 'legacy', contactId: 'a', source: 'history', sourceMessageId: 'old-image', role: 'user',
+        text: '收藏正文', images: ['snapshot-original'], imageExpired: true, imageDescription: '旧识图描述', starredAt: 50 };
+    await h.Storage.saveXiShi([old]);
+    assert.equal(Object.hasOwn(h.data.get(h.CONFIG.XI_SHI_KEY)[0], 'images'), false);
+    assert.equal(old.images[0], 'snapshot-original');
+    const backup = { [h.CONFIG.STORAGE_KEY]: [contact], [h.CONFIG.XI_SHI_KEY]: [old] };
+    await h.Storage.importFromBackup(backup);
+    await h.Storage.load();
+    const record = h.STATE.xiShiRecords[0];
+    assert.equal(record.text, '收藏正文');
+    assert.equal(record.imageDescription, '旧识图描述');
+    assert.equal(record.starredAt, 50);
+    assert.equal(Object.hasOwn(record, 'images'), false);
+    assert.equal(Object.hasOwn(record, 'imageExpired'), false);
+    assert.equal(h.STATE.contacts[0].history[0].images[0], 'chat-original');
+    assert.equal(Object.hasOwn(h.data.get(h.CONFIG.XI_SHI_KEY)[0], 'images'), false);
 });

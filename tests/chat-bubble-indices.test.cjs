@@ -217,6 +217,39 @@ function harness() {
     return context;
 }
 
+// ★ 原生 selectstart 可能来自文字节点；只拦消息表面，不能把输入框与 Agent 详情一起禁选。
+test('消息与透明菜单阻止原生选区，输入控件和 Agent 详情继续允许选字', () => {
+    const { App } = harness();
+    const listeners = {};
+    let bindings = 0;
+    const container = { dataset: {}, addEventListener(type, handler) { listeners[type] = handler; bindings++; } };
+    App.bindMessageSelectionGuard(container);
+    App.bindMessageSelectionGuard(container);
+    assert.equal(bindings, 2);
+    for (const type of ['selectstart', 'contextmenu']) {
+        const event = target => ({ target, prevented: false, preventDefault() { this.prevented = true; } });
+        const backdrop = event({ closest: () => null });
+        listeners[type](backdrop);
+        assert.equal(backdrop.prevented, true);
+        const text = event({ nodeType: 3, parentElement: { closest: () => null } });
+        listeners[type](text);
+        assert.equal(text.prevented, true);
+        for (const selector of ['input', 'textarea', '[contenteditable="true"]', '.agent-call-content']) {
+            const editable = event({ closest: allowed => allowed.includes(selector) ? {} : null });
+            listeners[type](editable);
+            assert.equal(editable.prevented, false);
+        }
+    }
+});
+
+test('菜单打开时清除没有文字的原生选区，避免透明遮罩保留整页选择背景', () => {
+    const h = harness();
+    let cleared = 0;
+    h.window.getSelection = () => ({ toString: () => '', rangeCount: 1, removeAllRanges() { cleared++; } });
+    h.App.presentMessageContextMenu({ left: 100, right: 200, top: 300, bottom: 400, height: 100 });
+    assert.equal(cleared, 1);
+});
+
 test('新发送的用户文字和图片首次上屏就带真实身份，菜单与多选可直接操作', () => {
     const c = harness();
     const contact = c.open({ role: 'assistant', messageId: 'previous', content: '晚安哦' });

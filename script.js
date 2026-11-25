@@ -12718,7 +12718,6 @@ const App = {
         const toggleBtn = menu.querySelector('button[data-action="toggle-hidden"]');
         if (toggleBtn) toggleBtn.querySelector('.message-menu-label').textContent = message.isHidden ? '取消隐藏' : '向ta隐藏';
 
-        this.contextMenuBubble = cardEl;
         this.presentMessageContextMenu(cardEl.getBoundingClientRect(), point);
     },
 
@@ -12764,9 +12763,8 @@ const App = {
             Storage.saveContacts();
             UI.renderOfflineChatHistory(contact, false, true);
         } else if (action === 'multi-select') {
-            const card = this.contextMenuBubble;
+            // ★ 进入多选时保持零选择，长按的卡片也由用户手动勾选。
             this.enterOfflineSelectMode();
-            if (card) this.toggleOfflineCardSelection(card);
         } else if (action === 'copy') {
             let contentToCopy = msgData.content || '';
             if (timestampRegex.test(contentToCopy)) {
@@ -13859,9 +13857,8 @@ const App = {
         }
 
         if (action === 'multi-select') {
-            const bubble = this.contextMenuBubble;
+            // ★ 进入多选时保持零选择，长按的气泡也由用户手动勾选。
             this.enterSelectMode();
-            if (bubble) this.toggleBubbleSelection(bubble);
         }
 
         else if (action === 'copy') {
@@ -14316,14 +14313,29 @@ const App = {
 
 
 
-        this.contextMenuBubble = target?.closest('.message-bubble') || null;
         this.presentMessageContextMenu(rect, point);
+    },
+
+    // ★ 在原生选择开始时拦截，而不是等长按计时结束后才 preventDefault；不阻止 touchstart，保留滑动聊天。
+    bindMessageSelectionGuard(container) {
+        if (!container || container.dataset.selectionGuardBound) return;
+        container.dataset.selectionGuardBound = 'true';
+        const guard = event => {
+            // ★ Agent 详情原本允许选字，输入控件也保留浏览器的编辑行为。
+            const target = event.target.nodeType === 3 ? event.target.parentElement : event.target;
+            if (target?.closest('input, textarea, [contenteditable="true"], .agent-call-content')) return;
+            event.preventDefault();
+        };
+        container.addEventListener('selectstart', guard);
+        container.addEventListener('contextmenu', guard);
     },
 
     // ★ 悬浮菜单共用定位：优先气泡上方，空间不足翻到下方；长气泡按实际触点定位。
     presentMessageContextMenu(rect, point) {
         const menu = document.getElementById('msg-context-menu');
         const panel = menu.querySelector('.menu-panel');
+        // ★ 空容器也可能形成没有文字的原生选区，不能只凭 Selection.toString() 判断；打开菜单时统一清掉。
+        window.getSelection?.()?.removeAllRanges?.();
         this.contextMenuCleanup?.();
         clearTimeout(this.contextMenuUnlockTimer);
         menu.style.display = 'block';
@@ -14351,6 +14363,7 @@ const App = {
         // ★ 遮罩始终接住点击，锁定只拦菜单动作，避免松手时穿透到底下的图片或链接。
         if (!menu.dataset.dismissInitialized) {
             menu.dataset.dismissInitialized = 'true';
+            this.bindMessageSelectionGuard(menu);
             menu.querySelector('.menu-backdrop').addEventListener('click', () => {
                 if (!menu.classList.contains('locked')) this.hideMessageContextMenu();
             });
@@ -14360,6 +14373,7 @@ const App = {
         const release = () => {
             if (!pressing) return;
             pressing = false;
+            window.getSelection?.()?.removeAllRanges?.();
             clearTimeout(this.contextMenuUnlockTimer);
             this.contextMenuUnlockTimer = setTimeout(() => menu.classList.remove('locked'), 150);
         };
@@ -14393,7 +14407,6 @@ const App = {
         clearTimeout(this.contextMenuUnlockTimer);
         this.contextMenuCleanup?.();
         this.contextMenuCleanup = null;
-        this.contextMenuBubble = null;
         STATE.selectedMessageIndex = null;
         STATE.selectedMessageId = null;
         STATE.selectedMessageRef = null;
@@ -16191,7 +16204,7 @@ const App = {
                 this.showOfflineMessageContextMenu(card, point);
             };
 
-            UI.els.offlineMsgs.addEventListener('contextmenu', (event) => event.preventDefault());
+            this.bindMessageSelectionGuard(UI.els.offlineMsgs);
 
             UI.els.offlineMsgs.addEventListener('touchstart', e => {
                 if (e.target.closest('.code-copy-btn')) return;
@@ -16200,7 +16213,6 @@ const App = {
                 offlineStartX = e.touches[0].clientX;
                 offlineStartY = e.touches[0].clientY;
                 offlineLongPressTimer = setTimeout(() => {
-                    e.preventDefault();
                     if (window.getSelection().toString().length > 0) return;
                     openOfflineMenu(card, { x: offlineStartX, y: offlineStartY, pressed: true });
                 }, 380);
@@ -16544,6 +16556,9 @@ const App = {
         // ★★★★★ 联系人列表长按 + 上下箭头排序 END ★★★★★
 
 
+        // ★ 同时保护气泡外层、时间和头像，避免长按选区越过气泡扩展到整个聊天列表。
+        this.bindMessageSelectionGuard(UI.els.chatMsgs);
+
         // --- 长按相关变量 (优化版) ---
         let longPressTimer = null;
         let startX = 0;
@@ -16572,7 +16587,6 @@ const App = {
             startY = e.touches[0].clientY;
             
             longPressTimer = setTimeout(() => {
-                e.preventDefault();
                 if (window.getSelection().toString().length > 0) return;
                 
                 // ★★★ 使用 bubble 的位置来弹出菜单，如果 bubble 存在的话 ★★★

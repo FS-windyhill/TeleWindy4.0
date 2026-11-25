@@ -402,7 +402,13 @@ const Storage = {
         // ★ 夕拾独立加载，旧备份缺字段时默认为空；其它探索数据异常也不清掉已存收藏。
         try {
             const xiShiRecords = await DB.get(CONFIG.XI_SHI_KEY);
-            STATE.xiShiRecords = Array.isArray(xiShiRecords) ? xiShiRecords : [];
+            const records = Array.isArray(xiShiRecords) ? xiShiRecords : [];
+            STATE.xiShiRecords = this.prepareXiShiRecords(records);
+            // ★ 旧夕拾只清理收藏副本中的原图，聊天图片不动；先保留文字与描述，迁移落盘失败也不清空列表。
+            if (records.some((record, index) => record !== STATE.xiShiRecords[index])) {
+                try { await this.saveXiShi(STATE.xiShiRecords); }
+                catch (error) { console.warn('清理夕拾旧图片失败，将在下次保存时重试:', error); }
+            }
         } catch (error) {
             console.warn('读取夕拾失败:', error);
             STATE.xiShiRecords = [];
@@ -640,9 +646,19 @@ const Storage = {
         await DB.set(CONFIG.CHARACTER_MEMORIES_KEY, STATE.characterMemories);
     },
 
+    // ★ 所有夕拾写入都剔除原图附件及过期标记，兼容旧收藏和旧备份，不修改传入对象。
+    prepareXiShiRecords(records) {
+        return records.map(record => {
+            if (!record || typeof record !== 'object'
+                || (!Object.hasOwn(record, 'images') && !Object.hasOwn(record, 'imageExpired'))) return record;
+            const { images, imageExpired, ...snapshot } = record;
+            return snapshot;
+        });
+    },
+
     // ★ 夕拾先写入候选列表，成功后由模块提交内存；沿用整库备份，无需新建 objectStore。
     async saveXiShi(records = STATE.xiShiRecords) {
-        await DB.set(CONFIG.XI_SHI_KEY, records);
+        await DB.set(CONFIG.XI_SHI_KEY, this.prepareXiShiRecords(records));
     },
 
     // 保存角色心笺列表
