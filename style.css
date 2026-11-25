@@ -13968,6 +13968,25 @@ body.dark-mode .offline-card-avatar {
 }
 /* ★★★★★ 通话记录 START：卡片沿用心笺，详情只调整顶部与阅读空间 ★★★★★ */
 /* ★★★★★ 夕拾 START：沿用心笺卡片，只覆盖本页正文和星标，不改变心笺外观。 ★★★★★ */
+/* ★ 联系人页介绍卡片与心笺保持相同间距、毛玻璃和字号，深色模式同步适配。 */
+.xi-shi-intro {
+    margin-bottom: 14px;
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.68);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.42);
+    box-shadow: 0 10px 28px rgba(39, 42, 55, 0.12);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    color: rgba(38, 40, 48, 0.78);
+    font-size: 0.9rem;
+    line-height: 1.55;
+}
+body.dark-mode .xi-shi-intro {
+    border-color: rgba(245, 245, 245, 0.3);
+    background: rgba(36, 36, 36, 0.28);
+    color: rgba(244, 244, 244, 0.7);
+}
 .xi-shi-contact { width: 100%; box-sizing: border-box; text-align: left; font: inherit; color: inherit; }
 .xi-shi-contact .heart-note-contact-name,
 .xi-shi-contact .heart-note-contact-status { display: block; }
@@ -14020,6 +14039,53 @@ body.dark-mode .xi-shi-source {
 }
 
 
+
+/* ★ 导出弹窗独立复刻朋友圈设置：白色标题、单层内容底板，不共用其业务类名。 */
+.xi-shi-export-panel {
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    animation: modalPop 0.3s ease-out;
+}
+/* ★ 标题两侧预留相同空间，关闭按钮靠右，避免 SVG 挤偏居中标题。 */
+.xi-shi-export-header { position: relative; display: flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 40px; margin-bottom: 12px; flex-shrink: 0; }
+.xi-shi-export-header > h3 { margin: 0; color: #fff; text-align: center; }
+.xi-shi-export-close { position: absolute; top: 0; right: 0; display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; }
+.xi-shi-export-close svg { display: block; width: 20px; height: 20px; }
+.xi-shi-export-close:hover { background: rgba(255, 255, 255, 0.12); }
+.xi-shi-export-body {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 20px 15px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.92);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+.xi-shi-export-option + .xi-shi-export-option { margin-top: 20px; }
+.xi-shi-export-hint { margin: 5px 0 9px; color: #8d929a; font-size: 0.75rem; line-height: 1.45; overflow-wrap: anywhere; }
+#xi-shi-export-status { margin: 0 0 16px; }
+.xi-shi-export-body > .xi-shi-export-hint:last-child { margin: 16px 0 0; }
+/* ★ 格式按钮直接下载，边框与底色参考保存按钮；禁用态明确提示空列表不可导出。 */
+.xi-shi-export-download {
+    padding: 10px 20px;
+    border-radius: 8px;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+    background: var(--btn-color);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+.xi-shi-export-download { width: 100%; color: var(--primary-btn-text); border: 0.7px solid var(--primary-btn-text); }
+.xi-shi-export-download:disabled { opacity: 0.45; cursor: not-allowed; }
+.xi-shi-export-download:focus-visible,
+.xi-shi-export-close:focus-visible { outline: 2px solid var(--primary-btn-text); outline-offset: 3px; }
+body.dark-mode .modal-overlay.xi-shi-export-bg { background: rgba(0, 0, 0, 0.25); }
+body.dark-mode .xi-shi-export-body { background: rgba(20, 20, 20, 0.92); }
+body.dark-mode .xi-shi-export-download { color: #fff; border: 2px solid var(--primary-btn-text); }
 
 /* ★ 通用提示默认隐藏；夕拾通过 hidden 属性切换，非空态主动显示。 */
 #xi-shi-empty, #xi-shi-detail-empty { display: block; }

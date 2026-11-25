@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 长期记忆弹窗统一背景模糊，更新版本参数避免 PWA 沿用旧样式。 -->
-    <link rel="stylesheet" href="./style.css?v=20261125-xi-shi-description-spacing-6">
+    <link rel="stylesheet" href="./style.css?v=20261125-xi-shi-intro-1">
 </head>
 <body>
 
@@ -856,6 +856,8 @@
                 <h1>夕拾</h1>
             </header>
             <main class="heart-note-page">
+                <!-- ★ 介绍卡片参考心笺，夕拾使用独立类名，方便单独调整外观。 -->
+                <div class="xi-shi-intro">夕拾是收藏对话内容的地方。</div>
                 <div id="xi-shi-contacts" class="heart-note-contact-list"></div>
                 <div id="xi-shi-empty" class="todo-empty-hint">还没有角色，先去通讯录创建一个吧。</div>
             </main>
@@ -864,6 +866,10 @@
             <header class="app-header">
                 <button type="button" id="xi-shi-detail-back-btn" class="header-icon-btn left" title="返回夕拾"><svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg></button>
                 <h1 id="xi-shi-detail-title">夕拾</h1>
+                <!-- ★ 沿用长期记忆的省略号图形，尺寸交给 header 的 icon 规则，与返回箭头一致。 -->
+                <button type="button" id="xi-shi-export-open" class="header-icon-btn right" title="导出夕拾" aria-label="导出夕拾" aria-haspopup="dialog">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+                </button>
             </header>
             <main class="heart-note-page">
                 <div class="inline-list-search" id="xi-shi-search">
@@ -875,6 +881,31 @@
             </main>
         </div>
         <!-- ★★★★★ 夕拾：角色列表 / 收藏快照 END ★★★★★ -->
+
+        <!-- ★ 夕拾导出参考朋友圈设置的单层内容区，类名独立；格式按钮点击后直接下载。 -->
+        <div id="modal-xi-shi-export" class="modal-overlay xi-shi-export-bg hidden">
+            <div class="xi-shi-export-panel" role="dialog" aria-modal="true" aria-labelledby="xi-shi-export-title" aria-describedby="xi-shi-export-status">
+                <!-- ★ 关闭入口放在标题右侧，标题保留居中；SVG 只负责图形，按钮保留可读名称。 -->
+                <div class="xi-shi-export-header">
+                    <h3 id="xi-shi-export-title">导出夕拾</h3>
+                    <button type="button" id="xi-shi-export-close" class="xi-shi-export-close" title="关闭" aria-label="关闭导出夕拾">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                </div>
+                <div class="xi-shi-export-body">
+                    <p id="xi-shi-export-status" class="xi-shi-export-hint" role="status"></p>
+                    <div class="xi-shi-export-option">
+                        <button type="button" id="xi-shi-export-json" class="xi-shi-export-download" aria-describedby="xi-shi-export-json-hint">导出成 JSON</button>
+                        <p id="xi-shi-export-json-hint" class="xi-shi-export-hint">每条夕拾保存为一条记录，包含 role 和 context 字段。</p>
+                    </div>
+                    <div class="xi-shi-export-option">
+                        <button type="button" id="xi-shi-export-txt" class="xi-shi-export-download" aria-describedby="xi-shi-export-txt-hint">导出成纯文本</button>
+                        <p id="xi-shi-export-txt-hint" class="xi-shi-export-hint">以“我 / 角色名”标注说话人，方便直接阅读。</p>
+                    </div>
+                    <p class="xi-shi-export-hint">按面板顺序导出全部夕拾：星标优先，同组内按消息时间从新到旧，保留正文、【思考过程】和【图片描述】。</p>
+                </div>
+            </div>
+        </div>
 
         <!-- ★★★★★ 通话记录：联系人 / 电话列表 / 原文详情 START ★★★★★ -->
         <div id="view-phone-history" class="page-view" style="display: none;">
@@ -3429,7 +3460,7 @@
     <!-- ★ 电话独立管理临时会话与音频，不把电话模式写入角色持久化字段。 -->
     <script src="./js/phone-call.js?v=20261121-phone-wake-lock-1"></script>
     <!-- ★ 夕拾只读纪念快照，复用现有列表搜索，不参与 AI 上下文。 -->
-    <script src="./js/xi-shi.js?v=20261125-description-fold-2"></script>
+    <script src="./js/xi-shi.js?v=20261125-export-order-3"></script>
     <script src="./js/phone-history.js?v=20261119-phone-history-2"></script>
     <script src="./js/chat-voice-input.js?v=20261116-chat-voice-toast-3"></script>
     <!-- ★ 世界感知这次扩展了天气适配器，带版本参数避免旧静态缓存继续拿到单天气源脚本。 -->

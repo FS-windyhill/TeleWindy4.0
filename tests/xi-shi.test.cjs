@@ -13,9 +13,17 @@ const method = name => {
 function harness() {
     let now = 1000, serial = 0, fail = false, accepted = true;
     const elements = new Map(), toasts = [], views = [], dialogs = [], data = new Map();
+    const downloads = [], blobs = new Map();
     class Element {
-        constructor() { this.children = []; this.events = {}; this.dataset = {}; this.value = ''; this.style = {}; }
+        constructor() {
+            this.children = []; this.events = {}; this.dataset = {}; this.value = ''; this.style = {};
+            const classes = new Set(['hidden']);
+            this.classList = { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value) };
+        }
         append(...items) { this.children.push(...items); }
+        appendChild(item) { this.append(item); }
+        remove() { this.removed = true; }
+        click() { downloads.push({ name: this.download, blob: blobs.get(this.href), anchor: this }); }
         replaceChildren() { this.children = []; }
         addEventListener(type, callback) { this.events[type] = callback; }
         querySelector(selector) { return this.parts?.[selector]; }
@@ -26,10 +34,11 @@ function harness() {
         return elements.get(id);
     };
     get('xi-shi-search').parts = { input: get('xi-shi-input'), button: get('xi-shi-clear') };
-    const document = { getElementById: get, createElement: () => new Element(), addEventListener() {},
+    const document = { body: new Element(), getElementById: get, createElement: () => new Element(), addEventListener() {},
         querySelector: selector => get(selector) };
     const context = vm.createContext({ document, console: { warn() {}, log() {}, group() {}, groupEnd() {} },
-        Date: class extends Date { static now() { return now; } }, setTimeout, clearTimeout,
+        Date: class extends Date { static now() { return now; } }, setTimeout, clearTimeout, Blob,
+        URL: { createObjectURL: blob => { const url = `blob:${blobs.size}`; blobs.set(url, blob); return url; }, revokeObjectURL: url => blobs.delete(url) },
         localStorage: { getItem: () => null }, btoa: value => value,
         STATE: { contacts: [], xiShiRecords: [], settings: {} },
         Toast: { show: (text, options) => toasts.push({ text, options }) },
@@ -61,7 +70,7 @@ function harness() {
     context.STATE.contacts = [contact];
     context.STATE.currentContactId = 'a';
     context.XiShi.contactId = 'a';
-    return { ...context, contact, get, data, toasts, views, dialogs,
+    return { ...context, contact, get, data, toasts, views, dialogs, downloads,
         clock: value => { now = value; }, fail: value => { fail = value; }, accept: value => { accepted = value; } };
 }
 
@@ -80,6 +89,65 @@ test('整组收藏只保留文字快照，编辑/删除原消息不影响收藏�
     assert.equal(h.toasts[0].options?.icon || 'check', 'xi-shi');
     assert.equal(h.toasts.at(-1).options?.icon || 'check', 'xi-shi');
     assert.equal(h.toasts.at(-1).text, '已收藏到夕拾');
+});
+
+// ★ 导出运行真实快照拆分和下载逻辑，覆盖跨角色隔离、面板排序、搜索不漏条及两种文件的实际字节内容。
+test('夕拾导出只含当前角色全部快照，星标优先且时间倒序，JSON/TXT 保留正文、思考与图片描述', async () => {
+    const h = harness();
+    h.contact.name = '喜羊羊';
+    h.STATE.xiShiRecords = [
+        { id: 'late', contactId: 'a', role: 'assistant', text: '<think>珍惜这段相遇</think>我很开心能遇到你', imageDescription: '花园', messageTimeMs: 2000 },
+        { id: 'other', contactId: 'b', role: 'user', text: '其他角色的收藏', messageTimeMs: 500 },
+        { id: 'early', contactId: 'a', role: 'user', text: '[2026-11-25 12:00] 今天天气真好', messageTimeMs: 1000 },
+        { id: 'pinned', contactId: 'a', role: 'user', text: '置顶收藏', messageTimeMs: 500, starredAt: 999 }
+    ];
+    const before = JSON.stringify(h.STATE.xiShiRecords);
+    h.get('xi-shi-input').value = '不存在';
+    h.XiShi.init();
+    h.get('xi-shi-export-open').events.click();
+    assert.equal(h.get('modal-xi-shi-export').classList.contains('hidden'), false);
+    h.get('xi-shi-export-json').events.click();
+    assert.equal(h.downloads.length, 1);
+    const expected = [
+        { role: 'user', context: '置顶收藏' },
+        { role: 'assistant', context: '我很开心能遇到你\n\n【思考过程】\n珍惜这段相遇\n\n【图片描述】\n花园' },
+        { role: 'user', context: '今天天气真好' }
+    ];
+    assert.deepEqual(JSON.parse(await h.downloads[0].blob.text()), expected);
+    assert.match(h.downloads[0].name, /^喜羊羊的夕拾_\d{4}-\d{2}-\d{2}\.json$/);
+    assert.equal(h.downloads[0].blob.type, 'application/json;charset=utf-8');
+    assert.equal(h.downloads[0].anchor.removed, true);
+    h.get('xi-shi-export-txt').events.click();
+    assert.equal(await h.downloads[1].blob.text(), `我：\n${expected[0].context}\n\n喜羊羊：\n${expected[1].context}\n\n我：\n${expected[2].context}`);
+    assert.equal(h.downloads[1].blob.type, 'text/plain;charset=utf-8');
+    assert.equal(JSON.stringify(h.STATE.xiShiRecords), before);
+    assert.equal(h.get('modal-xi-shi-export').classList.contains('hidden'), false);
+    h.get('xi-shi-export-close').events.click();
+    assert.equal(h.get('modal-xi-shi-export').classList.contains('hidden'), true);
+});
+
+test('夕拾空列表禁止下载，独立思考/图片快照保留标签，下载失败提示且清理临时节点', async () => {
+    const h = harness();
+    h.XiShi.openExport();
+    assert.equal(h.get('xi-shi-export-json').disabled, true);
+    assert.equal(h.get('xi-shi-export-txt').disabled, true);
+    h.XiShi.downloadExport('txt');
+    assert.equal(h.downloads.length, 0);
+    h.contact.name = '喜/羊:羊';
+    h.STATE.xiShiRecords = [
+        { contactId: 'a', role: 'assistant', text: '独立思考', bubbleType: 'thought', messageTimeMs: 1 },
+        { contactId: 'a', role: 'user', text: '', imageDescription: '图片描述', bubbleType: 'image', messageTimeMs: 2 }
+    ];
+    h.XiShi.downloadExport('json');
+    assert.deepEqual(JSON.parse(await h.downloads[0].blob.text()), [
+        { role: 'user', context: '【图片描述】\n图片描述' },
+        { role: 'assistant', context: '【思考过程】\n独立思考' }
+    ]);
+    assert.match(h.downloads[0].name, /^喜_羊_羊的夕拾_/);
+    h.document.createElement = () => ({ click() { throw Error('下载失败'); }, remove() { this.removed = true; } });
+    h.XiShi.downloadExport('txt');
+    assert.equal(h.toasts.at(-1).text, '夕拾导出失败，请重试');
+    assert.equal(h.document.body.children.at(-1).removed, true);
 });
 
 test('线上/线下菜单按消息身份收藏整组，不会因菜单打开后插入消息而收藏邻居', async () => {

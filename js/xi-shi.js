@@ -108,6 +108,68 @@ const XiShi = {
         return [content.thought, content.text, content.imageDescription].filter(Boolean).join('\n\n');
     },
 
+    // ★ 导出只读当前角色的完整快照，沿用面板的星标优先、时间倒序；不受搜索筛选影响，也不回读聊天正文。
+    exportData() {
+        return this.sorted().map(record => {
+            const content = this.content(record);
+            // ★ 两种文件共用同一份文本；折叠状态不影响导出，标签保留思考与识图描述的含义。
+            const context = [content.text,
+                content.thought ? `【思考过程】\n${content.thought}` : '',
+                content.imageDescription ? `【图片描述】\n${content.imageDescription}` : '']
+                .filter(Boolean).join('\n\n');
+            return { role: record.role, context };
+        });
+    },
+
+    openExport() {
+        const contact = STATE.contacts.find(item => item.id === this.contactId);
+        if (!contact) return;
+        const count = this.records().length;
+        document.getElementById('xi-shi-export-status').textContent = count
+            ? `将导出${contact.name}的全部 ${count} 条夕拾。` : '还没有夕拾，收藏后再来导出吧。';
+        ['json', 'txt'].forEach(format => { document.getElementById(`xi-shi-export-${format}`).disabled = !count; });
+        document.getElementById('modal-xi-shi-export').classList.remove('hidden');
+        document.getElementById(count ? 'xi-shi-export-json' : 'xi-shi-export-close').focus();
+    },
+
+    closeExport() {
+        document.getElementById('modal-xi-shi-export').classList.add('hidden');
+        document.getElementById('xi-shi-export-open').focus();
+    },
+
+    downloadExport(format) {
+        const contact = STATE.contacts.find(item => item.id === this.contactId);
+        if (!contact || !['json', 'txt'].includes(format)) return;
+        let url, anchor;
+        try {
+            const data = this.exportData();
+            if (!data.length) {
+                this.openExport();
+                return;
+            }
+            const text = format === 'json' ? JSON.stringify(data, null, 2)
+                : data.map(item => `${item.role === 'user' ? '我' : contact.name}：\n${item.context}`).join('\n\n');
+            const blob = new Blob([text], { type: format === 'json' ? 'application/json;charset=utf-8' : 'text/plain;charset=utf-8' });
+            url = URL.createObjectURL(blob);
+            anchor = document.createElement('a');
+            // ★ 文件名清理路径保留字符；使用本地日期，避免晚间导出时 UTC 日期差一天。
+            const now = new Date();
+            const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
+            const name = String(contact.name || '角色').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
+            anchor.href = url;
+            anchor.download = `${name}的夕拾_${date}.${format}`;
+            document.body.appendChild(anchor);
+            anchor.click();
+        } catch (error) {
+            console.warn('[夕拾] 导出失败:', error);
+            Toast.show('夕拾导出失败，请重试', { icon: 'triangle-exclamation-point' });
+        } finally {
+            anchor?.remove();
+            // ★ 等浏览器接管下载后再释放临时 URL，连续导出也不会积累资源。
+            if (url) setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+    },
+
     renderThought(thought, keyword) {
         if (!thought) return '';
         // ★ 沿用聊天的 Markdown 解析，折叠面板使用夕拾独立类名；搜索高亮避免嵌套摘要。
@@ -277,6 +339,22 @@ const XiShi = {
     },
 
     init() {
+        document.getElementById('xi-shi-export-open').addEventListener('click', () => this.openExport());
+        document.getElementById('xi-shi-export-close').addEventListener('click', () => this.closeExport());
+        ['json', 'txt'].forEach(format => {
+            document.getElementById(`xi-shi-export-${format}`).addEventListener('click', () => this.downloadExport(format));
+        });
+        const exportModal = document.getElementById('modal-xi-shi-export');
+        exportModal.addEventListener('click', event => { if (event.target === exportModal) this.closeExport(); });
+        exportModal.addEventListener('keydown', event => {
+            if (event.key === 'Escape') { event.preventDefault(); this.closeExport(); }
+            // ★ 键盘焦点留在弹窗内；关闭后回到 header 的导出入口。
+            if (event.key !== 'Tab') return;
+            const buttons = Array.from(exportModal.querySelectorAll('button:not(:disabled)'));
+            const first = buttons[0], last = buttons[buttons.length - 1];
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+        });
         document.getElementById('explore-xi-shi-btn').addEventListener('click', () => UI.switchView('xi-shi'));
         [['xi-shi', 'explore'], ['xi-shi-detail', 'xi-shi']].forEach(([page, back]) => {
             document.getElementById(`${page}-back-btn`).addEventListener('click', () => UI.switchView(back));
