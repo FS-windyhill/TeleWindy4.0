@@ -12716,6 +12716,7 @@ const App = {
             });
         }
         const toggleBtn = menu.querySelector('button[data-action="toggle-hidden"]');
+        // ★ 线上与线下共用单行文案，菜单按当前文字和字号自动撑开。
         if (toggleBtn) toggleBtn.querySelector('.message-menu-label').textContent = message.isHidden ? '取消隐藏' : '向ta隐藏';
 
         this.presentMessageContextMenu(cardEl.getBoundingClientRect(), point);
@@ -14344,8 +14345,10 @@ const App = {
         const viewport = window.visualViewport;
         const leftEdge = viewport?.offsetLeft || 0, topEdge = viewport?.offsetTop || 0;
         const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
-        // ★ 与 CSS 的紧凑宽度保持一致，视口缩小时仍保留两侧空隙。
-        panel.style.width = `${Math.min(300, width - 32)}px`;
+        // ★ 使用内容固有宽度，让菜单随字号加宽；视口含软键盘/缩放时仍限制在可见区域内。
+        panel.style.width = 'max-content';
+        panel.style.minWidth = `${Math.min(300, width - 24)}px`;
+        panel.style.maxWidth = `${width - 24}px`;
         const bounds = panel.getBoundingClientRect();
         const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
         const anchorX = clamp(point?.x ?? (rect.left + rect.right) / 2, leftEdge + 8, leftEdge + width - 8);
@@ -14381,9 +14384,11 @@ const App = {
             if (!pressing) menu.classList.remove('locked');
         }, 300);
         const close = () => this.hideMessageContextMenu();
+        // ★ 超大字号下允许横向查看菜单，菜单自身滚动不触发“聊天滚动时关闭”。
+        const closeOnScroll = event => { if (!menu.contains(event.target)) close(); };
         const keydown = event => { if (event.key === 'Escape') close(); };
         window.addEventListener('resize', close);
-        document.addEventListener('scroll', close, true);
+        document.addEventListener('scroll', closeOnScroll, true);
         document.addEventListener('keydown', keydown);
         document.addEventListener('touchend', release, true);
         document.addEventListener('touchcancel', release, true);
@@ -14391,7 +14396,7 @@ const App = {
         viewport?.addEventListener('resize', close);
         this.contextMenuCleanup = () => {
             window.removeEventListener('resize', close);
-            document.removeEventListener('scroll', close, true);
+            document.removeEventListener('scroll', closeOnScroll, true);
             document.removeEventListener('keydown', keydown);
             document.removeEventListener('touchend', release, true);
             document.removeEventListener('touchcancel', release, true);

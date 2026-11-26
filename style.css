@@ -3713,11 +3713,12 @@ body.dark-mode .contact-menu-panel button[data-action="cancel"] {
 /* ★★★★★ 联系人长按菜单 END ★★★★★ */
 
 /* ★ 整组菜单贴近长按气泡；选择器限定本菜单，不影响联系人及其它弹窗。 */
-#msg-context-menu { position: fixed; inset: 0; display: none; z-index: 2100; touch-action: none; }
+#msg-context-menu { position: fixed; inset: 0; display: none; z-index: 2100; touch-action: pan-x; }
 #msg-context-menu .menu-backdrop { position: absolute; inset: 0; background: transparent; }
 #msg-context-menu .menu-panel {
-    /* ★ 六项功能保持单排，面板收窄并给手机屏幕两侧留出空隙。 */
-    position: fixed; z-index: 1; width: min(300px, calc(100vw - 32px));
+    /* ★ 按六项功能的实际字号撑开面板，小字号保持紧凑，最大宽度仍给屏幕两侧留白。 */
+    position: fixed; z-index: 1; width: max-content;
+    min-width: min(300px, calc(100vw - 24px)); max-width: calc(100vw - 24px);
     box-sizing: border-box; border-radius: 10px; background: rgba(255, 255, 255, 0.96);
     box-shadow: 0 4px 22px rgba(0, 0, 0, 0.22); color: #333;
     --menu-arrow-x: 50%; animation: message-menu-appear 0.15s ease-out;
@@ -3734,7 +3735,12 @@ body.dark-mode .contact-menu-panel button[data-action="cancel"] {
     position: relative;
     z-index: 1;
     display: grid;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    /* ★ 每项按内容分配宽度，较长的隐藏文案不会挤进相邻按钮；极窄屏可在菜单内横向滑动。 */
+    grid-template-columns: repeat(6, max-content);
+    justify-content: space-between;
+    overflow-x: auto;
+    box-sizing: border-box;
+    touch-action: pan-x;
     padding: 4px;
     gap: 2px;
 }
@@ -3747,7 +3753,7 @@ body.dark-mode .contact-menu-panel button[data-action="cancel"] {
     justify-content: center;
     gap: 3px;
     min-width: 0;
-    padding: 6px 0;
+    padding: 6px;
     border: 0;
     border-radius: 6px;
     color: inherit;
@@ -3759,6 +3765,13 @@ body.dark-mode .contact-menu-panel button[data-action="cancel"] {
     -webkit-tap-highlight-color: transparent;
 }
 
+/* ★ 文案恢复单行，宽度由实际文字撑开，不再预留第二行的空白。 */
+#msg-context-menu .message-menu-label {
+    display: block;
+    line-height: 1.4;
+    white-space: nowrap;
+    text-align: center;
+}
 #msg-context-menu button svg { display: block; width: 21px; height: 21px; flex-shrink: 0; }
 #msg-context-menu button:active { background: rgba(128, 128, 128, 0.18); }
 #msg-context-menu button:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
