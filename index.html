@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 长期记忆弹窗统一背景模糊，更新版本参数避免 PWA 沿用旧样式。 -->
-    <link rel="stylesheet" href="./style.css?v=20261126-menu-font-width-2">
+    <link rel="stylesheet" href="./style.css?v=20261126-message-menu-fixed-width-1">
 </head>
 <body>
 
@@ -45,12 +45,27 @@
             <header class="app-header">
 
                 <h1>通讯录</h1>
-                <button id="add-contact-btn" class="header-icon-btn right" title="添加新角色">
+                <button id="add-contact-btn" class="header-icon-btn right" title="添加" aria-controls="contact-add-menu" aria-expanded="false">
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="12" y1="5" x2="12" y2="19"></line>
                         <line x1="5" y1="12" x2="19" y2="12"></line>
                     </svg>
                 </button>
+                <!-- ★ 加号菜单：锚定在通讯录右上角，点击外侧或切页时收起。 -->
+                <div id="contact-add-menu" class="contact-add-menu hidden">
+                    <button type="button" id="contact-add-character">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+                            <circle cx="9" cy="7" r="3"></circle><path d="M3 20v-2a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v2M19 9v6m-3-3h6"></path>
+                        </svg>
+                        创建角色
+                    </button>
+                    <button type="button" id="contact-add-group">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true">
+                            <circle cx="9" cy="7" r="3"></circle><path d="M3 20v-2a5 5 0 0 1 5-5h2a5 5 0 0 1 5 5v2M16 4a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5v2"></path>
+                        </svg>
+                        创建群聊
+                    </button>
+                </div>
                 <button id="main-settings-btn" class="header-icon-btn left" title="全局设置">
                     <!-- 将 SVG 直接粘在按钮里 -->
                     <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -2016,6 +2031,55 @@
         </template>
 
         <!-- ======================= -->
+        <!-- ★★★★★ 群聊页：独立文字消息与设置入口 START ★★★★★ -->
+        <div id="view-group-chat" class="page-view">
+            <header class="app-header chat-header">
+                <button type="button" id="group-chat-back" class="header-icon-btn left" aria-label="返回通讯录">
+                    <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <div class="chat-header-profile">
+                    <div id="group-chat-header-avatar"></div>
+                    <div class="chat-header-meta">
+                        <h1 id="group-chat-title"></h1>
+                        <p id="group-chat-member-count"></p>
+                    </div>
+                </div>
+                <button type="button" id="group-chat-settings" class="header-icon-btn right" aria-label="群设置"></button>
+            </header>
+            <div id="group-chat-messages" class="group-chat-messages" role="log" aria-label="群聊消息"></div>
+            <div id="group-chat-status" class="group-chat-feedback" role="status"></div>
+            <!-- ★ 群聊与单聊共用底栏样式；控件 ID 独立，切换会话时保留各自的草稿。 -->
+            <footer class="app-footer">
+                <div id="group-chat-image-preview" class="hidden">
+                    <div class="group-chat-preview-frame">
+                        <img id="group-chat-preview-img" alt="待发送图片">
+                        <button type="button" id="group-chat-clear-image" aria-label="移除图片">×</button>
+                    </div>
+                </div>
+                <input type="file" id="group-chat-image-input" accept="image/*" hidden>
+                <button type="button" id="group-chat-reroll" class="footer-btn" title="重新生成" aria-label="重新生成" disabled>
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path d="M12 2L14.8 8.4L22 12L14.8 15.6L12 22L9.2 15.6L2 12L9.2 8.4L12 2Z"/>
+                    </svg>
+                </button>
+                <textarea id="group-chat-draft" rows="1" aria-label="群消息" placeholder="说点什么..."></textarea>
+                <button type="button" id="group-chat-upload" class="footer-btn" title="上传图片" aria-label="上传图片">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                </button>
+                <button type="button" id="group-chat-send" title="发送" aria-label="发送">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                        <path class="chat-send-icon" d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        <g class="chat-stop-icon"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></g>
+                    </svg>
+                </button>
+            </footer>
+        </div>
+        <!-- ★★★★★ 群聊页 END ★★★★★ -->
+
         <!-- 页面 2：聊天窗口 (隐藏) -->
         <!-- ======================= -->
         <div id="view-chat" class="page-view"> 
@@ -2357,6 +2421,48 @@
 
 
 
+
+    <!-- ★★★★★ 创建群聊 / 群设置：独立类名，沿用角色弹窗的标题 / 正文 / 底栏布局 START ★★★★★ -->
+    <div id="group-chat-modal" class="group-modal-overlay hidden">
+        <form id="group-chat-form" class="group-modal" role="dialog" aria-modal="true" aria-labelledby="group-modal-title">
+            <h2 id="group-modal-title">创建群聊</h2>
+            <div class="group-modal-body">
+                <label class="group-modal-field" for="group-modal-name">群聊名称</label>
+                <input id="group-modal-name" type="text" maxlength="60" required>
+
+                <label class="group-modal-field" for="group-modal-avatar">群头像（可选）</label>
+                <div class="group-modal-avatar-row">
+                    <div id="group-modal-avatar-preview"></div>
+                    <input id="group-modal-avatar" type="file" accept="image/*">
+                    <button type="button" id="group-modal-avatar-reset" class="group-modal-secondary hidden">使用成员头像</button>
+                </div>
+
+                <fieldset class="group-modal-members">
+                    <legend class="group-modal-field">群成员（至少两位角色）</legend>
+                    <div id="group-modal-member-list" class="group-modal-member-list"></div>
+                </fieldset>
+
+                <label class="group-modal-field" for="group-modal-description">群简介（可选）</label>
+                <textarea id="group-modal-description" rows="3" maxlength="500"></textarea>
+
+                <div id="group-modal-model-section" class="hidden">
+                    <label class="group-modal-field" for="group-modal-model">群聊模型</label>
+                    <select id="group-modal-model"></select>
+                </div>
+
+                <div id="group-modal-actions" class="group-modal-danger-zone hidden">
+                    <button type="button" id="group-modal-clear" class="group-modal-danger-button group-modal-danger-outline">清空聊天记录</button>
+                    <button type="button" id="group-modal-dissolve" class="group-modal-danger-button">解散群聊</button>
+                </div>
+                <p id="group-modal-error" class="group-modal-error hidden" role="alert"></p>
+            </div>
+            <div class="group-modal-footer">
+                <button type="button" id="group-modal-cancel">取消</button>
+                <button type="submit" id="group-modal-save">确定</button>
+            </div>
+        </form>
+    </div>
+    <!-- ★★★★★ 创建群聊 / 群设置 END ★★★★★ -->
 
     <!-- 新增：主设置（复用 modal-overlay 的结构，JS 里会切换内容） -->
     <div id="main-modal" class="modal-overlay hidden">
@@ -3100,7 +3206,7 @@
     </div>
     <!-- ★★★★★ 联系人列表长按操作菜单 END ★★★★★ -->
 
-    <!-- ★ 长按整组操作：标题只作说明，六个功能横排；透明遮罩仅用于点击外部关闭。 -->
+    <!-- ★ 长按整组操作：第一行是标题，第二行六项等宽排列，透明遮罩用于点击外部关闭。 -->
     <div id="msg-context-menu" class="msg-context-menu" style="display: none;">
         <div class="menu-backdrop"></div>
         <div class="menu-panel" role="dialog" aria-label="编辑整组">
@@ -3444,12 +3550,12 @@
     
 
     <!-- 项目脚本：先加载独立服务，再加载主业务入口 -->
-    <script src="./js/config.js?v=20261124-xi-shi-1"></script>
+    <script src="./js/config.js?v=20261126-group-chat-bridge-1"></script>
     <script src="./js/css-presets.js?v=20261101-header-default-2"></script>
     <script src="./js/custom-css.js?v=20261101-prefix-parser-1"></script>
     <!-- ★ 气泡身份要先于存储迁移、历史过滤和聊天页加载。 -->
     <script src="./js/chat-bubbles.js?v=20261025-bubble-snapshot-1"></script>
-    <script src="./js/storage.js?v=20261125-xi-shi-text-only-2"></script>
+    <script src="./js/storage.js?v=20261126-group-chat-1"></script>
     <!-- ★ 存储统计只在打开管理页时读取旧数据，不改变 IndexedDB 格式。 -->
     <script src="./js/storage-space.js?v=20261024-4"></script>
     <script src="./js/usage-stats.js?v=20261024-usage-cache-3"></script>
@@ -3478,7 +3584,8 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261119-schedule-current-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./script.js?v=20261126-menu-font-width-2"></script>
+    <script src="./js/group-chat.js?v=20261126-group-chat-user-waterfall-1"></script>
+    <script src="./script.js?v=20261126-message-menu-fixed-width-1"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

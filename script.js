@@ -1136,12 +1136,14 @@ const API = {
         UsageStats.jobStart(job, settings);
         // ★ 创建请求可能在用户停止后才返回 ID。只清理这个 job，不能再登记为待接收。
         const wait = settings.ONLINE_CHAT_WAIT;
-        const signal = wait?.controller.signal;
+        // ★ 群聊复用 Worker 请求与取消能力，回复由群聊自己逐条接收。
+        const foregroundOnly = settings.ASYNC_BACKEND_FOREGROUND_ONLY === true;
+        const signal = wait?.controller.signal || (foregroundOnly ? settings.REQUEST_SIGNAL : null);
         if (signal?.aborted) {
             void this.deleteChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN);
             signal.throwIfAborted();
         }
-        this.rememberPendingJob(job.jobId, settings);
+        if (!foregroundOnly) this.rememberPendingJob(job.jobId, settings);
 
         try {
             const result = await this.waitForChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN, {
@@ -1194,7 +1196,7 @@ const API = {
             }
 
             // ★ 普通聊天由 App 落库后确认；否则 API 返回前删掉结果，数据库失败时就无从恢复。
-            if (!settings.CHAT_HISTORY_KEY) {
+            if (!settings.CHAT_HISTORY_KEY && !foregroundOnly) {
                 await this.deleteChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN);
                 this.forgetPendingJob(job.jobId);
             }
@@ -1225,6 +1227,7 @@ const API = {
         } catch (error) {
             // ★ 主动停止不走网络故障的恢复分支，也不显示失败气泡。
             signal?.throwIfAborted();
+            if (foregroundOnly) throw new Error(this.explainAsyncBackendError(error));
             console.warn('[AsyncBackend] job failed or interrupted', {
                 jobId: this.asyncJobLogId(job.jobId),
                 error: error.message
@@ -1247,6 +1250,8 @@ const API = {
             const friendlyError = this.explainAsyncBackendError(error);
             this.markPendingJobFailed(job.jobId, friendlyError);
             throw new Error(friendlyError);
+        } finally {
+            if (foregroundOnly) void this.deleteChatJob(backendUrl, job.jobId, settings.ASYNC_BACKEND_TOKEN);
         }
     },
 
@@ -1652,6 +1657,8 @@ const API = {
             context: settings.ASYNC_BACKEND_CONTEXT || null,
             chatHistoryKey: settings.CHAT_HISTORY_KEY || 'history',
             rerollMessageIds: settings.CHAT_REROLL_MESSAGE_IDS || [],
+            // ★ 后台恢复按实际发送的群聊桥接版本计数。
+            groupChatBridgeRound: settings.GROUP_CHAT_BRIDGE_ROUND || null,
             // ★ 番茄钟请求快照随 job 保存，避免恢复时聊天索引因删除/重生成发生偏移。
             pomodoroInjection: settings.POMODORO_INJECTION || null,
             // ★ 电话回顾快照随请求保存，恢复旧 job 时不消费后来发生的新通话。
@@ -2847,6 +2854,8 @@ const UI = {
         App.hideMessageContextMenu();
         // ★ 页面切走时立即停麦，避免识别结果回填到后来打开的聊天。
         globalThis.ChatVoiceInput?.cancel();
+        // ★ 群聊是独立会话页；切到其它页面时只收起群聊界面。
+        if (viewName !== 'group-chat') globalThis.GroupChat?.leave();
         const appContainer = document.getElementById('app-container');
         
         // 安全获取其他三个主要视图和底栏（找不到也不会报错）
@@ -2901,7 +2910,13 @@ const UI = {
         // 先清除底栏的全部高亮状态
         document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
 
-        if (['xi-shi', 'xi-shi-detail', 'phone-history', 'phone-history-calls', 'phone-history-detail'].includes(viewName)) {
+        if (viewName === 'group-chat') {
+            appContainer.classList.remove('in-chat-mode');
+            STATE.currentContactId = null;
+            document.querySelectorAll('.page-view').forEach(view => { view.style.display = 'none'; });
+            document.getElementById('view-group-chat').style.display = 'flex';
+            if (bottomTabBar) bottomTabBar.style.display = 'none';
+        } else if (['xi-shi', 'xi-shi-detail', 'phone-history', 'phone-history-calls', 'phone-history-detail'].includes(viewName)) {
             appContainer.classList.remove('in-chat-mode');
             // ★ 聊天页保留常驻布局，与心笺等探索子页使用同一规则。
             document.querySelectorAll('.page-view').forEach(view => {
@@ -3560,6 +3575,8 @@ const UI = {
             // 4. 将填好数据的克隆体加入页面
             this.els.contactContainer.appendChild(clone);
         });
+        // ★ 群聊共用联系人列表模板，群资料与消息保存在独立会话里。
+        globalThis.GroupChat?.renderContacts(this.els.contactContainer, template);
     },
 
     // ★★★ 渲染世界书：大分类下拉框 ★★★
@@ -4595,6 +4612,20 @@ const UI = {
         el.style.overflowY = '';
     },
 
+    // ★ 聊天输入共用换行规则：桌面 Enter 发送，Shift+Enter 或手机回车换行，中文候选确认交给输入法。
+    bindComposerInput(el, send, onInput) {
+        if (!el) return;
+        el.addEventListener('input', () => {
+            this.autoGrowComposer(el);
+            onInput?.();
+        });
+        el.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' || event.shiftKey || window.innerWidth < 800 || event.isComposing || event.keyCode === 229) return;
+            event.preventDefault();
+            send();
+        });
+    },
+
     // ★★★ 聊天 Header 在线状态：统一管理头像、绿点和“离开/离线”文案 ★★★
     getChatHeaderAvatarSrc(contact) {
         const avatar = String(contact?.avatar || '').trim();
@@ -5241,6 +5272,7 @@ const App = {
                             offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId,
                             offlineRecapRoundsLeft: contact.offlineRecapRoundsLeft,
                             offlineRecapConsumedRoundId: contact.offlineRecapConsumedRoundId,
+                            groupChatBridge: contact.groupChatBridge,
                             phoneRecaps: JSON.parse(JSON.stringify(contact.phoneRecaps || []))
                         };
                         const alreadySaved = targetHistory.some(msg => msg.asyncJobId === pending.jobId);
@@ -5263,6 +5295,9 @@ const App = {
                                 asyncJobId: pending.jobId
                             };
                             targetHistory.push(assistantMessage);
+                            if (!offlineTargeted && pending.groupChatBridgeRound && globalThis.GroupChat) {
+                                contact.groupChatBridge = GroupChat.consumeBridgeRound(contact.groupChatBridge, pending.groupChatBridgeRound);
+                            }
                         } else {
                             assistantMessage = targetHistory.find(msg => msg.asyncJobId === pending.jobId) || null;
                         }
@@ -11213,6 +11248,17 @@ const App = {
     // APP CONTROLLER.handleSend
     // ★★★ 线上聊天与线下见面共用的请求配置组装 START ★★★
     // 全局默认 + 角色绑定预设覆盖 + 数值兜底 + 缺失检查；配置缺失时弹窗并返回 null。
+    // ★ 群聊与单聊共用独立识图的 API 配置和取消信号。
+    buildChatVisionSettings(signal) {
+        return {
+            url: STATE.settings.VISION_URL,
+            key: STATE.settings.VISION_KEY || STATE.settings.API_KEY,
+            model: STATE.settings.VISION_MODEL || 'Qwen/Qwen3-VL-30B-A3B-Instruct',
+            prompt: STATE.settings.VISION_PROMPT || '描述这张图片',
+            signal
+        };
+    },
+
     buildChatRequestSettings(contact) {
         // 1.1 先载入全局默认设置
         const requestSettings = {
@@ -11625,13 +11671,7 @@ const App = {
 
             // ★★★ 独立识图：新发的图和上次还没识完的原图共用取消信号 ★★★
             if (currentImageBase64 && requestSettings.IMAGE_API_MODE === 'separate') {
-                const visionSettings = {
-                    url: STATE.settings.VISION_URL,
-                    key: STATE.settings.VISION_KEY || STATE.settings.API_KEY,
-                    model: STATE.settings.VISION_MODEL || 'Qwen/Qwen3-VL-30B-A3B-Instruct',
-                    prompt: STATE.settings.VISION_PROMPT || '描述这张图片',
-                    signal
-                };
+                const visionSettings = this.buildChatVisionSettings(signal);
 
                 if (usingAsyncBackend) {
                     // ★ 后台识图：
@@ -11868,6 +11908,13 @@ const App = {
             }
             // ★★★ 线下见面回顾 END ★★★
 
+            // ★ 群聊只读桥接：群消息作为本轮背景，单聊历史不复制群气泡。
+            const groupChatContext = globalThis.GroupChat?.buildPrivateContext(contact, agentUserMessage?.messageId);
+            if (groupChatContext) {
+                volatileDynamicContextPrompts.push(groupChatContext.prompt);
+                requestSettings.GROUP_CHAT_BRIDGE_ROUND = groupChatContext.round;
+            }
+
             let dynamicContextContent = '';
             const allDynamicContextPrompts = [
                 ...routineDynamicContextPrompts,
@@ -12084,6 +12131,7 @@ const App = {
                 const originalHistory = contact.history;
                 const originalBridge = { offlineBridgeRoundsLeft: contact.offlineBridgeRoundsLeft,
                     offlineBridgeConsumedRoundId: contact.offlineBridgeConsumedRoundId,
+                    groupChatBridge: contact.groupChatBridge,
                     phoneRecaps: JSON.parse(JSON.stringify(contact.phoneRecaps || [])) };
                 replacementRollback = () => {
                     contact.history = originalHistory;
@@ -12104,6 +12152,10 @@ const App = {
                 };
                 if (asyncJobId) aiMessage.asyncJobId = asyncJobId;
                 contact.history.push(aiMessage);
+                // ★ 轮次和成功回复一起保存，重生成和重复回填不会再扣一次。
+                if (requestSettings.GROUP_CHAT_BRIDGE_ROUND && globalThis.GroupChat) {
+                    contact.groupChatBridge = GroupChat.consumeBridgeRound(contact.groupChatBridge, requestSettings.GROUP_CHAT_BRIDGE_ROUND);
+                }
                 newAiMessageIndex = contact.history.length - 1;
             } else {
                 newAiMessageIndex = contact.history.findIndex(msg => msg.asyncJobId === asyncJobId);
@@ -12716,7 +12768,7 @@ const App = {
             });
         }
         const toggleBtn = menu.querySelector('button[data-action="toggle-hidden"]');
-        // ★ 线上与线下共用单行文案，菜单按当前文字和字号自动撑开。
+        // ★ 线上与线下共用单行文案，按消息的隐藏状态切换。
         if (toggleBtn) toggleBtn.querySelector('.message-menu-label').textContent = message.isHidden ? '取消隐藏' : '向ta隐藏';
 
         this.presentMessageContextMenu(cardEl.getBoundingClientRect(), point);
@@ -14345,10 +14397,8 @@ const App = {
         const viewport = window.visualViewport;
         const leftEdge = viewport?.offsetLeft || 0, topEdge = viewport?.offsetTop || 0;
         const width = viewport?.width || window.innerWidth, height = viewport?.height || window.innerHeight;
-        // ★ 使用内容固有宽度，让菜单随字号加宽；视口含软键盘/缩放时仍限制在可见区域内。
-        panel.style.width = 'max-content';
-        panel.style.minWidth = `${Math.min(300, width - 24)}px`;
-        panel.style.maxWidth = `${width - 24}px`;
+        // ★ 宽度由 CSS 统一计算，这里传入缩放后的可见视口宽度，再测量面板定位。
+        panel.style.setProperty('--message-menu-viewport-width', `${width}px`);
         const bounds = panel.getBoundingClientRect();
         const clamp = (value, min, max) => Math.max(min, Math.min(value, max));
         const anchorX = clamp(point?.x ?? (rect.left + rect.right) / 2, leftEdge + 8, leftEdge + width - 8);
@@ -14358,7 +14408,8 @@ const App = {
         const above = anchorTop - bounds.height - 12;
         const below = above < topEdge + 8;
         panel.classList.toggle('below', below);
-        const left = clamp(anchorX - bounds.width / 2, leftEdge + 8, leftEdge + width - bounds.width - 8);
+        const sideGap = 12; // 与 CSS 的窄屏留白保持一致。
+        const left = clamp(anchorX - bounds.width / 2, leftEdge + sideGap, leftEdge + width - bounds.width - sideGap);
         const top = clamp(below ? anchorBottom + 12 : above, topEdge + 8, topEdge + height - bounds.height - 8);
         panel.style.left = `${left}px`;
         panel.style.top = `${top}px`;
@@ -14384,11 +14435,9 @@ const App = {
             if (!pressing) menu.classList.remove('locked');
         }, 300);
         const close = () => this.hideMessageContextMenu();
-        // ★ 超大字号下允许横向查看菜单，菜单自身滚动不触发“聊天滚动时关闭”。
-        const closeOnScroll = event => { if (!menu.contains(event.target)) close(); };
         const keydown = event => { if (event.key === 'Escape') close(); };
         window.addEventListener('resize', close);
-        document.addEventListener('scroll', closeOnScroll, true);
+        document.addEventListener('scroll', close, true);
         document.addEventListener('keydown', keydown);
         document.addEventListener('touchend', release, true);
         document.addEventListener('touchcancel', release, true);
@@ -14396,7 +14445,7 @@ const App = {
         viewport?.addEventListener('resize', close);
         this.contextMenuCleanup = () => {
             window.removeEventListener('resize', close);
-            document.removeEventListener('scroll', closeOnScroll, true);
+            document.removeEventListener('scroll', close, true);
             document.removeEventListener('keydown', keydown);
             document.removeEventListener('touchend', release, true);
             document.removeEventListener('touchcancel', release, true);
@@ -16112,18 +16161,7 @@ const App = {
         });
 
         // --- 输入与发送 ---
-        if(UI.els.input) {
-            UI.els.input.addEventListener('input', function() {
-                UI.autoGrowComposer(this);
-            });
-            UI.els.input.onkeydown = (e) => {
-                const isMobile = window.innerWidth < 800;
-                if (e.key === "Enter" && !e.shiftKey && !isMobile) {
-                    e.preventDefault(); 
-                    App.handleSend(false);
-                }
-            };
-        }
+        UI.bindComposerInput(UI.els.input, () => this.handleSend(false));
 
         // ★ 只有点击底部按钮才停止等待，输入框的回车仍只用于发送。
         if (UI.els.sendBtn) UI.els.sendBtn.onclick = () => {
@@ -16173,19 +16211,7 @@ const App = {
         if (UI.els.offlineSendBtn) UI.els.offlineSendBtn.onclick = () => this.handleOfflineSend(false);
         if (UI.els.offlineRerollBtn) UI.els.offlineRerollBtn.onclick = () => this.handleOfflineSend(true);
 
-        if (UI.els.offlineInput) {
-            // 输入框自适应高度 + PC 端 Enter 发送（与线上输入框同款）
-            UI.els.offlineInput.addEventListener('input', function() {
-                UI.autoGrowComposer(this);
-            });
-            UI.els.offlineInput.addEventListener('keydown', (e) => {
-                const isMobile = window.innerWidth < 800;
-                if (e.key === 'Enter' && !e.shiftKey && !isMobile) {
-                    e.preventDefault();
-                    this.handleOfflineSend(false);
-                }
-            });
-        }
+        UI.bindComposerInput(UI.els.offlineInput, () => this.handleOfflineSend(false));
 
         // 线下卡片长按菜单（touch + 鼠标，与线上气泡同款；多选模式下不触发）
         if (UI.els.offlineMsgs) {
@@ -16383,8 +16409,12 @@ const App = {
         }
 
         // 角色编辑
-        const addBtn = document.getElementById('add-contact-btn');
-        if(addBtn) addBtn.onclick = () => this.openEditModal(null);
+        // ★ 联系人加号同时提供建群和原有的新建角色入口。
+        if (globalThis.GroupChat) GroupChat.bindEvents();
+        else {
+            const addBtn = document.getElementById('add-contact-btn');
+            if (addBtn) addBtn.onclick = () => this.openEditModal(null);
+        }
         const chatSetBtn = document.getElementById('chat-settings-btn');
         if(chatSetBtn) chatSetBtn.onclick = () => this.openEditModal(STATE.currentContactId);
         

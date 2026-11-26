@@ -418,6 +418,8 @@ const Storage = {
 
 
         
+        // ★ 群聊独立于角色；老备份没有群聊键时按空列表打开。
+        if (globalThis.GroupChat) await GroupChat.load();
         console.log('Storage loaded via IndexedDB.');
     },
 

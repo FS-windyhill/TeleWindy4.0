@@ -43,7 +43,8 @@ function harness() {
     vm.runInContext(fs.readFileSync('js/history-visibility.js', 'utf8') + '\nthis.HistoryVisibility = HistoryVisibility;', context);
     vm.runInContext(fs.readFileSync('js/offline-chat.js', 'utf8') + '\nthis.OfflineChat = OfflineChat;', context);
     vm.runInContext(fs.readFileSync('js/phone-call.js', 'utf8') + '\nthis.PhoneCall = PhoneCall;', context);
-    const signatures = ['async handleOfflineSend(isReroll = false) {', 'async handleSend(isReroll = false) {', 'ensureHistoryCacheMetadata(contact, historyKey = \'history\') {',
+    const signatures = ['async handleOfflineSend(isReroll = false) {', 'async handleSend(isReroll = false) {', 'buildChatVisionSettings(signal) {',
+        'ensureHistoryCacheMetadata(contact, historyKey = \'history\') {',
         'selectHistoryWindowRecords(contact, requestSettings, historyKey = \'history\') {', 'async resumePendingChatJobs() {',
         'rememberPendingJob(jobId, settings) {', 'getPendingOnlineChatJobs(contact) {', 'stopOnlineChatWait() {'];
     const app = vm.runInContext('({' + signatures.map(method).join('\n') + '})', context);
@@ -399,6 +400,40 @@ test('后台回复保存失败时不确认或删除服务端副本', async () =>
     h.Storage.saveContacts = async () => { throw Error('数据库不可用'); };
     await h.app.resumePendingChatJobs();
     assert.ok(!h.events.includes('delete')); assert.ok(!h.events.includes('forget'));
+});
+
+test('群聊回顾随线上后台任务快照恢复，保存失败和重复回填都不会多计轮次', async () => {
+    const h = harness();
+    h.contact.chatMode = 'online';
+    h.contact.history.push({ role: 'user', messageId: 'group-round', content: '刚才聊了什么？' });
+    h.context.CONFIG.GROUP_CHAT_BRIDGE_ROUNDS = 3;
+    vm.runInContext(fs.readFileSync('js/group-chat.js', 'utf8'), h.context);
+    Object.assign(h.app, {
+        loadPendingJobs: () => [],
+        savePendingJobs: jobs => { h.API.loadPendingJobs = () => jobs; },
+        asyncJobLogId: id => id,
+        async consumeWorkerPostAgentResult() { return true; },
+        markContactIncomingMessage() {}
+    });
+    h.app.rememberPendingJob('bridge-job', {
+        CONTACT_ID: 'a',
+        ASYNC_BACKEND_URL: 'https://worker',
+        ASYNC_BACKEND_USER_MESSAGE_ID: 'group-round',
+        GROUP_CHAT_BRIDGE_ROUND: { sourceKey: 42, roundId: 'group-round' }
+    });
+    h.API.getChatJob = async () => ({ status: 'done', result: '群聊里的话我记得。' });
+    const save = h.Storage.saveContacts;
+    h.Storage.saveContacts = async () => { throw Error('数据库不可用'); };
+    await h.app.resumePendingChatJobs();
+    assert.equal(h.contact.history.length, 1);
+    assert.equal(h.contact.groupChatBridge, undefined);
+
+    h.Storage.saveContacts = save;
+    await h.app.resumePendingChatJobs();
+    await h.app.resumePendingChatJobs();
+    assert.equal(h.contact.history.length, 2);
+    assert.deepEqual(Array.from(h.contact.groupChatBridge.roundIds), ['group-round']);
+    assert.equal(h.contact.groupChatBridge.sourceKey, 42);
 });
 
 // ★ 线上使用同一套保存和异常清理约定，也要验证准备阶段失败不会删掉旧回复。

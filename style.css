@@ -311,7 +311,8 @@ body.dark-mode .chat-voice-button {
     outline-offset: 1px;
 }
 
-#task-input {
+#task-input,
+#group-chat-draft {
     flex-grow: 1;
     /* 调整内边距，使其文字垂直居中看起来像 input */
     padding: 6px 16px;
@@ -350,13 +351,15 @@ body.dark-mode .chat-voice-button {
     border-bottom-right-radius: 0px;
 }
 
-#task-input:focus {
+#task-input:focus,
+#group-chat-draft:focus {
     outline: none;
     border-color: var(--primary-color);
     background: rgba(255, 255, 255, 0.88) !important;
 }
 
-#send-button {
+#send-button,
+#group-chat-send {
 
     /* 增加 Flex 布局使图标居中 */
     display: inline-flex;
@@ -376,7 +379,8 @@ body.dark-mode .chat-voice-button {
 
 }
 
-#reroll-footer-btn {
+#reroll-footer-btn,
+#group-chat-reroll {
 
     /* 增加 Flex 布局使图标居中 */
     display: inline-flex;
@@ -1223,18 +1227,21 @@ body.dark-mode button#btn-close-m-write.cancel-btn{
     -webkit-backdrop-filter: blur(8px);
 }
 
-.modal-danger-zone {
+.modal-danger-zone,
+.group-modal-danger-zone {
     margin-top: 0px;
     padding-top: 5px;
     display: flex; 
     flex-direction: column; 
     gap: 20px;
 }
-.danger-btn {
+.danger-btn,
+.group-modal-danger-button {
     background: #ff3a3a; color: #ffffff; border: 1px solid rgb(255, 0, 0);
     padding: 5px; border-radius: 8px; font-size: 0.9rem; cursor: pointer; width: 100%;
 }
-.danger-btn.outline {
+.danger-btn.outline,
+.group-modal-danger-outline {
     background: rgba(255, 80, 80, 0.1);
     color: #d32f2f;
     border: 1px solid rgba(255, 80, 80, 0.9);}
@@ -3113,25 +3120,30 @@ body.dark-mode .app-footer {
 }
 
 /* 输入框区域 */
-body.dark-mode #task-input {
+body.dark-mode #task-input,
+body.dark-mode #group-chat-draft {
     border: 1px solid #9d9d9dcc; /* 稍微加深一点 */
     color: #ffffff;
     background: rgba(60, 60, 60, 0.25) !important /* 深色半透明背景 */
 }
-body.dark-mode #task-input:focus {
+body.dark-mode #task-input:focus,
+body.dark-mode #group-chat-draft:focus {
     /* 用 inset 阴影模拟第二层描边：保持 2px 的视觉效果，但边框宽度恒为 1px，
        避免聚焦时内容区变矮 2px，导致自动增高的输入框闪烁或出现多余滚动条 */
     border-color: #9d9d9d;
     box-shadow: inset 0 0 0 1px #9d9d9d;
     background: rgba(0, 0, 0, 0.25) !important;
 }
-body.dark-mode #task-input::placeholder {
+body.dark-mode #task-input::placeholder,
+body.dark-mode #group-chat-draft::placeholder {
     color: #bdbdbd;
 }
 
 /* 按钮区域 */
 body.dark-mode #send-button,
-body.dark-mode #reroll-footer-btn {
+body.dark-mode #reroll-footer-btn,
+body.dark-mode #group-chat-send,
+body.dark-mode #group-chat-reroll {
     border: 1px solid rgba(182, 182, 182, 0.3);
     background: rgba(255, 255, 255, 0.2);
     color: rgba(255, 255, 255, 0.8);
@@ -3436,11 +3448,13 @@ body.dark-mode .wi-btn.primary {
 }
 
 /* 删除按钮 */
-body.dark-mode .danger-btn {
+body.dark-mode .danger-btn,
+body.dark-mode .group-modal-danger-button {
     background: #ff3a3a; color: #ffffff; border: 1px solid rgb(255, 0, 0);
     padding: 5px; border-radius: 8px; cursor: pointer; width: 100%;
 }
-body.dark-mode .danger-btn.outline {
+body.dark-mode .danger-btn.outline,
+body.dark-mode .group-modal-danger-outline {
     background: rgba(255, 33, 33, 0.3);
     color: #ffcaca;
     border: 1px solid rgba(255, 80, 80, 0.9);
@@ -3713,12 +3727,12 @@ body.dark-mode .contact-menu-panel button[data-action="cancel"] {
 /* ★★★★★ 联系人长按菜单 END ★★★★★ */
 
 /* ★ 整组菜单贴近长按气泡；选择器限定本菜单，不影响联系人及其它弹窗。 */
-#msg-context-menu { position: fixed; inset: 0; display: none; z-index: 2100; touch-action: pan-x; }
+#msg-context-menu { position: fixed; inset: 0; display: none; z-index: 2100; touch-action: none; }
 #msg-context-menu .menu-backdrop { position: absolute; inset: 0; background: transparent; }
 #msg-context-menu .menu-panel {
-    /* ★ 按六项功能的实际字号撑开面板，小字号保持紧凑，最大宽度仍给屏幕两侧留白。 */
-    position: fixed; z-index: 1; width: max-content;
-    min-width: min(300px, calc(100vw - 24px)); max-width: calc(100vw - 24px);
+    /* ★ 面板固定为 320px，窄屏按可见视口收窄，两侧各留 12px。 */
+    position: fixed; z-index: 1;
+    width: min(320px, calc(var(--message-menu-viewport-width, 100vw) - 24px));
     box-sizing: border-box; border-radius: 10px; background: rgba(255, 255, 255, 0.96);
     box-shadow: 0 4px 22px rgba(0, 0, 0, 0.22); color: #333;
     --menu-arrow-x: 50%; animation: message-menu-appear 0.15s ease-out;
@@ -3731,41 +3745,35 @@ body.dark-mode .contact-menu-panel button[data-action="cancel"] {
 #msg-context-menu .menu-title { position: relative; z-index: 1; padding: 5px 8px; border-radius: 10px 10px 0 0; background: rgba(128, 128, 128, 0.1); text-align: center; font-size: 0.78rem; font-weight: 500; }
 
 
-#msg-context-menu .message-menu-actions { 
+#msg-context-menu .message-menu-actions {
     position: relative;
     z-index: 1;
     display: grid;
-    /* ★ 每项按内容分配宽度，较长的隐藏文案不会挤进相邻按钮；极窄屏可在菜单内横向滑动。 */
-    grid-template-columns: repeat(6, max-content);
-    justify-content: space-between;
-    overflow-x: auto;
-    box-sizing: border-box;
-    touch-action: pan-x;
+    /* ★ 六项均分面板宽度，单行文案沿用同一排图标。 */
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     padding: 4px;
     gap: 2px;
 }
 
 
-#msg-context-menu button { 
+#msg-context-menu button {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 3px;
     min-width: 0;
-    padding: 6px;
+    padding: 6px 0;
     border: 0;
     border-radius: 6px;
     color: inherit;
     background: transparent;
     font: inherit;
     font-size: 0.72rem;
-    white-space: nowrap;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
 }
 
-/* ★ 文案恢复单行，宽度由实际文字撑开，不再预留第二行的空白。 */
 #msg-context-menu .message-menu-label {
     display: block;
     line-height: 1.4;
@@ -5244,7 +5252,8 @@ body.dark-mode .multi-select-bar {
    ============================================================ */
 
 
-#upload-image-btn{
+#upload-image-btn,
+#group-chat-upload {
     /* 增加 Flex 布局使图标居中 */
     display: inline-flex;
     align-items: center;
@@ -5269,7 +5278,8 @@ body.dark-mode .multi-select-bar {
 }
 
 
-body.dark-mode #upload-image-btn{
+body.dark-mode #upload-image-btn,
+body.dark-mode #group-chat-upload {
     border: 1px solid #9d9d9dcc;
     color: #ffffff;
     background: rgba(60, 60, 60, 0.25) !important;
@@ -5297,9 +5307,10 @@ body.dark-mode #upload-image-btn{
 
 
 /* 预览容器样式 */
-#image-preview-container {
-    /* 默认隐藏，由 JS 控制显示 */
-    display: none; 
+#image-preview-container { display: none; }
+
+#image-preview-container,
+#group-chat-image-preview {
     
     /* ★ 核心定位：位于 footer 的正上方 */
     position: absolute;
@@ -5317,7 +5328,8 @@ body.dark-mode #upload-image-btn{
 }
 
 /* 预览图本身的大小限制 */
-#image-preview-img {
+#image-preview-img,
+#group-chat-preview-img {
     display: block;
     max-height: 80px; /* 预览图小一点，不要挡视线 */
     max-width: 100px;
@@ -5436,6 +5448,268 @@ body.dark-mode #vision-model-name{
     gap: 12px;
 }
 
+/* ★★★★★ 群聊：通讯录加号、独立群会话和群设置 START ★★★★★ */
+#view-contact-list > .app-header { z-index: 2; } /* 菜单盖住下方的通讯录毛玻璃卡片 */
+
+.contact-add-menu {
+    position: absolute;
+    top: calc(100% + 7px);
+    right: 12px;
+    min-width: 144px;
+    padding: 4px;
+    border: 0;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 4px 22px rgba(0, 0, 0, .22);
+    color: #333;
+    animation: message-menu-appear .15s ease-out;
+}
+
+.contact-add-menu::before {
+    content: "";
+    position: absolute;
+    top: -6px;
+    right: 13px;
+    width: 12px;
+    height: 12px;
+    transform: rotate(45deg);
+    background: inherit;
+}
+
+.contact-add-menu > button {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 9px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: .86rem;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.contact-add-menu > button:is(:hover, :active) { background: rgba(128, 128, 128, .18); }
+.contact-add-menu > button:focus-visible { outline: 2px solid currentColor; outline-offset: -2px; }
+.contact-add-menu svg { width: 21px; height: 21px; flex: none; }
+body.dark-mode .contact-add-menu { background: rgba(60, 60, 60, .95); color: #eee; }
+
+/* ★ 群头像在列表、标题和编辑预览复用同一拼图，图片按自己的格子裁切。 */
+.group-avatar {
+    display: grid;
+    gap: 2px;
+    overflow: hidden;
+    border-radius: 50%;
+}
+
+.group-avatar:not(.contact-avatar) {
+    width: 44px;
+    height: 44px;
+    background: var(--btn-color);
+}
+
+.group-avatar[data-tiles="2"],
+.group-avatar[data-tiles="3"],
+.group-avatar[data-tiles="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.group-avatar[data-tiles="3"],
+.group-avatar[data-tiles="4"] { grid-template-rows: repeat(2, minmax(0, 1fr)); }
+.group-avatar[data-tiles="3"] > :first-child { grid-row: span 2; }
+
+.group-avatar-tile {
+    position: relative;
+    display: grid;
+    place-items: center;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--btn-color);
+    color: var(--text-color);
+    font-size: .8rem;
+}
+
+.group-avatar-tile img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+#view-group-chat {
+    background: var(--app-wallpaper-image, url('assets/images/wallpaper.jpg')) center/cover no-repeat fixed, var(--background-color);
+}
+
+#group-chat-header-avatar { flex: none; }
+#group-chat-header-avatar .group-avatar { width: 35px; height: 35px; }
+#group-chat-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.group-chat-messages {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 16px;
+}
+
+.group-chat-speaker {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: .72rem;
+    color: rgba(255, 255, 255, .9);
+    text-shadow: 0 0 3px rgba(0, 0, 0, .8);
+}
+
+.group-chat-message .user .group-chat-speaker { align-self: flex-end; }
+.group-chat-message .message-content { min-width: 0; }
+.group-chat-feedback:not(:empty) {
+    padding: 4px 15px;
+    background: var(--background-color);
+    color: var(--text-color);
+    font-size: .8rem;
+}
+
+#group-chat-draft {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+#group-chat-reroll:disabled { opacity: .5; cursor: default; }
+.group-chat-preview-frame { position: relative; }
+#group-chat-clear-image {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: red;
+    color: white;
+    cursor: pointer;
+}
+
+.group-modal-secondary {
+    border: 1px solid var(--btn-border-color);
+    border-radius: 8px;
+    padding: 7px 10px;
+    background: var(--btn-color);
+    color: var(--text-color);
+    cursor: pointer;
+}
+
+/* ★ 群弹窗复用角色弹窗的视觉布局，使用独立选择器以便分别调整。 */
+.group-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, .2);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.group-modal {
+    display: flex;
+    flex-direction: column;
+    width: 90%;
+    max-width: 600px;
+    max-height: 90vh;
+    max-height: 90dvh;
+    padding: 20px 20px 24px;
+    box-sizing: border-box;
+    animation: modalPop .3s ease-out;
+}
+
+.group-modal h2 {
+    flex-shrink: 0;
+    margin: 0 0 12px;
+    color: #fff;
+    text-align: center;
+    font-size: 1.3rem;
+}
+
+.group-modal-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 15px;
+    margin-bottom: 16px;
+    background: rgba(255, 255, 255, .7);
+    border-radius: 15px;
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, .05);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.group-modal-field {
+    display: block;
+    margin: 0 0 5px;
+    color: #666;
+    font-size: .8rem;
+    font-weight: bold;
+}
+
+.group-modal-body :is(input[type="text"], textarea, select) {
+    display: block;
+    width: 100%;
+    padding: 10px;
+    margin: 0 0 15px;
+    box-sizing: border-box;
+    border: 1px solid #ddd;
+    border-radius: 10px;
+    background: #f9f9f9;
+    color: #333;
+    font: inherit;
+    font-size: .95rem;
+}
+
+.group-modal-body textarea { resize: vertical; }
+.group-modal-avatar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 15px; }
+.group-modal-avatar-row input { max-width: 100%; }
+.group-modal-members { min-width: 0; padding: 0; margin: 0 0 15px; border: 0; }
+.group-modal-member-list { max-height: 184px; overflow-y: auto; }
+
+.group-modal-error { margin: 8px 0 0; color: #b62828; font-size: .85rem; }
+.group-modal-footer { display: flex; gap: 12px; }
+.group-modal-footer button {
+    flex: 1;
+    padding: 9px;
+    border: .7px solid var(--btn-border-color);
+    border-radius: 8px;
+    background: var(--btn-color);
+    color: #333;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    font-size: .85rem;
+    cursor: pointer;
+}
+
+#group-modal-save { color: var(--primary-btn-text); border-color: var(--primary-btn-text); }
+body.dark-mode .group-modal-overlay { background: rgba(75, 75, 75, .15); }
+body.dark-mode .group-modal-body { background: rgb(39 39 39 / 72%); }
+body.dark-mode .group-modal-field { color: #b0b0b0; }
+body.dark-mode .group-modal-body :is(input[type="text"], textarea, select) {
+    border-color: var(--btn-border-color);
+    background: #333;
+    color: #fff;
+}
+body.dark-mode .group-modal-footer button { color: #fff; }
+body.dark-mode .group-modal-error { color: #ffaaaa; }
+/* ★★★★★ 群聊 END ★★★★★ */
+
 /* -------------------------------------- */
 /* 细节微调：滚动条美化 (可选) */
 /* -------------------------------------- */
@@ -5538,7 +5812,9 @@ select#system-prompt-preset-select.setting-input{
 /* 通用的 SVG 样式，控制图标大小和位置 */
 
 #upload-image-btn svg,
-#send-button svg {
+#send-button svg,
+#group-chat-upload svg,
+#group-chat-send svg {
     width: 1em;  /* 根据需要调整图标大小，1.2em 大约相当于 18-20px */
     height: 1em;
     display: block; /* 消除原本 inline 元素的间隙 */
@@ -5546,15 +5822,19 @@ select#system-prompt-preset-select.setting-input{
 
 /* ★ 同一个发送键切换纸飞机和停止图标，按钮尺寸保持一致。 */
 #send-button .chat-stop-icon,
-#send-button[data-action="stop-wait"] .chat-send-icon {
+#send-button[data-action="stop-wait"] .chat-send-icon,
+#group-chat-send .chat-stop-icon,
+#group-chat-send[data-action="stop-wait"] .chat-send-icon {
     display: none;
 }
 
-#send-button[data-action="stop-wait"] .chat-stop-icon {
+#send-button[data-action="stop-wait"] .chat-stop-icon,
+#group-chat-send[data-action="stop-wait"] .chat-stop-icon {
     display: inline;
 }
 
-#reroll-footer-btn svg {
+#reroll-footer-btn svg,
+#group-chat-reroll svg {
     width: 0.9em;  /* 根据需要调整图标大小，1.2em 大约相当于 18-20px */
     height: 0.9em;
     display: block; /* 消除原本 inline 元素的间隙 */
@@ -12316,10 +12596,14 @@ body.dark-mode .proactive-log {
 /* ★ 保存按钮沿用运行方式按钮的边框、底色和文字；卡片底部仍横向铺满。 */
 .proactive-save-button { width: 100%; min-height: 40px; margin-top: 14px; padding: 9px 12px; }
 .proactive-settings-grid .proactive-save-button { grid-column: 1 / -1; margin-top: 2px; }
+.group-modal-member-list,
 .proactive-character-list { display: grid; gap: 10px; margin-top: 13px; }
+.group-modal-member,
 .proactive-character-item { display: flex; align-items: center; gap: 11px; padding: 10px 12px; border-radius: 14px; background: rgba(0, 0, 0, 0.06); }
+.group-modal-member-avatar,
 .proactive-character-avatar { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 50%; object-fit: cover; display: grid; place-items: center; background: rgba(120,120,150,.12); }
-.proactive-character-name { 
+.group-modal-member-name,
+.proactive-character-name {
     flex: 1; min-width: 0; 
     overflow: hidden; 
     text-overflow: ellipsis; 
@@ -12328,6 +12612,7 @@ body.dark-mode .proactive-log {
 }
 
 
+.group-modal-member input,
 .proactive-character-item input { width: 18px; height: 18px; }
 .proactive-manual-card select { margin-top: 12px; min-height: 20px;}
 /* ★ 运行日志卡片沿用后台任务状态的浅底面板，条目共用中性的诊断日志样式。 */
@@ -12368,6 +12653,7 @@ body.dark-mode .proactive-settings-grid input, body.dark-mode .proactive-manual-
 body.dark-mode .proactive-setting-section { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.16); }
 body.dark-mode .proactive-setting-heading { color: rgba(255,255,255,.85); }
 body.dark-mode .proactive-setting-note { color: rgba(255,255,255,.62); }
+body.dark-mode .group-modal-member,
 body.dark-mode .proactive-character-item, body.dark-mode .proactive-status-summary { background: rgba(255,255,255,.07); }
 @media (max-width: 620px) {
     .proactive-settings-grid { grid-template-columns: 1fr; }
