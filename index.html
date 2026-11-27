@@ -17,7 +17,7 @@
     <link rel="stylesheet" href="./vendor/katex/katex.min.css">
 
     <!-- ★ 长期记忆弹窗统一背景模糊，更新版本参数避免 PWA 沿用旧样式。 -->
-    <link rel="stylesheet" href="./style.css?v=20261126-message-menu-fixed-width-1">
+    <link rel="stylesheet" href="./style.css?v=20261127-group-interactions-1">
 </head>
 <body>
 
@@ -1782,8 +1782,9 @@
                 <textarea id="todo-plan-text" class="todo-editor-textarea" placeholder="写下这一天要做的事..." rows="4"></textarea>
 
                 <div class="edit-buttons">
-                    <button id="todo-plan-save-btn" class="primary">保存</button>
                     <button id="todo-plan-cancel-btn" class="cancel-btn">取消</button>
+                    <button id="todo-plan-save-btn" class="primary">保存</button>
+                    
                 </div>
             </div>
         </div>
@@ -1862,8 +1863,9 @@
                 <textarea id="countdown-text" class="todo-editor-textarea" placeholder="写下这一天的名称..." rows="4"></textarea>
 
                 <div class="edit-buttons">
-                    <button id="countdown-save-btn" class="primary">保存</button>
                     <button id="countdown-cancel-btn" class="cancel-btn">取消</button>
+                    <button id="countdown-save-btn" class="primary">保存</button>
+                    
                 </div>
             </div>
         </div>
@@ -2424,17 +2426,21 @@
 
     <!-- ★★★★★ 创建群聊 / 群设置：独立类名，沿用角色弹窗的标题 / 正文 / 底栏布局 START ★★★★★ -->
     <div id="group-chat-modal" class="group-modal-overlay hidden">
-        <form id="group-chat-form" class="group-modal" role="dialog" aria-modal="true" aria-labelledby="group-modal-title">
+        <form id="group-chat-form" class="group-modal" role="dialog" aria-modal="true" aria-labelledby="group-modal-title" tabindex="-1">
             <h2 id="group-modal-title">创建群聊</h2>
             <div class="group-modal-body">
                 <label class="group-modal-field" for="group-modal-name">群聊名称</label>
                 <input id="group-modal-name" type="text" maxlength="60" required>
 
-                <label class="group-modal-field" for="group-modal-avatar">群头像（可选）</label>
-                <div class="group-modal-avatar-row">
-                    <div id="group-modal-avatar-preview"></div>
-                    <input id="group-modal-avatar" type="file" accept="image/*">
-                    <button type="button" id="group-modal-avatar-reset" class="group-modal-secondary hidden">使用成员头像</button>
+                <!-- ★ 群头像：左侧预览，右侧上传；有自定义头像时可切回成员拼图。 -->
+                <div id="group-modal-avatar-label" class="group-modal-field">群头像（可选）</div>
+                <div class="group-modal-avatar-row" role="group" aria-labelledby="group-modal-avatar-label">
+                    <div id="group-modal-avatar-preview" class="group-modal-avatar-preview"></div>
+                    <div class="group-modal-avatar-buttons">
+                        <button type="button" id="group-modal-avatar-upload" class="group-modal-avatar-button">上传本地图片</button>
+                        <button type="button" id="group-modal-avatar-reset" class="group-modal-avatar-button hidden">使用成员头像</button>
+                        <input id="group-modal-avatar" type="file" accept="image/*" hidden>
+                    </div>
                 </div>
 
                 <fieldset class="group-modal-members">
@@ -3550,11 +3556,11 @@
     
 
     <!-- 项目脚本：先加载独立服务，再加载主业务入口 -->
-    <script src="./js/config.js?v=20261126-group-chat-bridge-1"></script>
+    <script src="./js/config.js?v=20261127-group-context-per-group-1"></script>
     <script src="./js/css-presets.js?v=20261101-header-default-2"></script>
     <script src="./js/custom-css.js?v=20261101-prefix-parser-1"></script>
     <!-- ★ 气泡身份要先于存储迁移、历史过滤和聊天页加载。 -->
-    <script src="./js/chat-bubbles.js?v=20261025-bubble-snapshot-1"></script>
+    <script src="./js/chat-bubbles.js?v=20261127-group-interactions-1"></script>
     <script src="./js/storage.js?v=20261126-group-chat-1"></script>
     <!-- ★ 存储统计只在打开管理页时读取旧数据，不改变 IndexedDB 格式。 -->
     <script src="./js/storage-space.js?v=20261024-4"></script>
@@ -3573,9 +3579,9 @@
     <script src="./js/world-sense.js?v=20260829"></script>
     <script src="./js/todo-countdown-context.js"></script>
     <script src="./js/character-schedule.js"></script>
-    <script src="./js/character-memory.js?v=20261121-memory-impression-1"></script>
+    <script src="./js/character-memory.js?v=20261127-memory-thought-cleanup-1"></script>
     <!-- ★ 印象服务先加载定义，运行时复用 App 的角色记忆 API 预设与存储。 -->
-    <script src="./js/memory-impression.js?v=20261124-memory-impression-blur-1"></script>
+    <script src="./js/memory-impression.js?v=20261127-memory-thought-cleanup-1"></script>
     <script src="./js/agent-skill-router.js?v=20260907-agent-panel-2"></script>
     <script src="./js/agent-runtime.js"></script>
     <script src="./js/agent-todo-manager.js"></script>
@@ -3584,8 +3590,8 @@
     <!-- ★ 主动消息返回路径与后台设置拆页同步更新，避免 PWA 沿用旧脚本。 -->
     <script src="./js/proactive-messages.js?v=20261119-schedule-current-1"></script>
     <!-- ★ 切屏调用模式移入独立页面，更新版本参数避免 PWA 沿用旧保存逻辑。 -->
-    <script src="./js/group-chat.js?v=20261126-group-chat-user-waterfall-1"></script>
-    <script src="./script.js?v=20261126-message-menu-fixed-width-1"></script>
+    <script src="./js/group-chat.js?v=20261127-group-interactions-1"></script>
+    <script src="./script.js?v=20261127-group-interactions-1"></script>
 <script>
     document.getElementById('usage-entry').addEventListener('click', () => UsageStats.open().catch(console.warn));
     document.getElementById('usage-entry').addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' ') { e.preventDefault(); UsageStats.open().catch(console.warn); } });

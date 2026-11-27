@@ -40,6 +40,69 @@ test('最近三个非空记忆日期：跳过断聊、空白文本，长期记�
     assert.equal(memory.getInjectRecords({ enabled: false, records }).length, 0);
 });
 
+// ★ 每日总结先清理思考链，里面即使有完整 JSON 或代码围栏，也不能当作正式记忆保存。
+test('每日记忆跳过思考中的 JSON 草稿，兼容正式 JSON 的代码围栏', () => {
+    const { memory } = harness();
+    const draft = '<think>先拟草稿：```json\n{"memories":["草稿记忆"],"comment":"草稿寄语"}\n```\n</think>\n';
+    const json = JSON.stringify({ memories: ['正式记忆'], comment: '正式寄语' });
+    for (const body of [json, '```json\n' + json + '\n```', '整理结果如下：\n' + json]) {
+        const result = memory.parseAiMemory(draft + body);
+        assert.deepEqual(Array.from(result.memories, item => item.text), ['正式记忆']);
+        assert.equal(result.comment, '正式寄语');
+    }
+});
+
+test('每日记忆清理多个不同大小写的开头思考块，保留正式记忆中的字面标签', () => {
+    const { memory } = harness();
+    const text = '讨论了 <think>示例</think> 和 {"key":"value"}。';
+    const raw = ' \n<THINK data-source="model">{"memories":["草稿"]}</THINK>\n'
+        + '<thinking>另一段推理</thinking>\n<thought>最后确认</thought>\n'
+        + JSON.stringify({ memories: [text], comment: '记住这次讨论' });
+    assert.equal(memory.parseAiMemory(raw).memories[0].text, text);
+});
+
+test('每日记忆拒绝未闭合或仅有思考的返回，不能把完整草稿当成正式结果', () => {
+    const { memory } = harness();
+    const draft = '{"memories":["草稿记忆"],"comment":"草稿寄语"}';
+    for (const raw of ['<think>' + draft, '<thinking>' + draft + '</thinking>',
+        '<thought>已完成的思考</thought><THINK>' + draft]) {
+        assert.throws(() => memory.parseAiMemory(raw), /思考/);
+    }
+});
+
+test('每日记忆生成入口只保存正式总结，解析思考失败时保留已有记忆', async () => {
+    for (const truncated of [false, true]) {
+        const { STATE, context, memory } = harness();
+        // ★ 生成入口读取真实的 AI 可见聊天，连同消息清洗依赖一起加载。
+        for (const file of ['js/chat-bubbles.js', 'js/history-visibility.js']) vm.runInContext(read(file), context);
+        const dateKey = '2026-11-26';
+        STATE.contacts = [{ id: 'daily', name: '角色', history: [
+            { role: 'user', content: '今天一起看了电影', timestamp: dateKey + ' 12:00' }
+        ] }];
+        const record = memory.ensureRecord(memory.ensureMemory('daily'), dateKey);
+        record.memories = [{ text: '已有记忆' }, { text: '手动记忆', createdManually: true }];
+        record.comment = '已有寄语';
+        const draft = '<think>```json\n{"memories":["草稿记忆"]}\n```';
+        context.API = { async chat() {
+            return truncated ? draft : draft + '</think>\n{"memories":["正式记忆"],"comment":"正式寄语"}';
+        } };
+        let saved;
+        context.Storage = { async saveCharacterMemories() { saved = JSON.parse(JSON.stringify(record)); } };
+        context.MemoryImpression = { schedule() {}, render() {} };
+        const app = methods(context, [['    async generateCharacterMemory(', '    async toggleCharacterMemoryEnabled(']]);
+        Object.assign(app, {
+            buildMemoryRequestSettings() { return { API_URL: 'mock', API_KEY: 'mock', MODEL: 'mock' }; },
+            renderCharacterMemoryList() {}, renderCharacterMemoryDetail() {}
+        });
+        assert.equal(await app.generateCharacterMemory('daily', dateKey, { silent: true }), !truncated);
+        assert.deepEqual(saved.memories.map(item => item.text), truncated
+            ? ['已有记忆', '手动记忆'] : ['正式记忆', '手动记忆']);
+        assert.equal(saved.comment, truncated ? '已有寄语' : '正式寄语');
+        assert.equal(saved.isGenerating, false);
+        if (truncated) assert.match(saved.error, /思考标签未闭合/);
+    }
+});
+
 test('近期待办超过80项仍完整保留，ID 不被复述名称或猜测日期筛掉，无效 ID 不猜目标', () => {
     const { STATE, manager } = harness();
     STATE.todoPlans = Array.from({ length: 100 }, (_, i) => ({ id: `id${i}`, text: `旧任务${i}`, dateKey: '2026-11-06' }));

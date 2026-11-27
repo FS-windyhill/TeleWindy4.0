@@ -14,6 +14,7 @@
 //   - MOMENTS_INJECT_COUNT: 用户动态在聊天里提示可见角色的聊天轮次
 //   - CHARACTER_MOMENT_INJECT_COUNT: 角色动态在聊天里提示作者本人的聊天轮次
 //   - GROUP_CHAT_BRIDGE_ROUNDS: 每次有新来源消息后，群聊和线上单聊双向注入的成功轮数
+//   - GROUP_CHAT_PRIVATE_CONTEXT_ROUNDS: 群聊回注单聊时，每个群最多携带最近几轮完整问答
 //   - POMODORO_INJECT_COUNT / POMODORO_SPEECH_CONTEXT_COUNT: 番茄记录注入轮数与最多回注的陪伴发言条数
 //   - DEFAULT: 所有设置项的默认值
 //     - TODO_PLAN_INJECT_ENABLED: TO DO 计划是否注入 AI system prompt
@@ -63,6 +64,7 @@ const CONFIG = {
     MOMENTS_INJECT_COUNT: 2, // 用户动态对可见角色的聊天注入轮次
     CHARACTER_MOMENT_INJECT_COUNT: 2, // 角色自己的动态对作者本人的聊天注入轮次
     GROUP_CHAT_BRIDGE_ROUNDS: 3, // 群聊和线上单聊各自计数，重生成不重复占用轮数。
+    GROUP_CHAT_PRIVATE_CONTEXT_ROUNDS: 3, // 每个群分别取最近 3 轮，一轮包含用户发言及其后的整组群成员回复。
 
     DEFAULT: {
         API_URL: 'https://api.deepseek.com/v1/chat/completions',

@@ -99,15 +99,8 @@ const MemoryImpression = {
     },
 
     parseJson(raw) {
-        let text = String(raw || '').trim();
-        // ★ 有些模型把思考与正式正文混在 content 里；先移除开头的思考块，防止读到其中的 JSON 草稿。
-        // 只清理正文前的标签，不改 JSON 字符串中作为记忆内容出现的字面标签。
-        const thought = /^<(think|thinking|thought)\b[^>]*>[\s\S]*?<\/\1\s*>\s*/i;
-        while (thought.test(text)) text = text.replace(thought, '').trimStart();
-        if (/^<(?:think|thinking|thought)\b/i.test(text)) {
-            throw new Error('模型思考标签未闭合，可能输出已被截断，请检查模型最大输出 token 设置');
-        }
-        if (!text) throw new Error('模型仅返回了思考内容，没有正式 JSON');
+        // ★ 和每日总结共用思考块清理，后面的多行 JSON 兼容仍按印象原有流程处理。
+        const text = CharacterMemory.stripLeadingThought(raw);
         try {
             return CharacterMemory.extractJson(text);
         } catch (error) {

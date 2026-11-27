@@ -3,7 +3,6 @@
 // ============================================================
 const GroupChat = {
     PRIVATE_TO_GROUP_COUNT: 4,
-    GROUP_TO_PRIVATE_COUNT: 6,
     REPLY_LIMIT: 4,
     groups: [],
     currentId: null,
@@ -89,12 +88,15 @@ const GroupChat = {
             event.preventDefault();
             void this.saveEditor();
         };
-        this.el('group-modal-avatar').onchange = event => void this.readAvatar(event.target.files[0]);
+        // ★ 用独立按钮打开头像选择器，文件读取和预览仍由原来的流程处理。
+        const avatarInput = this.el('group-modal-avatar');
+        this.el('group-modal-avatar-upload').onclick = () => avatarInput.click();
+        avatarInput.onchange = event => void this.readAvatar(event.target.files[0]);
         this.el('group-modal-avatar-reset').onclick = () => {
             if (this.editor.busy) return;
             this.editor.avatar = '';
             this.editor.upload = null;
-            this.el('group-modal-avatar').value = '';
+            avatarInput.value = '';
             this.renderEditorAvatar();
         };
         this.el('group-modal-member-list').onchange = () => this.renderEditorAvatar();
@@ -119,6 +121,214 @@ const GroupChat = {
             this.imageDrafts.delete(this.currentId);
             this.renderImagePreview();
         };
+        this.bindMessageActions();
+    },
+
+    // ================ 单气泡操作：共用菜单，群聊身份与写库流程独立 ================
+    bindMessageActions() {
+        const list = this.el('group-chat-messages');
+        App.bindMessageSelectionGuard(list);
+        let timer, origin;
+        const cancel = () => { clearTimeout(timer); timer = null; };
+        list.addEventListener('pointerdown', event => {
+            cancel();
+            this.messageClickLocked = false;
+            if (event.button !== 0 || !event.isPrimary || this.selection) return;
+            const bubble = event.target.closest('.message-bubble');
+            if (!bubble || event.target.closest('.code-copy-btn')) return;
+            origin = { x: event.clientX, y: event.clientY };
+            timer = setTimeout(() => {
+                this.messageClickLocked = true;
+                this.showMessageMenu(bubble, { ...origin, pressed: true });
+            }, 380);
+        });
+        list.addEventListener('pointermove', event => {
+            if (origin && (Math.abs(event.clientX - origin.x) > 10 || Math.abs(event.clientY - origin.y) > 10)) cancel();
+        });
+        for (const name of ['pointerup', 'pointercancel', 'pointerleave', 'scroll']) list.addEventListener(name, cancel);
+        list.addEventListener('contextmenu', event => {
+            event.preventDefault();
+            cancel();
+            const bubble = event.target.closest('.message-bubble');
+            if (bubble && !this.selection) this.showMessageMenu(bubble, { x: event.clientX, y: event.clientY });
+        });
+        // ★ 捕获阶段拦住图片、链接和代码复制，长按松手与多选都不能穿透到气泡内部。
+        list.addEventListener('click', event => {
+            const bubble = event.target.closest('.message-bubble');
+            if (!this.selection && !this.messageClickLocked) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (this.messageClickLocked) { this.messageClickLocked = false; return; }
+            if (!bubble) return;
+            const key = JSON.stringify([Number(bubble.dataset.sentAt), bubble.dataset.bubbleKey]);
+            if (this.selection.keys.has(key)) this.selection.keys.delete(key);
+            else this.selection.keys.add(key);
+            bubble.classList.toggle('selected', this.selection.keys.has(key));
+            this.updateSelectCount();
+        }, true);
+        this.el('msg-context-menu').addEventListener('click', event => {
+            const menu = this.el('msg-context-menu');
+            const button = event.target.closest('button');
+            if (menu.dataset.mode !== 'group' || menu.classList.contains('locked') || !button) return;
+            const target = this.actionTarget;
+            App.hideMessageContextMenu();
+            void this.handleMessageAction(button.dataset.action, target);
+        });
+    },
+
+    resolveBubble(target) {
+        const group = this.find(target?.groupId);
+        const message = group?.history.find(item => item.sentAt === target.sentAt);
+        if (!message) return null;
+        const index = ChatBubbles.indexOf(message, target.key);
+        return index === null ? null : { group, message, index };
+    },
+
+    showMessageMenu(bubble, point) {
+        const target = { groupId: this.currentId, sentAt: Number(bubble.dataset.sentAt), key: bubble.dataset.bubbleKey };
+        const found = this.resolveBubble(target);
+        if (!found) return;
+        App.hideMessageContextMenu();
+        this.actionTarget = target;
+        App.configureMessageContextMenu('group');
+        this.el('msg-context-menu').querySelector('[data-action="toggle-hidden"] .message-menu-label').textContent =
+            found.message.isHidden || ChatBubbles.isHidden(found.message, target.key) ? '取消隐藏' : '向ta隐藏';
+        App.presentMessageContextMenu(bubble.getBoundingClientRect(), point);
+    },
+
+    bubbleText(target) {
+        const found = this.resolveBubble(target);
+        if (!found) return '';
+        const { message, index } = found;
+        return index === message.bubbleIds.length
+            ? (message.image_description ? '[图片描述: ' + message.image_description + ']' : '[图片]')
+            : cleanMarkdownForCopy(ChatBubbles.parse(message).parts[index]);
+    },
+
+    async copyBubbles(targets) {
+        try {
+            await navigator.clipboard.writeText(targets.map(target => this.bubbleText(target)).filter(Boolean).join('\n\n'));
+            Toast.show('已复制');
+        } catch (error) {
+            console.warn('[群聊] 复制失败:', error);
+            Toast.show('复制失败，请检查浏览器权限');
+        }
+    },
+
+    async handleMessageAction(action, target) {
+        const found = this.resolveBubble(target);
+        if (!found) return;
+        if (action === 'copy') return this.copyBubbles([target]);
+        if (action === 'multi-select') return this.enterSelectMode();
+        if (action === 'edit') {
+            const image = found.index === found.message.bubbleIds.length;
+            const oldText = image ? found.message.image_description || '' : ChatBubbles.parse(found.message).parts[found.index];
+            UI.showEditModal(oldText, newText => {
+                if (newText.trim() && newText !== oldText) void this.changeBubbles([target], 'edit', newText);
+            });
+        } else if (action === 'delete') {
+            if (confirm('确定要删除这个气泡吗？')) await this.changeBubbles([target], 'delete');
+        } else if (action === 'toggle-hidden') {
+            const hidden = !(found.message.isHidden || ChatBubbles.isHidden(found.message, target.key));
+            await this.changeBubbles([target], 'toggle-hidden', hidden);
+        }
+    },
+
+    async changeBubbles(targets, action, value) {
+        const groupId = targets[0]?.groupId;
+        try {
+            await this.commit(groups => groups.map(group => {
+                if (group.id !== groupId) return group;
+                const history = group.history.flatMap(original => {
+                    const keys = targets.filter(target => target.sentAt === original.sentAt).map(target => target.key);
+                    if (!keys.length) return [original];
+                    // ★ 写最新快照，不能用菜单打开时的历史下标；失败时也不修改原记录。
+                    const message = structuredClone(original);
+                    ChatBubbles.ensure(message);
+                    const valid = keys.filter(key => ChatBubbles.indexOf(message, key) !== null);
+                    if (!valid.length) return [original];
+                    if (action === 'delete') return ChatBubbles.deleteParts(message, valid) ? [message] : [];
+                    if (action === 'edit') {
+                        const index = ChatBubbles.indexOf(message, valid[0]);
+                        if (index === message.bubbleIds.length) message.image_description = value;
+                        else ChatBubbles.editPart(message, valid[0], value);
+                    } else if (action === 'toggle-hidden') {
+                        // ★ 兼容旧备份的整条隐藏，转为逐气泡隐藏后再切换选中项。
+                        if (message.isHidden) {
+                            for (const key of [...message.bubbleIds, message.imageBubbleKey].filter(Boolean)) ChatBubbles.setHidden(message, key, true);
+                            message.isHidden = false;
+                        }
+                        valid.forEach(key => ChatBubbles.setHidden(message, key, value));
+                    }
+                    return [message];
+                });
+                return { ...group, history };
+            }));
+            if (this.currentId === groupId) {
+                this.renderHistory(this.find(groupId), true);
+                this.updateSelectCount();
+            }
+            UI.renderContacts();
+            return true;
+        } catch (error) {
+            console.warn('[群聊] 消息操作保存失败:', error);
+            Toast.show('保存失败，请重试');
+            return false;
+        }
+    },
+
+    enterSelectMode() {
+        this.messageClickLocked = false;
+        this.selection = { groupId: this.currentId, keys: new Set() };
+        this.el('group-chat-messages').classList.add('select-mode');
+        const bar = this.el('multi-select-bar');
+        bar.dataset.mode = 'group';
+        bar.classList.remove('hidden');
+        this.el('btn-batch-collect').hidden = true;
+        this.updateSelectCount();
+        App.bindSelectBarEvents();
+    },
+
+    exitSelectMode() {
+        if (!this.selection) return;
+        this.selection = null;
+        this.messageClickLocked = false;
+        this.el('group-chat-messages').classList.remove('select-mode');
+        this.el('group-chat-messages').querySelectorAll('.selected').forEach(bubble => bubble.classList.remove('selected'));
+        const bar = this.el('multi-select-bar');
+        delete bar.dataset.mode;
+        bar.classList.add('hidden');
+        this.el('btn-batch-collect').hidden = false;
+    },
+
+    selectedTargets() {
+        if (!this.selection) return [];
+        const targets = [...this.selection.keys].map(value => {
+            const [sentAt, key] = JSON.parse(value);
+            return { groupId: this.selection.groupId, sentAt, key };
+        }).filter(target => this.resolveBubble(target));
+        return targets.sort((a, b) => a.sentAt - b.sentAt
+            || this.resolveBubble(a).index - this.resolveBubble(b).index);
+    },
+
+    updateSelectCount() {
+        if (!this.selection) return;
+        const targets = this.selectedTargets();
+        this.selection.keys = new Set(targets.map(target => JSON.stringify([target.sentAt, target.key])));
+        this.el('select-count-num').textContent = targets.length;
+    },
+
+    async handleBatchAction(action) {
+        const selection = this.selection;
+        const targets = this.selectedTargets();
+        if (!targets.length) return;
+        if (action === 'copy') return this.copyBubbles(targets);
+        if (action === 'delete' && !confirm('确定要删除选中的 ' + targets.length + ' 个气泡吗？')) return;
+        const hidden = targets.some(target => {
+            const { message } = this.resolveBubble(target);
+            return !message.isHidden && !ChatBubbles.isHidden(message, target.key);
+        });
+        if (await this.changeBubbles(targets, action, hidden) && this.selection === selection) this.exitSelectMode();
     },
 
     // ★ 图片头像用原图地址，文字头像留在格子内；无自定义群头像时取前四位。
@@ -151,29 +361,26 @@ const GroupChat = {
         container.replaceChildren(avatar);
     },
 
-    renderContacts(container, template) {
-        if (STATE.isContactSortMode) return;
-        for (const group of this.groups) {
-            const clone = template.content.cloneNode(true);
-            const item = clone.querySelector('.contact-item');
-            item.classList.add('group-contact-item');
-            item.setAttribute('role', 'button');
-            item.tabIndex = 0;
-            clone.querySelector('.contact-name').textContent = group.name;
-            const latest = group.history.at(-1);
-            clone.querySelector('.contact-preview').textContent = latest
-                ? this.speaker(latest) + '：' + (latest.content || (latest.images?.length ? '[图片]' : ''))
-                : group.description || '暂无消息';
-            this.renderAvatar(clone.querySelector('.avatar-wrapper'), group, true);
-            item.onclick = () => this.open(group.id);
-            item.onkeydown = event => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault();
-                    this.open(group.id);
-                }
-            };
-            container.append(clone);
-        }
+    // ★ 只构造群聊专属的头像和预览，其余点击、置顶和排序由联系人列表统一绑定。
+    createContactItem(group, template) {
+        const clone = template.content.cloneNode(true);
+        const item = clone.querySelector('.contact-item');
+        item.classList.add('group-contact-item');
+        item.setAttribute('role', 'button');
+        item.tabIndex = 0;
+        clone.querySelector('.contact-name').textContent = group.name;
+        const latest = group.history.at(-1);
+        clone.querySelector('.contact-preview').textContent = latest
+            ? this.speaker(latest) + '：' + (latest.content || (latest.images?.length ? '[图片]' : ''))
+            : group.description || '暂无消息';
+        this.renderAvatar(clone.querySelector('.avatar-wrapper'), group, true);
+        item.onkeydown = event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                item.click();
+            }
+        };
+        return clone;
     },
 
     openEditor(group) {
@@ -210,6 +417,7 @@ const GroupChat = {
             label.className = 'group-modal-member';
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
+            checkbox.className = 'group-modal-member-check';
             checkbox.value = String(contact.id);
             checkbox.checked = selected.has(contact.id);
             const avatar = this.avatarTile(contact.avatar, contact.name?.slice(0, 1) || '人');
@@ -224,7 +432,9 @@ const GroupChat = {
         this.editorError('');
         this.renderEditorAvatar();
         this.el('group-chat-modal').classList.remove('hidden');
-        this.el('group-modal-name').focus();
+        // ★ 编辑群资料时把焦点留在弹窗，避免手机弹出键盘；新建群聊仍可直接输入名称。
+        if (group) this.el('group-chat-form').focus({ preventScroll: true });
+        else this.el('group-modal-name').focus();
     },
 
     closeEditor(force = false, restoreFocus = true) {
@@ -363,6 +573,7 @@ const GroupChat = {
     open(id) {
         const group = this.find(id);
         if (!group) return;
+        this.exitSelectMode();
         this.currentId = id;
         UI.switchView('group-chat');
         const input = this.el('group-chat-draft');
@@ -374,6 +585,8 @@ const GroupChat = {
     },
 
     leave() {
+        this.exitSelectMode();
+        this.messageClickLocked = false;
         this.toggleMenu(false);
         this.closeEditor(true, false);
         this.currentId = null;
@@ -392,11 +605,18 @@ const GroupChat = {
     },
 
     // ★ 历史和新消息共用气泡模板，瀑布流上屏时才播放入场动画。
-    createMessageBubble(group, message, text, image = null, animate = false) {
+    createMessageBubble(group, message, text, image = null, animate = false, partIndex = 0) {
         const own = message.role === 'user';
         const sender = own ? 'user' : 'ai';
         const avatar = own ? UI.getUserAvatar() : group.memberAvatars?.[message.senderId];
         const bubble = UI.createSingleBubble(parseCustomMarkdown(text), sender, avatar, message.timestamp, -1, animate, 0, image);
+        // ★ 复用气泡外观；群聊目标用 sentAt + bubbleKey 定位，不能借用单聊历史下标。
+        const element = bubble.querySelector('.message-bubble');
+        const key = ChatBubbles.keyAt(message, partIndex);
+        element.dataset.sentAt = String(message.sentAt);
+        element.dataset.bubbleKey = key;
+        element.classList.toggle('is-hidden-bubble', !!message.isHidden || ChatBubbles.isHidden(message, key));
+        element.classList.toggle('selected', !!this.selection?.keys.has(JSON.stringify([message.sentAt, key])));
         const name = document.createElement('span');
         name.className = 'group-chat-speaker';
         name.textContent = own ? '我' : message.senderName;
@@ -405,22 +625,25 @@ const GroupChat = {
     },
 
     messageParts(message) {
-        const text = splitMessageIntoBubbleParts(message.content || '').map(part => ({ text: part }));
-        return text.concat((message.images || []).map(image => ({ text: '', image })));
+        ChatBubbles.ensure(message);
+        const text = ChatBubbles.parse(message).parts.map((part, partIndex) => ({ text: part, partIndex }));
+        const image = message.images?.[0] || (message.isImageExpired ? 'expired' : null);
+        return image ? text.concat({ text: '', image, partIndex: text.length }) : text;
     },
 
     createMessageRow(group, message, animate = false, count = Infinity) {
         const row = document.createElement('div');
         row.className = 'message-group group-chat-message';
         row.dataset.sentAt = String(message.sentAt);
-        for (const { text, image } of this.messageParts(message).slice(0, count)) {
-            row.append(this.createMessageBubble(group, message, text, image, animate));
+        for (const { text, image, partIndex } of this.messageParts(message).slice(0, count)) {
+            row.append(this.createMessageBubble(group, message, text, image, animate, partIndex));
         }
         return row;
     },
 
-    renderHistory(group) {
+    renderHistory(group, keepScrollPosition = false) {
         const list = this.el('group-chat-messages');
+        const scrollTop = list.scrollTop;
         const fragment = document.createDocumentFragment();
         const preview = this.turns.get(group.id);
         const shown = this.userWaterfalls.get(group.id)?.shown;
@@ -431,7 +654,7 @@ const GroupChat = {
             if (count !== 0) fragment.append(this.createMessageRow(group, message, false, count));
         }
         list.replaceChildren(fragment);
-        list.scrollTop = list.scrollHeight;
+        list.scrollTop = keepScrollPosition ? scrollTop : list.scrollHeight;
         this.renderStatus(group.id);
     },
 
@@ -500,10 +723,16 @@ const GroupChat = {
                 const previous = history.at(-1);
                 if (previous?.sentAt !== continuationAt) return groups;
                 // ★ 空行拆出的气泡逐条落库，仍属于同一条发言。插话不会带入尚未显示的正文。
-                savedMessage = { ...previous, content: previous.content + '\n\n' + message.content };
+                savedMessage = structuredClone(previous);
+                ChatBubbles.appendText(savedMessage, message.content);
                 history = [...history.slice(0, -1), savedMessage];
             } else if (message) {
                 savedMessage = this.stampMessage(message, audience);
+                // ★ 一次模型请求的全部成员发言共用批次，窗口计数时合并为一条 assistant 消息。
+                if (sender) {
+                    turn.replyBatchId ??= savedMessage.sentAt;
+                    savedMessage.replyBatchId = turn.replyBatchId;
+                }
                 history = [...history, savedMessage];
             }
             // ★ 每位发过言的成员只保留一份头像，避免把大图反复存进每条消息。
@@ -533,7 +762,7 @@ const GroupChat = {
                 const animate = !!turn && !turn.controller.signal.aborted;
                 if (!row) list.append(this.createMessageRow(group, savedMessage, animate));
                 else if (continuationAt != null && row.childElementCount < splitMessageIntoBubbleParts(savedMessage.content).length) {
-                    row.append(this.createMessageBubble(group, savedMessage, message.content, null, animate));
+                    row.append(this.createMessageBubble(group, savedMessage, message.content, null, animate, ChatBubbles.parse(savedMessage).parts.length - 1));
                 }
             }
             if (nearBottom) list.scrollTop = list.scrollHeight;
@@ -552,16 +781,27 @@ const GroupChat = {
         playback.shown.set(message.sentAt, 0);
         const { signal } = playback.controller;
         playback.tail = playback.tail.then(async () => {
-            for (const [index, { text, image }] of this.messageParts(message).entries()) {
+            for (const [index, part] of this.messageParts(message).entries()) {
+                const { text, partIndex } = part;
+                const key = ChatBubbles.keyAt(message, partIndex);
                 if (index) await this.wait(getWaterfallBubbleDelayMs(text), signal);
                 signal.throwIfAborted();
                 playback.shown.set(message.sentAt, index + 1);
                 if (this.currentId !== id) continue;
                 const group = this.find(id);
+                // ★ 编辑或删除可以发生在瀑布流期间，只播放仍存在的最新气泡，不能把旧内容重新插回来。
+                const live = group?.history.find(item => item.sentAt === message.sentAt);
+                if (!live) continue;
+                const liveIndex = ChatBubbles.indexOf(live, key);
+                if (liveIndex === null) continue;
+                const current = this.messageParts(live).find(item => item.partIndex === liveIndex);
+                if (!current) continue;
                 const list = this.el('group-chat-messages');
                 const row = list.querySelector('[data-sent-at="' + message.sentAt + '"]');
-                if (!row) list.append(this.createMessageRow(group, message, true, index + 1));
-                else if (row.childElementCount <= index) row.append(this.createMessageBubble(group, message, text, image, true));
+                if (!row) list.append(this.createMessageRow(group, live, true, liveIndex + 1));
+                else if (!Array.from(row.querySelectorAll('.message-bubble')).some(bubble => bubble.dataset.bubbleKey === key)) {
+                    row.append(this.createMessageBubble(group, live, current.text, current.image, true, liveIndex));
+                }
                 list.scrollTop = list.scrollHeight;
             }
         }).catch(error => {
@@ -685,7 +925,8 @@ const GroupChat = {
     // ★ 识图遵循线上单聊的设置。原图只用于当前这轮，历史请求和单聊桥接只带描述或占位符。
     async prepareImage(id, history, settings, signal) {
         const lastReply = history.findLastIndex(message => message.role === 'assistant');
-        const message = history.slice(lastReply + 1).findLast(item => item.images?.[0]);
+        const message = history.slice(lastReply + 1).findLast(item => item.images?.[0]
+            && !item.isHidden && !ChatBubbles.isHidden(item, ChatBubbles.keyAt(item, ChatBubbles.parse(item).parts.length)));
         if (!message) return null;
         const image = message.images[0];
         if (settings.IMAGE_API_MODE === 'multimodal') {
@@ -748,6 +989,52 @@ const GroupChat = {
         }
     },
 
+    // ================ 群聊历史窗口：复用单聊策略，按统一回复批次计数 ================
+    historyWindowMessages(history) {
+        const messages = [];
+        for (const [index, message] of history.entries()) {
+            const previous = messages.at(-1);
+            // ★ 旧群记录没有批次字段：连续的成员回复视作当时的一次统一回复。
+            // 新记录按批次区分，即使相邻两次请求都由同一成员发言，也各占一条。
+            if (message.role === 'assistant' && previous?.role === 'assistant' && previous.replyBatchId === message.replyBatchId) {
+                previous.groupMessages.push(message);
+                continue;
+            }
+            messages.push({
+                role: message.role,
+                content: '群聊消息',
+                cacheSeq: Number.isSafeInteger(message.sentAt) ? message.sentAt : index,
+                replyBatchId: message.replyBatchId,
+                groupMessages: [message]
+            });
+        }
+        return messages;
+    },
+
+    async selectHistoryWindow(id, history, settings, signal) {
+        const group = this.find(id);
+        const windowContact = {
+            history: this.historyWindowMessages(history),
+            historyWindowStartSeq: group.historyWindowStartSeq
+        };
+        // ★ 虚拟记录只负责条数与稳定序号。真正发往模型的仍是原始成员发言，保留人名、图片描述和可见范围。
+        const selected = App.selectHistoryWindowRecords(windowContact, settings);
+        if (selected.changed) {
+            await this.commit(groups => {
+                if (signal.aborted) return groups;
+                return groups.map(item => item.id === id
+                    ? { ...item, historyWindowStartSeq: windowContact.historyWindowStartSeq }
+                    : item);
+            });
+        }
+        settings.HISTORY_WINDOW_LOG = {
+            ...selected.log,
+            sentCount: selected.records.length,
+            countUnit: '用户每次发送 / AI一次统一回复'
+        };
+        return selected.records.flatMap(record => record.msg.groupMessages);
+    },
+
     async generate(id, turn, delay) {
         const { signal } = turn.controller;
         let failure = '';
@@ -786,7 +1073,9 @@ const GroupChat = {
             const roundId = history.findLast(message => message.role === 'user')?.sentAt;
             const privateContext = this.prepareGroupContext(group, members, roundId);
             turn.privateBridgeRound = privateContext.round;
-            const raw = await API.chat(this.buildRequest(group, members, history, image, privateContext.messages), settings);
+            const windowHistory = await this.selectHistoryWindow(id, history, settings, signal);
+            signal.throwIfAborted();
+            const raw = await API.chat(this.buildRequest(group, members, windowHistory, image, privateContext.messages), settings);
             signal.throwIfAborted();
             const backendDescription = settings.ASYNC_BACKEND_RESULT.image_description;
             if (image && backendDescription) await this.saveImageDescription(id, image.sentAt, backendDescription, signal);
@@ -854,7 +1143,7 @@ const GroupChat = {
             return data;
         });
         const memberIds = members.map(member => member.id);
-        const history = messages.slice(-24).map(message => {
+        const history = messages.map(message => {
             const currentImage = image?.sentAt === message.sentAt ? image : null;
             const entry = {
                 timestamp: message.timestamp,
@@ -866,7 +1155,7 @@ const GroupChat = {
                 entry.visibleTo = memberIds.filter(id => message.audience.includes(id)).map(String);
             }
             return entry;
-        });
+        }).filter(entry => entry.content);
         // ★ 公共群历史只附一份。统一放入一个 user 消息，兼容现有只读取末尾 user 的模型适配器。
         return [
             { role: 'system', content: system },
@@ -875,11 +1164,15 @@ const GroupChat = {
     },
 
     contextText(message, currentImage) {
-        if (!message.images?.length) return message.content;
+        // ★ 隐藏不仅影响群聊生成，也影响群聊回注单聊；统一按稳定气泡 key 清洗。
+        if (message.isHidden) return '';
+        const visible = HistoryVisibility.buildVisibleMessage(message, { includeImageDescription: false });
+        const content = visible?.content || '';
+        if (!ChatBubbles.hasImage(message) || ChatBubbles.isHidden(message, message.imageBubbleKey)) return content;
         const description = currentImage?.description || message.image_description;
         const imageLabel = currentImage?.attached ? '[图片：原图随本次请求附上]'
             : description ? '[图片：' + description + ']' : '[图片]';
-        return [message.content, imageLabel].filter(Boolean).join('\n');
+        return [content, imageLabel].filter(Boolean).join('\n');
     },
 
     // ================ 群聊 / 单聊轮次桥接 ================
@@ -934,32 +1227,62 @@ const GroupChat = {
         };
     },
 
-    buildPrivateContext(contact, roundId) {
-        const contactId = contact.id;
-        const candidates = [];
-        for (const group of this.groups) {
-            let count = 0;
-            for (let i = group.history.length - 1; i >= 0 && count < this.GROUP_TO_PRIVATE_COUNT; i--) {
-                const message = group.history[i];
-                if (!message.audience.includes(contactId)) continue;
-                candidates.push({ group, message });
-                count++;
+    // ★ 从后向前取完整问答，兼容已有群记录。一组多人回复和正文空行都归到前面的用户发言。
+    recentGroupRounds(group, contactId, limit) {
+        const rounds = [];
+        let messages = [];
+        let hasUser = false;
+        const history = group.history;
+        // ★ 先按原记录划定轮次，再检查角色的可见范围，避免移出 / 加入群后拼出虚假的问答。
+        const collect = () => {
+            const visible = messages.filter(message => message.audience?.includes(contactId) && this.contextText(message)).reverse();
+            if (visible.some(message => message.role === 'user') && visible.some(message => message.role === 'assistant')) {
+                rounds.push({ group, messages: visible });
+            }
+        };
+        for (let i = history.length - 1; i >= 0; i--) {
+            const message = history[i];
+            if (message.role === 'user') {
+                // ★ 末尾尚未收到回复的用户消息不构成完整一轮。
+                if (messages.length) {
+                    messages.push(message);
+                    hasUser = true;
+                }
+            } else if (message.role === 'assistant') {
+                if (hasUser) {
+                    collect();
+                    if (rounds.length >= limit) return rounds;
+                    messages = [];
+                    hasUser = false;
+                }
+                messages.push(message);
             }
         }
-        // ★ 按消息提交时间选择全局最近 6 条，防止角色进多个群后单聊上下文随群数膨胀。
-        const recent = candidates.sort((a, b) => b.message.sentAt - a.message.sentAt).slice(0, this.GROUP_TO_PRIVATE_COUNT);
+        if (hasUser && rounds.length < limit) collect();
+        return rounds;
+    },
+
+    buildPrivateContext(contact, roundId) {
+        const contactId = contact.id;
+        const limit = CONFIG.GROUP_CHAT_PRIVATE_CONTEXT_ROUNDS;
+        if (!(limit > 0)) return null;
+        // ★ 每个群分别取最近几轮完整问答，活跃群不会挤掉其它群的额度。
+        const recent = this.groups.flatMap(group => this.recentGroupRounds(group, contactId, limit))
+            .sort((a, b) => b.messages.at(-1).sentAt - a.messages.at(-1).sentAt);
         if (!recent.length) return null;
         const bridge = contact.groupChatBridge;
         // ★ 清空一个群后，剩下的旧消息不会被当作新来源续期。
-        const sourceKey = Math.max(recent[0].message.sentAt, Number(bridge?.sourceKey) || 0);
+        const sourceKey = Math.max(recent[0].messages.at(-1).sentAt, Number(bridge?.sourceKey) || 0);
         const round = this.planBridgeRound(bridge, sourceKey, roundId);
         if (!round) return null;
         // ★ 同一群只标一次群名，保留正文里的空行；多个群分块，避免同名角色和话题混在一起。
         const blocks = new Map();
-        for (const { group, message } of recent.reverse()) {
+        for (const { group, messages } of recent.reverse()) {
             if (!blocks.has(group)) blocks.set(group, []);
-            const speaker = message.role === 'user' ? '用户' : this.speaker(message, contactId);
-            blocks.get(group).push(speaker + '：“' + this.contextText(message) + '”');
+            for (const message of messages) {
+                const speaker = message.role === 'user' ? '用户' : this.speaker(message, contactId);
+                blocks.get(group).push(speaker + '：“' + this.contextText(message) + '”');
+            }
         }
         const transcript = [...blocks].map(([group, lines]) => '【' + group.name + '】\n' + lines.join('\n\n'));
         return { prompt: ['【近期群聊背景】', ...transcript].join('\n\n'), round };

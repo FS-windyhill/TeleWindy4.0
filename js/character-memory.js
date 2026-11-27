@@ -13,6 +13,7 @@
 //   - parseMessageDateKey(msg): 从 timestamp 或内容前缀提取日期
 //   - collectMessagesForDate(contact, dateKey): 提取某天的可总结聊天
 //   - formatMessagesForPrompt(contact, messages): 整理给 AI 的带时间聊天记录
+//   - stripLeadingThought(rawText): 清理 AI 正式正文前的思考块
 //   - extractJson(rawText): 从 AI 返回里抽出 JSON
 //   - normalizeMemoryText(text): 清理记忆文本，不做字数硬截断
 //   - parseAiMemory(rawText): 解析并校验 AI 记忆
@@ -171,6 +172,19 @@ const CharacterMemory = {
         }).join('\n');
     },
 
+    stripLeadingThought(rawText) {
+        let text = String(rawText || '').trim();
+        // ★ 每日总结与记忆印象共用清理流程，先移除开头的思考块，避免读取其中的 JSON 草稿。
+        // 只清理正文前的标签，保留正式 JSON 字符串中作为记忆内容出现的字面标签。
+        const thought = /^<(think|thinking|thought)\b[^>]*>[\s\S]*?<\/\1\s*>\s*/i;
+        while (thought.test(text)) text = text.replace(thought, '').trimStart();
+        if (/^<(?:think|thinking|thought)\b/i.test(text)) {
+            throw new Error('模型思考标签未闭合，可能输出已被截断，请检查模型最大输出 token 设置');
+        }
+        if (!text) throw new Error('模型仅返回了思考内容，没有正式 JSON');
+        return text;
+    },
+
     extractJson(rawText) {
         const text = String(rawText || '').trim();
         if (!text) throw new Error('AI 返回为空');
@@ -196,7 +210,7 @@ const CharacterMemory = {
     },
 
     parseAiMemory(rawText) {
-        const data = this.extractJson(rawText);
+        const data = this.extractJson(this.stripLeadingThought(rawText));
         const rawMemories = Array.isArray(data.memories) ? data.memories : [];
         const memories = rawMemories
             .map((item, index) => {

@@ -3755,6 +3755,13 @@ body.dark-mode .contact-menu-panel button[data-action="cancel"] {
     gap: 2px;
 }
 
+/* ★ 群聊共用菜单外观，五项动作均分；收藏能力由打开菜单的会话类型决定。 */
+#msg-context-menu[data-mode="group"] .message-menu-actions { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+#msg-context-menu button[hidden],
+#multi-select-bar button[hidden] { display: none; }
+#multi-select-bar[data-mode="group"] .select-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.group-chat-messages.select-mode { padding-bottom: 100px; }
+
 
 #msg-context-menu button {
     display: flex;
@@ -5599,15 +5606,6 @@ body.dark-mode .contact-add-menu { background: rgba(60, 60, 60, .95); color: #ee
     cursor: pointer;
 }
 
-.group-modal-secondary {
-    border: 1px solid var(--btn-border-color);
-    border-radius: 8px;
-    padding: 7px 10px;
-    background: var(--btn-color);
-    color: var(--text-color);
-    cursor: pointer;
-}
-
 /* ★ 群弹窗复用角色弹窗的视觉布局，使用独立选择器以便分别调整。 */
 .group-modal-overlay {
     position: fixed;
@@ -5677,10 +5675,85 @@ body.dark-mode .contact-add-menu { background: rgba(60, 60, 60, .95); color: #ee
 }
 
 .group-modal-body textarea { resize: vertical; }
-.group-modal-avatar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 15px; }
-.group-modal-avatar-row input { max-width: 100%; }
+
+/* ★ 群头像沿用单聊头像的大小与白边；右侧按钮可换行，避免窄屏把预览挤小。 */
+.group-modal-avatar-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 15px;
+}
+
+.group-modal-avatar-preview { flex-shrink: 0; }
+.group-modal-avatar-preview .group-avatar {
+    width: 64px;
+    height: 64px;
+    border: 3px solid #fff;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, .15);
+    box-sizing: border-box;
+}
+
+.group-modal-avatar-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.group-modal-avatar-button {
+    padding: 10px 15px;
+    border: 1px solid var(--btn-border-color);
+    border-radius: 8px;
+    background: var(--btn-color);
+    color: rgb(82, 82, 82);
+    font-size: .9rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
 .group-modal-members { min-width: 0; padding: 0; margin: 0 0 15px; border: 0; }
 .group-modal-member-list { max-height: 184px; overflow-y: auto; }
+
+/* ★ 群成员方框参考朋友圈名单，保留原生勾选和键盘操作。 */
+.group-modal-member-check {
+    appearance: none;
+    -webkit-appearance: none;
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    border: 1px solid #888;
+    border-radius: 5px;
+    background: rgba(0, 0, 0, .2);
+    position: relative;
+    cursor: pointer;
+    transition: background-color .2s ease, border-color .2s ease;
+}
+
+.group-modal-member-check:checked {
+    background-color: var(--primary-btn-text, #876eff);
+    border-color: var(--primary-btn-text, #876eff);
+}
+
+.group-modal-member-check:checked::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E") center / 70% no-repeat;
+}
+
+.group-modal-member-check:focus-visible {
+    outline: 2px solid var(--primary-btn-text, #876eff);
+    outline-offset: 2px;
+}
+
+/* ★ 危险操作用顶部虚线跟上方的群资料分开。 */
+.group-modal-danger-zone {
+    padding-top: 12px;
+    border-top: 1px dashed var(--btn-border-color);
+}
 
 .group-modal-error { margin: 8px 0 0; color: #b62828; font-size: .85rem; }
 .group-modal-footer { display: flex; gap: 12px; }
@@ -5707,6 +5780,7 @@ body.dark-mode .group-modal-body :is(input[type="text"], textarea, select) {
     color: #fff;
 }
 body.dark-mode .group-modal-footer button { color: #fff; }
+body.dark-mode .group-modal-avatar-button { color: #fff; border-color: #a9a9a9; }
 body.dark-mode .group-modal-error { color: #ffaaaa; }
 /* ★★★★★ 群聊 END ★★★★★ */
 
@@ -12612,7 +12686,6 @@ body.dark-mode .proactive-log {
 }
 
 
-.group-modal-member input,
 .proactive-character-item input { width: 18px; height: 18px; }
 .proactive-manual-card select { margin-top: 12px; min-height: 20px;}
 /* ★ 运行日志卡片沿用后台任务状态的浅底面板，条目共用中性的诊断日志样式。 */

@@ -3427,95 +3427,98 @@ const UI = {
         // ★★★ 联系人排序模式顶部提示 END ★★★
 
         // ★★★ 联系人置顶显示顺序 START ★★★
-        // 置顶联系人排在最前面；每组内部继续尊重 STATE.contacts 里的手动顺序
-        const visibleContacts = [
-            ...STATE.contacts.filter(c => c.isPinned),
-            ...STATE.contacts.filter(c => !c.isPinned)
-        ];
+        // 置顶项排在最前面；角色与群聊使用带类型的混合顺序，兼容旧联系人数组顺序
+        const visibleEntries = App.getContactListEntries();
         // ★★★ 联系人置顶显示顺序 END ★★★
 
-        visibleContacts.forEach(c => {
+        visibleEntries.forEach(entry => {
+            const c = entry.contact;
             // 2. 克隆模板 (cloneNode(true) 表示深拷贝)
-            const clone = template.content.cloneNode(true);
+            const clone = entry.type === 'group'
+                ? GroupChat.createContactItem(c, template)
+                : template.content.cloneNode(true);
 
-            // 3. 填充数据
+            if (entry.type !== 'group') {
+                // 3. 填充数据
             
-            // --- A. 填充名字 ---
-            clone.querySelector('.contact-name').textContent = c.name;
+                // --- A. 填充名字 ---
+                clone.querySelector('.contact-name').textContent = c.name;
 
-            // --- B. 处理头像 ---
-            const avatarWrapper = clone.querySelector('.avatar-wrapper');
-            // 简单判断：如果是 base64 或 http 开头，就是图片，否则是 emoji/文字
-            if (c.avatar && /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(c.avatar)) {
-                const img = document.createElement('img');
-                img.src = c.avatar;
-                img.className = 'contact-avatar';
-                img.onerror = function() { this.style.display = 'none'; }; // 图片坏了就隐藏
-                avatarWrapper.appendChild(img);
-            } else {
-                const div = document.createElement('div');
-                div.className = 'contact-avatar';
-                div.textContent = c.avatar || '🌼'; // 默认头像
-                avatarWrapper.appendChild(div);
-            }
-
-            // --- C. 处理消息预览和红点逻辑 (原逻辑保持不变) ---
-            let previewText = "暂无消息";
-            let msgCount = 0;
-            let showRedDot = false;
-            
-            const validMsgs = c.history.filter(m => {
-                const isTransientError = m.isTransientError === true
-                    || (m.asyncJobId && String(m.content || '').startsWith('(发送失败:'));
-                return m.role !== 'system' && !isTransientError;
-            });
-            if (validMsgs.length > 0) {
-                const lastMsgObj = validMsgs[validMsgs.length - 1];
-                let content = lastMsgObj.content || '';
-                
-                // 正则去时间戳
-                content = content.replace(/^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/, '');
-
-                // 联系人列表只统计正文气泡，think/thinking/thought 思考块会在聊天页单独渲染，不计入未读红点
-                content = content.replace(/<(?:think|thinking|thought)[^>]*>[\s\S]*?(?:<\/(?:think|thinking|thought)>|$)/gi, '').trim();
-                if (lastMsgObj.role === 'assistant' && typeof AgentIntentMarkup !== 'undefined') {
-                    content = AgentIntentMarkup.strip(content);
+                // --- B. 处理头像 ---
+                const avatarWrapper = clone.querySelector('.avatar-wrapper');
+                // 简单判断：如果是 base64 或 http 开头，就是图片，否则是 emoji/文字
+                if (c.avatar && /^(data:|https?:|file:|blob:|\.?\/|assets\/)/i.test(c.avatar)) {
+                    const img = document.createElement('img');
+                    img.src = c.avatar;
+                    img.className = 'contact-avatar';
+                    img.onerror = function() { this.style.display = 'none'; }; // 图片坏了就隐藏
+                    avatarWrapper.appendChild(img);
+                } else {
+                    const div = document.createElement('div');
+                    div.className = 'contact-avatar';
+                    div.textContent = c.avatar || '🌼'; // 默认头像
+                    avatarWrapper.appendChild(div);
                 }
 
-                // ==========================================================
-                // ★ 新增代码：在这里添加一行，用正则去除Markdown符号 ★
-                // 这个表达式会移除星号、井号、下划线、反引号等常见Markdown标记
-                content = content.replace(/(\*\*|__|\*|_|#|`|>{1,}\s|- |\d+\.\s|\[(.*?)\]\((.*?)\)|!\[(.*?)\]\((.*?)\))/g, '');
-                // ==========================================================
+                // --- C. 处理消息预览和红点逻辑 (原逻辑保持不变) ---
+                let previewText = "暂无消息";
+                let msgCount = 0;
+                let showRedDot = false;
+            
+                const validMsgs = c.history.filter(m => {
+                    const isTransientError = m.isTransientError === true
+                        || (m.asyncJobId && String(m.content || '').startsWith('(发送失败:'));
+                    return m.role !== 'system' && !isTransientError;
+                });
+                if (validMsgs.length > 0) {
+                    const lastMsgObj = validMsgs[validMsgs.length - 1];
+                    let content = lastMsgObj.content || '';
+                
+                    // 正则去时间戳
+                    content = content.replace(/^\[(?:[A-Z][a-z]{2}\.\d{1,2}|\d{4}-\d{2}-\d{2})\s\d{2}:\d{2}\]\s/, '');
 
-                // 拆分段落
-                const chunks = splitMessageIntoBubbleParts(content);
+                    // 联系人列表只统计正文气泡，think/thinking/thought 思考块会在聊天页单独渲染，不计入未读红点
+                    content = content.replace(/<(?:think|thinking|thought)[^>]*>[\s\S]*?(?:<\/(?:think|thinking|thought)>|$)/gi, '').trim();
+                    if (lastMsgObj.role === 'assistant' && typeof AgentIntentMarkup !== 'undefined') {
+                        content = AgentIntentMarkup.strip(content);
+                    }
 
-                if (chunks.length > 0) {
-                    let lastChunk = chunks[chunks.length - 1];
-                    previewText = lastChunk.length > 30 ? lastChunk.slice(0, 30) + '…' : lastChunk;
-                    msgCount = chunks.length;
+                    // ==========================================================
+                    // ★ 新增代码：在这里添加一行，用正则去除Markdown符号 ★
+                    // 这个表达式会移除星号、井号、下划线、反引号等常见Markdown标记
+                    content = content.replace(/(\*\*|__|\*|_|#|`|>{1,}\s|- |\d+\.\s|\[(.*?)\]\((.*?)\)|!\[(.*?)\]\((.*?)\))/g, '');
+                    // ==========================================================
+
+                    // 拆分段落
+                    const chunks = splitMessageIntoBubbleParts(content);
+
+                    if (chunks.length > 0) {
+                        let lastChunk = chunks[chunks.length - 1];
+                        previewText = lastChunk.length > 30 ? lastChunk.slice(0, 30) + '…' : lastChunk;
+                        msgCount = chunks.length;
                     
-                    // ★ 修改逻辑：
-                    // 必须同时满足两个条件：
-                    // 1. 最后一条是 AI 发的
-                    // 2. 角色身上有 "hasNewMsg" 标记
-                    if (lastMsgObj.role === 'assistant' && c.hasNewMsg === true) {
-                        showRedDot = true;
+                        // ★ 修改逻辑：
+                        // 必须同时满足两个条件：
+                        // 1. 最后一条是 AI 发的
+                        // 2. 角色身上有 "hasNewMsg" 标记
+                        if (lastMsgObj.role === 'assistant' && c.hasNewMsg === true) {
+                            showRedDot = true;
+                        }
                     }
                 }
-            }
 
-            // 填入预览文字
-            clone.querySelector('.contact-preview').textContent = previewText;
+                // 填入预览文字
+                clone.querySelector('.contact-preview').textContent = previewText;
 
-            // --- D. 处理红点显示 ---
-            const badge = clone.querySelector('.badge-count');
-            if (showRedDot && msgCount > 0) {
-                badge.textContent = msgCount;
-                badge.style.display = 'block'; // 显示
-            } else {
-                badge.style.display = 'none'; // 隐藏
+                // --- D. 处理红点显示 ---
+                const badge = clone.querySelector('.badge-count');
+                if (showRedDot && msgCount > 0) {
+                    badge.textContent = msgCount;
+                    badge.style.display = 'block'; // 显示
+                } else {
+                    badge.style.display = 'none'; // 隐藏
+                }
+
             }
 
             // --- E. 绑定点击事件 ---
@@ -3523,6 +3526,7 @@ const UI = {
             // 我们需要给里面的 .contact-item 元素加事件
             const itemDiv = clone.querySelector('.contact-item');
             itemDiv.dataset.id = c.id;
+            itemDiv.dataset.contactType = entry.type;
 
             // 置顶项只加样式，不改模板结构；金边样式在 style.css 里控制
             if (c.isPinned) itemDiv.classList.add('contact-item-pinned');
@@ -3534,14 +3538,15 @@ const UI = {
                 sortControls.className = 'contact-sort-controls';
 
                 // 当前联系人所在的小组：置顶联系人只和置顶联系人排，普通联系人只和普通联系人排
-                const groupContacts = visibleContacts.filter(item => !!item.isPinned === !!c.isPinned);
-                const groupIndex = groupContacts.findIndex(item => item.id === c.id);
+                const groupContacts = visibleEntries.filter(item => !!item.contact.isPinned === !!c.isPinned);
+                const groupIndex = groupContacts.findIndex(item => item.key === entry.key);
 
                 const upBtn = document.createElement('button');
                 upBtn.type = 'button';
                 upBtn.className = 'contact-sort-btn';
                 upBtn.dataset.action = 'move-up';
                 upBtn.dataset.id = c.id;
+                upBtn.dataset.contactType = entry.type;
                 upBtn.textContent = '↑';
                 upBtn.disabled = groupIndex <= 0;
                 upBtn.title = '上移';
@@ -3551,6 +3556,7 @@ const UI = {
                 downBtn.className = 'contact-sort-btn';
                 downBtn.dataset.action = 'move-down';
                 downBtn.dataset.id = c.id;
+                downBtn.dataset.contactType = entry.type;
                 downBtn.textContent = '↓';
                 downBtn.disabled = groupIndex >= groupContacts.length - 1;
                 downBtn.title = '下移';
@@ -3569,14 +3575,14 @@ const UI = {
                 }
                 // 排序模式下点击联系人不进入聊天，只响应右侧上下箭头
                 if (STATE.isContactSortMode) return;
-                App.enterChat(c.id);
+                if (entry.type === 'group') GroupChat.open(c.id);
+                else App.enterChat(c.id);
             };
 
             // 4. 将填好数据的克隆体加入页面
             this.els.contactContainer.appendChild(clone);
         });
-        // ★ 群聊共用联系人列表模板，群资料与消息保存在独立会话里。
-        globalThis.GroupChat?.renderContacts(this.els.contactContainer, template);
+        // ★ 群聊与角色在同一次遍历中渲染，排序和置顶都使用相同的条目结构。
     },
 
     // ★★★ 渲染世界书：大分类下拉框 ★★★
@@ -6081,6 +6087,8 @@ const App = {
         if (appContainer?.classList.contains('in-chat-mode')) return 'chat';
 
         const viewMap = [
+            // ★ 群聊也走全局边缘返回入口，直接触发现有返回通讯录按钮。
+            ['group-chat', 'view-group-chat'],
             ['explore', 'view-explore'],
             ['pomodoro', 'view-pomodoro'],
             ['todo-plan', 'view-todo-plan'],
@@ -6119,8 +6127,8 @@ const App = {
         // ★ 边缘滑返回只做页面级操作：输入、按钮、弹窗、横向滚动区先全部让路，避免误触。
         if (!target || target === document) return true;
         if (target.closest('input, textarea, select, button, a, label, [contenteditable="true"], [role="button"]')) return true;
-        if (target.closest('.modal:not(.hidden), .proactive-api-modal:not(.hidden), #storage-space-clean-modal:not(.hidden), .menu, .contact-menu, .message-actions-menu')) return true;
-        const hasVisibleModal = Array.from(document.querySelectorAll('.modal:not(.hidden), .proactive-api-modal:not(.hidden), #modal-overlay:not(.hidden), #storage-space-clean-modal:not(.hidden)')).some(el => {
+        if (target.closest('.modal:not(.hidden), .group-modal-overlay:not(.hidden), .proactive-api-modal:not(.hidden), #storage-space-clean-modal:not(.hidden), .menu, .contact-menu, .message-actions-menu')) return true;
+        const hasVisibleModal = Array.from(document.querySelectorAll('.modal:not(.hidden), .group-modal-overlay:not(.hidden), #msg-context-menu, #msg-edit-modal, .proactive-api-modal:not(.hidden), #modal-overlay:not(.hidden), #storage-space-clean-modal:not(.hidden)')).some(el => {
             const style = getComputedStyle(el);
             return style.display !== 'none' && style.visibility !== 'hidden' && el.getClientRects().length > 0;
         });
@@ -6141,6 +6149,7 @@ const App = {
         const backButtonMap = {
             chat: 'back-btn',
             'offline-chat': 'offline-back-btn',
+            'group-chat': 'group-chat-back',
             explore: 'explore-back-btn',
             pomodoro: 'pomodoro-back-btn',
             'todo-plan': 'todo-plan-back-btn',
@@ -6211,6 +6220,16 @@ const App = {
                 swipeDirection = null;
             }
         }, { passive: true });
+
+        // ★ 群聊命中边缘水平手势后接管默认行为，避免浏览器历史返回与应用内返回同时触发。
+        // 只拦截已通过输入控件 / 弹窗 / 横向滚动区检查的起点，纵向滚动继续交给浏览器。
+        document.addEventListener('touchmove', (event) => {
+            if (!swipeDirection || this.getActiveSwipeBackView() !== 'group-chat' || event.touches.length !== 1) return;
+            const dx = event.touches[0].clientX - startX;
+            const dy = event.touches[0].clientY - startY;
+            const movingBack = swipeDirection === 'right' ? dx > 10 : dx < -10;
+            if (movingBack && Math.abs(dx) > Math.abs(dy) && event.cancelable) event.preventDefault();
+        }, { passive: false });
 
         document.addEventListener('touchend', (event) => {
             if (!swipeDirection) return;
@@ -12747,6 +12766,7 @@ const App = {
             : null;
         if (!message || !contact?.offlineHistory?.includes(message)) return;
 
+        this.configureMessageContextMenu('offline');
         STATE.offlineSelectedMessageId = messageId;
 
         const menu = document.getElementById('msg-context-menu');
@@ -14058,22 +14078,26 @@ const App = {
         if (this._selectBarEventsBound) return;
         
         document.getElementById('btn-exit-select').addEventListener('click', () => {
-            if (STATE.offlineSelectMode) this.exitOfflineSelectMode();
+            if (globalThis.GroupChat?.selection) GroupChat.exitSelectMode();
+            else if (STATE.offlineSelectMode) this.exitOfflineSelectMode();
             else this.exitSelectMode();
         });
         document.getElementById('btn-batch-copy').addEventListener('click', () => {
-            if (STATE.offlineSelectMode) this.handleOfflineBatchCopy();
+            if (globalThis.GroupChat?.selection) void GroupChat.handleBatchAction('copy');
+            else if (STATE.offlineSelectMode) this.handleOfflineBatchCopy();
             else this.handleBatchCopy();
         });
         document.getElementById('btn-batch-collect').addEventListener('click', () => this.handleBatchCollect());
         document.getElementById('btn-batch-delete').addEventListener('click', () => {
-            if (STATE.offlineSelectMode) this.handleOfflineBatchDelete();
+            if (globalThis.GroupChat?.selection) void GroupChat.handleBatchAction('delete');
+            else if (STATE.offlineSelectMode) this.handleOfflineBatchDelete();
             else this.handleBatchDelete();
         });
        
         // ★★★ 新增：绑定隐藏按钮 ★★★
         document.getElementById('btn-batch-hide').addEventListener('click', () => {
-            if (STATE.offlineSelectMode) this.handleOfflineBatchToggleHidden();
+            if (globalThis.GroupChat?.selection) void GroupChat.handleBatchAction('toggle-hidden');
+            else if (STATE.offlineSelectMode) this.handleOfflineBatchToggleHidden();
             else this.handleBatchToggleHidden();
         });
         
@@ -14206,7 +14230,7 @@ const App = {
     // 这一组函数只服务联系人列表：
     // 1. 长按联系人后弹出独立菜单；
     // 2. 菜单里可以切换置顶，也可以进入上下箭头排序模式；
-    // 3. 排序结果直接写回 STATE.contacts，所以保存后刷新仍然保持顺序。
+    // 3. 混合顺序写入设置，角色与群聊仍各自保存资料，刷新后按相同顺序展示。
     // 注意：这里不复用消息气泡菜单的类名和状态，避免两个菜单互相影响。
     // ============================================================
 
@@ -14214,16 +14238,31 @@ const App = {
         const menu = document.getElementById('contact-action-menu');
         if (menu) menu.style.display = 'none';
         STATE.selectedContactActionId = null;
+        STATE.selectedContactActionType = null;
     },
 
-    showContactActionMenu(contactId) {
+    // ★ 排序只保存带类型的条目 key，角色和群资料继续留在各自的存储中。
+    // 旧数据没有混合顺序时，沿用原来的角色顺序，并把群聊接在后面。
+    getContactListEntries() {
+        const entries = [
+            ...STATE.contacts.map(contact => ({ type: 'contact', contact, id: String(contact.id), key: 'contact:' + contact.id })),
+            ...(globalThis.GroupChat?.groups || []).map(contact => ({ type: 'group', contact, id: String(contact.id), key: 'group:' + contact.id }))
+        ];
+        const saved = STATE.settings.CONTACT_LIST_ORDER;
+        const order = new Map((Array.isArray(saved) ? saved : []).map((key, index) => [key, index]));
+        return entries.sort((a, b) => Number(!!b.contact.isPinned) - Number(!!a.contact.isPinned)
+            || (order.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.key) ?? Number.MAX_SAFE_INTEGER));
+    },
+
+    showContactActionMenu(contactId, contactType = 'contact') {
         const menu = document.getElementById('contact-action-menu');
         if (!menu) return;
 
-        const contact = STATE.contacts.find(c => c.id === contactId);
+        const contact = this.getContactListEntries().find(entry => entry.type === contactType && entry.id === String(contactId))?.contact;
         if (!contact) return;
 
         STATE.selectedContactActionId = contactId;
+        STATE.selectedContactActionType = contactType;
 
         // 如果已经置顶，再长按时就显示“取消置顶”
         const pinBtn = menu.querySelector('[data-action="toggle-pin"]');
@@ -14259,12 +14298,17 @@ const App = {
 
         if (action === 'toggle-pin') {
             // 切换联系人自身的置顶标记，再统一整理一次数组顺序
-            const contact = STATE.contacts.find(c => c.id === contactId);
-            if (!contact) return;
-
-            contact.isPinned = !contact.isPinned;
-            this.normalizeContactOrder();
-            await Storage.saveContacts();
+            const type = STATE.selectedContactActionType || 'contact';
+            const entry = this.getContactListEntries().find(item => item.type === type && item.id === String(contactId));
+            if (!entry) return;
+            if (type === 'group') {
+                await GroupChat.commit(groups => groups.map(group => group.id === entry.contact.id
+                    ? { ...group, isPinned: !group.isPinned } : group));
+            } else {
+                entry.contact.isPinned = !entry.contact.isPinned;
+                this.normalizeContactOrder();
+                await Storage.saveContacts();
+            }
             UI.renderContacts();
         } else if (action === 'sort') {
             // 进入排序模式后，renderContacts 会给每一项补上上下箭头
@@ -14283,24 +14327,29 @@ const App = {
         ];
     },
 
-    async moveContactInList(contactId, direction) {
-        const contact = STATE.contacts.find(c => c.id === contactId);
-        if (!contact) return;
-
-        // 先拆成两个小组，保证置顶联系人不会被普通联系人挤下去
-        const pinnedContacts = STATE.contacts.filter(c => c.isPinned);
-        const normalContacts = STATE.contacts.filter(c => !c.isPinned);
-        const group = contact.isPinned ? pinnedContacts : normalContacts;
-        const index = group.findIndex(c => c.id === contactId);
-        const targetIndex = direction === 'up' ? index - 1 : index + 1;
-
-        if (targetIndex < 0 || targetIndex >= group.length) return;
-
-        [group[index], group[targetIndex]] = [group[targetIndex], group[index]];
-        STATE.contacts = [...pinnedContacts, ...normalContacts];
-
-        await Storage.saveContacts();
-        UI.renderContacts();
+    async moveContactInList(contactId, direction, contactType = 'contact') {
+        const entries = this.getContactListEntries();
+        const entry = entries.find(item => item.type === contactType && item.id === String(contactId));
+        if (!entry) return;
+        const group = entries.filter(item => !!item.contact.isPinned === !!entry.contact.isPinned);
+        const index = group.indexOf(entry);
+        const other = group[direction === 'up' ? index - 1 : index + 1];
+        if (!other) return;
+        const from = entries.indexOf(entry);
+        const to = entries.indexOf(other);
+        [entries[from], entries[to]] = [entries[to], entries[from]];
+        // ★ 只更新展示顺序，不移动角色或群聊数据，避免跨存储写入一半时留下不一致的顺序。
+        const previous = STATE.settings.CONTACT_LIST_ORDER;
+        const next = entries.map(item => item.key);
+        STATE.settings.CONTACT_LIST_ORDER = next;
+        try {
+            await Storage.saveSettings();
+            UI.renderContacts();
+        } catch (error) {
+            if (STATE.settings.CONTACT_LIST_ORDER === next) STATE.settings.CONTACT_LIST_ORDER = previous;
+            console.warn('[联系人] 排序保存失败:', error);
+            Toast.show('排序保存失败，请重试');
+        }
     },
 
     // ★★★★★ 联系人列表长按菜单 END ★★★★★
@@ -14308,6 +14357,7 @@ const App = {
 
     // 【7. APP CONTROLLER】
     showMessageContextMenu(msgIndex, rect, target, point) {
+        this.configureMessageContextMenu('online');
         STATE.selectedMessageId = null;
         STATE.selectedMessageRef = null;
         STATE.selectedMessageIndex = msgIndex;
@@ -14331,7 +14381,7 @@ const App = {
                 if (!btn) return;
                 const action = btn.dataset.action;
                 // ★ 菜单从线下见面卡片打开时由线下分支处理，线上这里直接让路
-                if (STATE.offlineSelectedMessageId) return;
+                if (STATE.offlineSelectedMessageId || menu.dataset.mode === 'group') return;
                 // 如果处于防误触锁定状态，直接无视点击
                 if (menu.classList.contains('locked')) return; 
 
@@ -14367,6 +14417,16 @@ const App = {
 
 
         this.presentMessageContextMenu(rect, point);
+    },
+
+    // ★ 三种聊天共用菜单外观和定位，群聊按气泡操作；每次打开都重设能力，避免模式间串按钮。
+    configureMessageContextMenu(mode) {
+        const menu = document.getElementById('msg-context-menu');
+        menu.dataset.mode = mode;
+        const title = mode === 'group' ? '编辑气泡' : '编辑整组';
+        menu.querySelector('.menu-title').textContent = title;
+        menu.querySelector('.menu-panel').setAttribute('aria-label', title);
+        menu.querySelector('[data-action="collect-xi-shi"]').hidden = mode === 'group';
     },
 
     // ★ 在原生选择开始时拦截，而不是等长按计时结束后才 preventDefault；不阻止 touchstart，保留滑动聊天。
@@ -14465,6 +14525,7 @@ const App = {
         STATE.selectedMessageId = null;
         STATE.selectedMessageRef = null;
         STATE.offlineSelectedMessageId = null;
+        if (globalThis.GroupChat) GroupChat.actionTarget = null;
     },
 
 
@@ -16545,7 +16606,7 @@ const App = {
 
                 event.preventDefault();
                 event.stopPropagation();
-                this.moveContactInList(sortBtn.dataset.id, sortBtn.dataset.action === 'move-up' ? 'up' : 'down');
+                this.moveContactInList(sortBtn.dataset.id, sortBtn.dataset.action === 'move-up' ? 'up' : 'down', sortBtn.dataset.contactType);
             });
 
             UI.els.contactContainer.addEventListener('touchstart', (event) => {
@@ -16558,7 +16619,7 @@ const App = {
                 contactLongPressTimer = setTimeout(() => {
                     event.preventDefault();
                     STATE.contactClickLocked = true;
-                    this.showContactActionMenu(item.dataset.id);
+                    this.showContactActionMenu(item.dataset.id, item.dataset.contactType);
                 }, CONTACT_LONG_PRESS_DURATION);
             }, { passive: false });
 
@@ -16581,7 +16642,7 @@ const App = {
                 // PC 端按住鼠标左键，也沿用同一个长按菜单
                 contactLongPressTimer = setTimeout(() => {
                     STATE.contactClickLocked = true;
-                    this.showContactActionMenu(item.dataset.id);
+                    this.showContactActionMenu(item.dataset.id, item.dataset.contactType);
                 }, CONTACT_LONG_PRESS_DURATION);
             });
 

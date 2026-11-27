@@ -204,6 +204,38 @@ const ChatBubbles = {
         this.contentBeforeChange.set(message, message.content);
     },
 
+    // ★ 瀑布流追加正文时只给新气泡分配 key，菜单和多选已绑定的旧气泡身份不变。
+    appendText(message, text) {
+        this.ensure(message);
+        const parts = this.parse(message, text).parts;
+        message.content = [message.content, text].filter(Boolean).join('\n\n');
+        message.bubbleIds.push(...parts.map(() => this.newKey()));
+        if (message.hiddenBubbleKeys.length) message.bubbleTextSnapshot = this.parse(message).parts;
+        this.syncIndices(message);
+        this.contentBeforeChange.set(message, message.content);
+    },
+
+    // ★ 单气泡编辑显式指定 key，重复正文也只替换目标；新增空行产生的气泡继承原目标的隐藏状态。
+    editPart(message, key, newText) {
+        this.ensure(message);
+        const index = message.bubbleIds.indexOf(key);
+        if (index < 0) return false;
+        const parsed = this.parse(message);
+        const parts = this.parse(message, newText).parts;
+        if (!parts.length) return false;
+        const ids = parts.map((_, i) => i === 0 ? key : this.newKey());
+        parsed.parts.splice(index, 1, ...parts);
+        message.bubbleIds.splice(index, 1, ...ids);
+        if (message.hiddenBubbleKeys.includes(key)) message.hiddenBubbleKeys.push(...ids.slice(1));
+        const thought = String(message.content || '').match(/<(?:think|thinking|thought)[^>]*>[\s\S]*?(?:<\/(?:think|thinking|thought)>|$)/i);
+        message.content = parsed.prefix + (thought ? thought[0] + '\n\n' : '') + parsed.parts.join('\n\n');
+        if (message.hiddenBubbleKeys.length) message.bubbleTextSnapshot = [...parsed.parts];
+        else delete message.bubbleTextSnapshot;
+        this.syncIndices(message, parsed.parts.length);
+        this.contentBeforeChange.set(message, message.content);
+        return true;
+    },
+
     deleteParts(message, keys) {
         this.ensure(message);
         const selected = new Set(keys);
